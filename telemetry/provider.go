@@ -1,0 +1,191 @@
+package telemetry
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	logsdk "go.opentelemetry.io/otel/sdk/log"
+	metricsdk "go.opentelemetry.io/otel/sdk/metric"
+	tracesdk "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+)
+
+const happiTelemetryName = "happi-telemetry"
+
+type Provider interface {
+	Tracer(opts ...trace.TracerOption) trace.Tracer
+}
+
+type OtelProvider struct {
+	propagator  propagation.TextMapPropagator
+	serviceName string
+
+	tracer trace.Tracer
+	meter  metric.Meter
+	logger *slog.Logger
+}
+
+type Config struct {
+	local       bool
+	localColors bool
+	attributes  map[string]string
+}
+
+// New creates a telemetry provider for the OpenTelemetry stack.
+//
+// The caller should call the returned shutdown function to make sure remaining
+// data is flushed and resources are freed.
+func New(ctx context.Context, serviceName string, opts ...Option) (OtelProvider, func(ctx context.Context) error) {
+	cfg := Config{localColors: true}
+	for _, opt := range opts {
+		opt.Apply(&cfg)
+	}
+
+	shutdownFuncs := make([]func(context.Context) error, 0, 3)
+
+	shutdown := func(ctx context.Context) error {
+		var err error
+		for _, fn := range shutdownFuncs {
+			err = errors.Join(err, fn(ctx))
+		}
+		shutdownFuncs = nil
+		return err
+	}
+
+	lp := newLoggerProvider(ctx, cfg)
+	shutdownFuncs = append(shutdownFuncs, lp.Shutdown)
+	tp := newTracerProvider(ctx, cfg)
+	shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
+	mp := newMeterProvider(ctx, cfg)
+	shutdownFuncs = append(shutdownFuncs, mp.Shutdown)
+
+	propagator := newPropagator()
+
+	logger := otelslog.NewLogger(serviceName, otelslog.WithLoggerProvider(lp))
+	for k, v := range cfg.attributes {
+		logger = logger.With(k, v)
+	}
+
+	return OtelProvider{
+		propagator:  propagator,
+		serviceName: serviceName,
+
+		tracer: tp.Tracer(happiTelemetryName),
+		meter:  mp.Meter(happiTelemetryName),
+		logger: logger,
+	}, shutdown
+}
+
+func (p OtelProvider) Logger() *slog.Logger {
+	return p.logger
+}
+
+func (p OtelProvider) Meter() metric.Meter {
+	return p.meter
+}
+
+func (p OtelProvider) Tracer() trace.Tracer {
+	return p.tracer
+}
+
+func (p OtelProvider) HTTPMiddleware(operation string) func(http.Handler) http.Handler {
+	return otelhttp.NewMiddleware(operation, otelhttp.WithPropagators(p.propagator))
+}
+
+func (p OtelProvider) HTTPTransport(rt http.RoundTripper) *otelhttp.Transport {
+	return otelhttp.NewTransport(rt, otelhttp.WithPropagators(p.propagator))
+}
+
+func newPropagator() propagation.TextMapPropagator {
+	return propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
+}
+
+func newTracerProvider(ctx context.Context, cfg Config) *tracesdk.TracerProvider {
+	otlpExporter, err := otlptracehttp.New(ctx)
+	if err != nil {
+		panic(err)
+	}
+	var exporter tracesdk.SpanExporter = otlpExporter
+	if cfg.local {
+		exporter = &LineTraceExporter{cfg.localColors}
+	}
+
+	return tracesdk.NewTracerProvider(tracesdk.WithBatcher(exporter))
+}
+
+func newMeterProvider(ctx context.Context, cfg Config) *metricsdk.MeterProvider {
+	otlpExporter, err := otlpmetrichttp.New(ctx)
+	if err != nil {
+		panic(err)
+	}
+	var exporter metricsdk.Exporter = otlpExporter
+	if cfg.local {
+		exporter = &LineMetricExporter{cfg.localColors}
+	}
+
+	return metricsdk.NewMeterProvider(metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter)))
+}
+
+func newLoggerProvider(ctx context.Context, cfg Config) *logsdk.LoggerProvider {
+	opts := make([]logsdk.LoggerProviderOption, 0, 2)
+	if cfg.local {
+		opts = append(opts, logsdk.WithProcessor(logsdk.NewBatchProcessor(&LineLogExporter{cfg.localColors})))
+	} else {
+		otlpLogExporter, err := otlploghttp.New(ctx)
+		if err != nil {
+			panic(err)
+		}
+		stdoutLogExporter, _ := stdoutlog.New()
+		opts = append(opts, logsdk.WithProcessor(logsdk.NewBatchProcessor(stdoutLogExporter)))
+		opts = append(opts, logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)))
+	}
+
+	return logsdk.NewLoggerProvider(opts...)
+}
+
+type Option interface {
+	Apply(*Config)
+}
+
+type optionFunc func(*Config)
+
+func (f optionFunc) Apply(c *Config) {
+	f(c)
+}
+
+// WithLocal switches the OpenTelemetry collector backends off and enables a
+// simple stdout backend for logs, metrics and traces.
+func WithLocal(isLocal bool) Option {
+	return optionFunc(func(c *Config) {
+		c.local = isLocal
+	})
+}
+
+// WithLocalColors allows you to disable or enable (the default) ANSI colors on
+// local terminal output.
+func WithLocalColors(localColors bool) Option {
+	return optionFunc(func(c *Config) {
+		c.localColors = localColors
+	})
+}
+
+// WithAttributes adds extra attributes/fields to the underlying telemetry
+// providers. Currently only works for logs.
+func WithAttributes(attrs map[string]string) Option {
+	return optionFunc(func(c *Config) {
+		c.attributes = attrs
+	})
+}
