@@ -26,9 +26,11 @@ type Provider struct {
 	propagator  propagation.TextMapPropagator
 	serviceName string
 
-	tracer trace.Tracer
-	meter  metric.Meter
-	logger *slog.Logger
+	tracer         trace.Tracer
+	meter          metric.Meter
+	logger         *slog.Logger
+	tracerProvider *tracesdk.TracerProvider
+	meterProvider  *metricsdk.MeterProvider
 }
 
 type Config struct {
@@ -41,7 +43,7 @@ type Config struct {
 //
 // The caller should call the returned shutdown function to make sure remaining
 // data is flushed and resources are freed.
-func New(ctx context.Context, serviceName string, opts ...Option) (Provider, func(ctx context.Context) error) {
+func New(ctx context.Context, serviceName string, opts ...Option) (*Provider, func(ctx context.Context) error) {
 	cfg := Config{localColors: true}
 	for _, opt := range opts {
 		opt.Apply(&cfg)
@@ -72,9 +74,12 @@ func New(ctx context.Context, serviceName string, opts ...Option) (Provider, fun
 		logger = logger.With(k, v)
 	}
 
-	return Provider{
+	return &Provider{
 		propagator:  propagator,
 		serviceName: serviceName,
+
+		tracerProvider: tp,
+		meterProvider:  mp,
 
 		tracer: tp.Tracer(happiTelemetryName),
 		meter:  mp.Meter(happiTelemetryName),
@@ -95,11 +100,19 @@ func (p Provider) Tracer() trace.Tracer {
 }
 
 func (p Provider) HTTPMiddleware(operation string) func(http.Handler) http.Handler {
-	return otelhttp.NewMiddleware(operation, otelhttp.WithPropagators(p.propagator))
+	return otelhttp.NewMiddleware(operation,
+		otelhttp.WithPropagators(p.propagator),
+		otelhttp.WithTracerProvider(p.tracerProvider),
+		otelhttp.WithMeterProvider(p.meterProvider),
+	)
 }
 
 func (p Provider) HTTPTransport(rt http.RoundTripper) *otelhttp.Transport {
-	return otelhttp.NewTransport(rt, otelhttp.WithPropagators(p.propagator))
+	return otelhttp.NewTransport(rt,
+		otelhttp.WithPropagators(p.propagator),
+		otelhttp.WithTracerProvider(p.tracerProvider),
+		otelhttp.WithMeterProvider(p.meterProvider),
+	)
 }
 
 func newPropagator() propagation.TextMapPropagator {
