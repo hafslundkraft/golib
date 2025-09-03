@@ -15,9 +15,9 @@ func main() {
 	tel, shutdown := telemetry.New(ctx, "my-app-name", telemetry.WithLocal(os.Getenv("ENV") == "local"))
 	defer shutdown()
 
-	log := tel.Logger
+	log := tel.Logger()
 
-	ctx, span := tel.Tracer.Start(ctx, "saying-hello")
+	ctx, span := tel.Tracer().Start(ctx, "saying-hello")
 
 	log.InfoContext(ctx, "Hello, HAPPI!")
 
@@ -26,4 +26,4 @@ func main() {
 
 ```
 
-See [the Snappi demo app](github.com/HafslundEcoVannkraft/snappi-demo-api) for more complete example usage.
+See [the Snappi demo app](https://github.com/HafslundEcoVannkraft/snappi-demo-api) for more complete example usage.

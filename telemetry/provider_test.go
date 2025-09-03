@@ -27,9 +27,9 @@ func TestProvider(t *testing.T) {
 	require.NotNil(t, spanCtx)
 	span.SetStatus(codes.Error, "err")
 
-	log.DebugContext(ctx, "testing testing", "some-field", "some-value")
-	log.ErrorContext(ctx, "testing testing")
-	log.WarnContext(ctx, "testing testing")
+	log.DebugContext(spanCtx, "testing testing", "some-field", "some-value")
+	log.ErrorContext(spanCtx, "testing testing")
+	log.WarnContext(spanCtx, "testing testing")
 
 	span.End()
 
