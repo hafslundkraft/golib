@@ -1,6 +1,6 @@
 # telemetry
 
-Helper library for setting up OpenTelemetry.
+Helper library for setting up OpenTelemetry, optionally printing to STDOUT for local testing.
 
 ```go
 package main
