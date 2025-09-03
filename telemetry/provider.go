@@ -22,11 +22,7 @@ import (
 
 const happiTelemetryName = "happi-telemetry"
 
-type Provider interface {
-	Tracer(opts ...trace.TracerOption) trace.Tracer
-}
-
-type OtelProvider struct {
+type Provider struct {
 	propagator  propagation.TextMapPropagator
 	serviceName string
 
@@ -45,7 +41,7 @@ type Config struct {
 //
 // The caller should call the returned shutdown function to make sure remaining
 // data is flushed and resources are freed.
-func New(ctx context.Context, serviceName string, opts ...Option) (OtelProvider, func(ctx context.Context) error) {
+func New(ctx context.Context, serviceName string, opts ...Option) (Provider, func(ctx context.Context) error) {
 	cfg := Config{localColors: true}
 	for _, opt := range opts {
 		opt.Apply(&cfg)
@@ -76,7 +72,7 @@ func New(ctx context.Context, serviceName string, opts ...Option) (OtelProvider,
 		logger = logger.With(k, v)
 	}
 
-	return OtelProvider{
+	return Provider{
 		propagator:  propagator,
 		serviceName: serviceName,
 
@@ -86,23 +82,23 @@ func New(ctx context.Context, serviceName string, opts ...Option) (OtelProvider,
 	}, shutdown
 }
 
-func (p OtelProvider) Logger() *slog.Logger {
+func (p Provider) Logger() *slog.Logger {
 	return p.logger
 }
 
-func (p OtelProvider) Meter() metric.Meter {
+func (p Provider) Meter() metric.Meter {
 	return p.meter
 }
 
-func (p OtelProvider) Tracer() trace.Tracer {
+func (p Provider) Tracer() trace.Tracer {
 	return p.tracer
 }
 
-func (p OtelProvider) HTTPMiddleware(operation string) func(http.Handler) http.Handler {
+func (p Provider) HTTPMiddleware(operation string) func(http.Handler) http.Handler {
 	return otelhttp.NewMiddleware(operation, otelhttp.WithPropagators(p.propagator))
 }
 
-func (p OtelProvider) HTTPTransport(rt http.RoundTripper) *otelhttp.Transport {
+func (p Provider) HTTPTransport(rt http.RoundTripper) *otelhttp.Transport {
 	return otelhttp.NewTransport(rt, otelhttp.WithPropagators(p.propagator))
 }
 
