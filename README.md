@@ -50,13 +50,12 @@ repo in CI. The relevant parts:
 ...
     steps:
       - name: Install SSH key
-        env:
-          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
         run: |
           mkdir ~/.ssh
           echo "${{ secrets.GOLIB_SSH_KEY }}" >> ~/.ssh/id_golib
           chmod 600 ~/.ssh/id_golib
-          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          eval $(ssh-agent)
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
           ssh-add ~/.ssh/id_golib
       - name: Build and push
         id: build
@@ -66,6 +65,6 @@ repo in CI. The relevant parts:
           system-name: <system>
           dockerfile: Dockerfile
           client-id: ${{ vars.HAPPI_GHA_CLIENT_ID }}
-          ssh: default=/tmp/ssh_agent.sock
+          ssh: default
 ...
 ```
