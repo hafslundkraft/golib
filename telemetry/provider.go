@@ -99,11 +99,17 @@ func (p Provider) Tracer() trace.Tracer {
 	return p.tracer
 }
 
-func (p Provider) HTTPMiddleware(operation string) func(http.Handler) http.Handler {
-	return otelhttp.NewMiddleware(operation,
+func (p Provider) HTTPMiddleware() func(http.Handler) http.Handler {
+	return otelhttp.NewMiddleware("http-server",
 		otelhttp.WithPropagators(p.propagator),
 		otelhttp.WithTracerProvider(p.tracerProvider),
 		otelhttp.WithMeterProvider(p.meterProvider),
+		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
+			if r.Pattern == "" {
+				return r.Method + " 404 Not Found"
+			}
+			return r.Method + " " + r.Pattern
+		}),
 	)
 }
 
