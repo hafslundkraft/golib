@@ -108,7 +108,7 @@ func (p Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 			if r.Pattern == "" {
 				return r.Method + " 404 Not Found"
 			}
-			return r.Method + " " + r.Pattern
+			return r.Pattern
 		}),
 	)
 }
