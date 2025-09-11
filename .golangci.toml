@@ -1,0 +1,134 @@
+version = "2"
+
+[run]
+timeout = "5m"
+tests = true
+allow-parallel-runners = true
+
+[formatters]
+enable = [
+    "gci",
+    "gofumpt",
+    "golines",
+]
+
+[formatters.settings.golines]
+max-len = 120
+
+[formatters.settings.gci]
+sections = [
+    "standard",
+    "default",
+    "prefix(github.com/HafslundEcoVannkraft)",
+    "blank",
+    "dot",
+    "localmodule",
+]
+
+[linters]
+default = "none"
+
+enable = [
+    # Correctness
+    "govet",
+    "staticcheck",
+    "errcheck",
+    "gomodguard",
+    "forbidigo",
+    "rowserrcheck",
+    "sqlclosecheck",
+    "bodyclose",
+    "durationcheck",
+
+    # Style and optimization
+    "gocritic",
+    "ineffassign",
+    "unconvert",
+    "prealloc",
+    "misspell",
+    "sloglint",
+    "errname",
+    "testifylint",
+    "revive",
+    "thelper",
+    "unused",
+    "usestdlibvars",
+    "wastedassign",
+    "wrapcheck",
+    "errorlint",
+    "errname",
+    "gochecknoglobals",
+    "godox",
+    "inamedparam",
+    "makezero",
+    "nakedret",
+    "noctx",
+    "spancheck",
+
+    # Security
+    "gosec",
+]
+
+[linters.exclusions]
+presets = ["std-error-handling", "common-false-positives"]
+
+[[linters.exclusions.rules]]
+path = "(generated|zz_generated|mock)_.*\\.go"
+linters = [
+    "govet",
+    "staticcheck",
+    "ineffassign",
+    "errcheck",
+    "gocritic",
+    "unconvert",
+    "prealloc",
+    "misspell",
+    "gosec",
+    "unused",
+    "usestdlibvars",
+    "wastedassign",
+    "wrapcheck",
+    "errorlint",
+    "errname",
+    "gochecknoglobals",
+    "godox",
+    "inamedparam",
+    "makezero",
+    "nakedret",
+    "noctx",
+]
+
+[[linters.exclusions.rules]]
+path = "_test\\.go"
+linters = ["gosec", "errcheck", "revive"]
+
+[linters.settings.misspell]
+locale = "US"
+
+[linters.settings.gocritic]
+enable-all = true
+
+[linters.settings.errcheck]
+exclude-functions = [
+    "io.Copy",
+    "fmt.Fprint",
+    "fmt.Fprintf",
+    "fmt.Fprintln",
+]
+
+[linters.settings.sloglint]
+context = "all"
+no-global = "all"
+key-naming-case = "kebab"
+
+[linters.settings.revive]
+severity = "warning"
+rules = [
+    { name = "exported" },
+]
+
+[linters.settings.gomodguard.blocked]
+modules = [
+    { "github.com/pkg/errors" = { recommendations = [], reason = "Use Go built-in errors wrapping" } },
+    { "gopkg.in/yaml.v3" = { recommendations = ["github.com/goccy/go-yaml"], reason = "Unmaintained" } },
+]

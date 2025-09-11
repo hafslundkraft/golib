@@ -1,8 +1,6 @@
 module github.com/HafslundEcoVannkraft/golib/telemetry
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.25.1
 
 require (
 	github.com/stretchr/testify v1.11.1

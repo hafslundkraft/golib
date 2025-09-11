@@ -1,3 +1,4 @@
+// nolint:forbidigo // fmt.Print* will be replaced with fmt.Fprint* soon
 package telemetry
 
 import (
@@ -24,10 +25,13 @@ func tint(color, s string) string {
 	return color + s + colReset
 }
 
+// LineTraceExporter is an OpenTelemetry trace exporter that prints traces to
+// STDOUT. Useful for local testing.
 type LineTraceExporter struct {
 	Colors bool
 }
 
+// ExportSpans takes a slice of spans and prints them to STDOUT
 func (e *LineTraceExporter) ExportSpans(ctx context.Context, spans []tracesdk.ReadOnlySpan) error {
 	for _, s := range spans {
 		status := s.Status().Code.String()
@@ -52,23 +56,30 @@ func (e *LineTraceExporter) ExportSpans(ctx context.Context, spans []tracesdk.Re
 	return nil
 }
 
+// Shutdown does nothing
 func (e *LineTraceExporter) Shutdown(ctx context.Context) error {
 	return nil
 }
 
 var _ tracesdk.SpanExporter = (*LineTraceExporter)(nil)
 
+// LineMetricExporter is an OpenTelemetry metric exporter that prints metrics to
+// STDOUT. Useful for local testing.
 type LineMetricExporter struct {
 	Colors bool
 }
 
+// Temporality returns CumulativeTemporality
 func (l LineMetricExporter) Temporality(kind metricsdk.InstrumentKind) metricdata.Temporality {
 	return metricdata.CumulativeTemporality
 }
 
+// Aggregation returns the aggregation type based on instrument kind
 func (l LineMetricExporter) Aggregation(kind metricsdk.InstrumentKind) metricsdk.Aggregation {
 	switch kind {
-	case metricsdk.InstrumentKindCounter, metricsdk.InstrumentKindUpDownCounter, metricsdk.InstrumentKindObservableCounter:
+	case metricsdk.InstrumentKindCounter,
+		metricsdk.InstrumentKindUpDownCounter,
+		metricsdk.InstrumentKindObservableCounter:
 		return metricsdk.AggregationSum{}
 	case metricsdk.InstrumentKindGauge, metricsdk.InstrumentKindObservableGauge:
 		return metricsdk.AggregationLastValue{}
@@ -79,6 +90,7 @@ func (l LineMetricExporter) Aggregation(kind metricsdk.InstrumentKind) metricsdk
 	}
 }
 
+// Export takes a metric and prints it to STDOUT.
 func (l LineMetricExporter) Export(ctx context.Context, metrics *metricdata.ResourceMetrics) error {
 	metricTag := "[metric]"
 	if l.Colors {
@@ -112,28 +124,34 @@ func (l LineMetricExporter) Export(ctx context.Context, metrics *metricdata.Reso
 	return nil
 }
 
+// ForceFlush does nothing
 func (l LineMetricExporter) ForceFlush(ctx context.Context) error {
 	return nil
 }
 
+// Shutdown does nothing
 func (l LineMetricExporter) Shutdown(ctx context.Context) error {
 	return nil
 }
 
 var _ metricsdk.Exporter = (*LineMetricExporter)(nil)
 
+// LineLogExporter is an OpenTelemetry log exporter that prints log lines to
+// STDOUT. Useful for local testing.
 type LineLogExporter struct {
 	Colors bool
 }
 
+// Export takes a slice of log records and prints them to STDOUT
 func (l *LineLogExporter) Export(ctx context.Context, records []logsdk.Record) error {
-	for _, record := range records {
+	for i := range records {
+		record := &records[i]
 		severityText := record.SeverityText()
 
 		if l.Colors {
-			if record.Severity() >= 17 {
+			if record.Severity() >= log.SeverityError1 {
 				severityText = tint(colError, severityText)
-			} else if record.Severity() >= 13 {
+			} else if record.Severity() >= log.SeverityWarn1 {
 				severityText = tint(colWarn, severityText)
 			}
 		}
@@ -153,10 +171,12 @@ func (l *LineLogExporter) Export(ctx context.Context, records []logsdk.Record) e
 	return nil
 }
 
+// Shutdown does nothing
 func (l *LineLogExporter) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// ForceFlush does nothing
 func (l *LineLogExporter) ForceFlush(ctx context.Context) error {
 	return nil
 }

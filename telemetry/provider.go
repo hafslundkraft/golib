@@ -22,6 +22,8 @@ import (
 
 const happiTelemetryName = "happi-telemetry"
 
+// Provider is the telemetry provider. Contains handles for logging, metrics and
+// traces.
 type Provider struct {
 	propagator  propagation.TextMapPropagator
 	serviceName string
@@ -33,7 +35,7 @@ type Provider struct {
 	meterProvider  *metricsdk.MeterProvider
 }
 
-type Config struct {
+type config struct {
 	local       bool
 	localColors bool
 	attributes  map[string]string
@@ -43,15 +45,19 @@ type Config struct {
 //
 // The caller should call the returned shutdown function to make sure remaining
 // data is flushed and resources are freed.
-func New(ctx context.Context, serviceName string, opts ...Option) (*Provider, func(ctx context.Context) error) {
-	cfg := Config{localColors: true}
+func New(
+	ctx context.Context,
+	serviceName string,
+	opts ...option,
+) (provider *Provider, shutdown func(ctx context.Context) error) {
+	cfg := config{localColors: true}
 	for _, opt := range opts {
-		opt.Apply(&cfg)
+		opt.apply(&cfg)
 	}
 
 	shutdownFuncs := make([]func(context.Context) error, 0, 3)
 
-	shutdown := func(ctx context.Context) error {
+	shutdown = func(ctx context.Context) error {
 		var err error
 		for _, fn := range shutdownFuncs {
 			err = errors.Join(err, fn(ctx))
@@ -87,19 +93,24 @@ func New(ctx context.Context, serviceName string, opts ...Option) (*Provider, fu
 	}, shutdown
 }
 
-func (p Provider) Logger() *slog.Logger {
+// Logger returns the logger
+func (p *Provider) Logger() *slog.Logger {
 	return p.logger
 }
 
-func (p Provider) Meter() metric.Meter {
+// Meter returns the meter
+func (p *Provider) Meter() metric.Meter {
 	return p.meter
 }
 
-func (p Provider) Tracer() trace.Tracer {
+// Tracer returns the tracer
+func (p *Provider) Tracer() trace.Tracer {
 	return p.tracer
 }
 
-func (p Provider) HTTPMiddleware() func(http.Handler) http.Handler {
+// HTTPMiddleware constructs a plain http middleware that instruments incoming
+// requests with traces and metrics.
+func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 	return otelhttp.NewMiddleware("http-server",
 		otelhttp.WithPropagators(p.propagator),
 		otelhttp.WithTracerProvider(p.tracerProvider),
@@ -113,7 +124,9 @@ func (p Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 	)
 }
 
-func (p Provider) HTTPTransport(rt http.RoundTripper) *otelhttp.Transport {
+// HTTPTransport constructs an instrumented RoundTripper. Add this to an HTTP
+// client to instrument outgoing HTTP calls.
+func (p *Provider) HTTPTransport(rt http.RoundTripper) *otelhttp.Transport {
 	return otelhttp.NewTransport(rt,
 		otelhttp.WithPropagators(p.propagator),
 		otelhttp.WithTracerProvider(p.tracerProvider),
@@ -128,11 +141,12 @@ func newPropagator() propagation.TextMapPropagator {
 	)
 }
 
-func newTracerProvider(ctx context.Context, cfg Config) *tracesdk.TracerProvider {
+func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider {
 	otlpExporter, err := otlptracehttp.New(ctx)
 	if err != nil {
 		panic(err)
 	}
+
 	var exporter tracesdk.SpanExporter = otlpExporter
 	if cfg.local {
 		exporter = &LineTraceExporter{cfg.localColors}
@@ -141,11 +155,12 @@ func newTracerProvider(ctx context.Context, cfg Config) *tracesdk.TracerProvider
 	return tracesdk.NewTracerProvider(tracesdk.WithBatcher(exporter))
 }
 
-func newMeterProvider(ctx context.Context, cfg Config) *metricsdk.MeterProvider {
+func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider {
 	otlpExporter, err := otlpmetrichttp.New(ctx)
 	if err != nil {
 		panic(err)
 	}
+
 	var exporter metricsdk.Exporter = otlpExporter
 	if cfg.local {
 		exporter = &LineMetricExporter{cfg.localColors}
@@ -154,53 +169,58 @@ func newMeterProvider(ctx context.Context, cfg Config) *metricsdk.MeterProvider 
 	return metricsdk.NewMeterProvider(metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter)))
 }
 
-func newLoggerProvider(ctx context.Context, cfg Config) *logsdk.LoggerProvider {
+func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 	opts := make([]logsdk.LoggerProviderOption, 0, 2)
 	if cfg.local {
-		opts = append(opts, logsdk.WithProcessor(logsdk.NewBatchProcessor(&LineLogExporter{cfg.localColors})))
+		opts = append(
+			opts,
+			logsdk.WithProcessor(logsdk.NewBatchProcessor(&LineLogExporter{cfg.localColors})),
+		)
 	} else {
 		otlpLogExporter, err := otlploghttp.New(ctx)
 		if err != nil {
 			panic(err)
 		}
 		stdoutLogExporter, _ := stdoutlog.New()
-		opts = append(opts, logsdk.WithProcessor(logsdk.NewBatchProcessor(stdoutLogExporter)))
-		opts = append(opts, logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)))
+		opts = append(opts,
+			logsdk.WithProcessor(logsdk.NewBatchProcessor(stdoutLogExporter)),
+			logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)),
+		)
 	}
 
 	return logsdk.NewLoggerProvider(opts...)
 }
 
-type Option interface {
-	Apply(*Config)
+type option interface {
+	apply(c *config)
 }
 
-type optionFunc func(*Config)
+type optionFunc func(*config)
 
-func (f optionFunc) Apply(c *Config) {
+func (f optionFunc) apply(c *config) {
 	f(c)
 }
 
 // WithLocal switches the OpenTelemetry collector backends off and enables a
 // simple stdout backend for logs, metrics and traces.
-func WithLocal(isLocal bool) Option {
-	return optionFunc(func(c *Config) {
+func WithLocal(isLocal bool) option {
+	return optionFunc(func(c *config) {
 		c.local = isLocal
 	})
 }
 
 // WithLocalColors allows you to disable or enable (the default) ANSI colors on
 // local terminal output.
-func WithLocalColors(localColors bool) Option {
-	return optionFunc(func(c *Config) {
+func WithLocalColors(localColors bool) option {
+	return optionFunc(func(c *config) {
 		c.localColors = localColors
 	})
 }
 
 // WithAttributes adds extra attributes/fields to the underlying telemetry
 // providers. Currently only works for logs.
-func WithAttributes(attrs map[string]string) Option {
-	return optionFunc(func(c *Config) {
+func WithAttributes(attrs map[string]string) option {
+	return optionFunc(func(c *config) {
 		c.attributes = attrs
 	})
 }
