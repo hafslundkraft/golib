@@ -9,4 +9,7 @@ lint:
 vet:
 	find -type f -name go.mod -printf '%h\n' -execdir go vet ./... \;
 
-.PHONY: test lint vet
+fmt:
+	find -type f -name go.mod -printf '%h\n' -execdir golangci-lint fmt --config=$(PWD)/.golangci.toml ./... \;
+
+.PHONY: test lint vet fmt
