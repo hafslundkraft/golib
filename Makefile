@@ -1,18 +1,17 @@
 all: lint vet test
 
-MODULES=$(shell go list -f '{{.Dir}}' -m)
+MODEXEC = find . -type f -name go.mod -execdir
 
-test: $(MODULES)
-	cd $^ && go test ./...
+test:
+	$(MODEXEC) go test ./... \;
 
-lint: $(MODULES)
-	cd $^ && golangci-lint run --config=$(PWD)/.golangci.toml ./...
+vet:
+	$(MODEXEC) go vet ./... \;
 
-vet: $(MODULES)
-	cd $^ && go vet ./...
-	find -type f -name go.mod -printf '%h\n' -execdir go vet ./... \;
+lint:
+	$(MODEXEC) golangci-lint run --config=$(PWD)/.golangci.toml ./... \;
 
-fmt: $(MODULES)
-	cd $^ && golangci-lint fmt --config=$(PWD)/.golangci.toml ./...
+fmt:
+	$(MODEXEC) golangci-lint fmt --config=$(PWD)/.golangci.toml ./... \;
 
-.PHONY: test lint vet fmt
+.PHONY: all test lint vet fmt
