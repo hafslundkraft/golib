@@ -1,15 +1,18 @@
 all: lint vet test
 
-test:
-	find -type f -name go.mod -printf '%h\n' -execdir go test ./... \;
+MODULES=$(shell go list -f '{{.Dir}}' -m)
 
-lint:
-	find -type f -name go.mod -printf '%h\n' -execdir golangci-lint run --config=$(PWD)/.golangci.toml ./... \;
+test: $(MODULES)
+	cd $^ && go test ./...
 
-vet:
+lint: $(MODULES)
+	cd $^ && golangci-lint run --config=$(PWD)/.golangci.toml ./...
+
+vet: $(MODULES)
+	cd $^ && go vet ./...
 	find -type f -name go.mod -printf '%h\n' -execdir go vet ./... \;
 
-fmt:
-	find -type f -name go.mod -printf '%h\n' -execdir golangci-lint fmt --config=$(PWD)/.golangci.toml ./... \;
+fmt: $(MODULES)
+	cd $^ && golangci-lint fmt --config=$(PWD)/.golangci.toml ./...
 
 .PHONY: test lint vet fmt
