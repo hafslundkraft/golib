@@ -1,4 +1,4 @@
-module github.com/HafslundEcoVannkraft/golib/telemetry
+module github.com/hafslundkraft/golib/telemetry
 
 go 1.25.1
 
