@@ -4,6 +4,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"go.opentelemetry.io/otel/log"
@@ -29,6 +30,7 @@ func tint(color, s string) string {
 // STDOUT. Useful for local testing.
 type LineTraceExporter struct {
 	Colors bool
+	w      io.Writer
 }
 
 // ExportSpans takes a slice of spans and prints them to STDOUT
@@ -43,7 +45,8 @@ func (e *LineTraceExporter) ExportSpans(ctx context.Context, spans []tracesdk.Re
 				tag = tint(colTrace, tag)
 			}
 		}
-		fmt.Printf(
+		fmt.Fprintf(
+			e.w,
 			"%s id=%s name=%q start=%s dur=%s status=%s\n",
 			tag,
 			s.SpanContext().TraceID().String(),
@@ -67,6 +70,7 @@ var _ tracesdk.SpanExporter = (*LineTraceExporter)(nil)
 // STDOUT. Useful for local testing.
 type LineMetricExporter struct {
 	Colors bool
+	w      io.Writer
 }
 
 // Temporality returns CumulativeTemporality
@@ -101,23 +105,23 @@ func (l LineMetricExporter) Export(ctx context.Context, metrics *metricdata.Reso
 			switch data := m.Data.(type) {
 			case metricdata.Sum[int64]:
 				for _, dp := range data.DataPoints {
-					fmt.Printf("%s %s name=%s value=%d\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
+					fmt.Fprintf(l.w, "%s %s name=%s value=%d\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
 				}
 			case metricdata.Sum[float64]:
 				for _, dp := range data.DataPoints {
-					fmt.Printf("%s %s name=%s value=%f\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
+					fmt.Fprintf(l.w, "%s %s name=%s value=%f\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
 				}
 			case metricdata.Gauge[int64]:
 				for _, dp := range data.DataPoints {
-					fmt.Printf("%s %s name=%s value=%d\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
+					fmt.Fprintf(l.w, "%s %s name=%s value=%d\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
 				}
 			case metricdata.Gauge[float64]:
 				for _, dp := range data.DataPoints {
-					fmt.Printf("%s %s name=%s value=%f\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
+					fmt.Fprintf(l.w, "%s %s name=%s value=%f\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value)
 				}
 			default:
 				// Ignoring histograms, summaries, etc.
-				fmt.Printf("%s unsupported metric type: %T\n", metricTag, data)
+				fmt.Fprintf(l.w, "%s unsupported metric type: %T\n", metricTag, data)
 			}
 		}
 	}
@@ -140,6 +144,7 @@ var _ metricsdk.Exporter = (*LineMetricExporter)(nil)
 // STDOUT. Useful for local testing.
 type LineLogExporter struct {
 	Colors bool
+	w      io.Writer
 }
 
 // Export takes a slice of log records and prints them to STDOUT
@@ -166,7 +171,7 @@ func (l *LineLogExporter) Export(ctx context.Context, records []logsdk.Record) e
 			line = fmt.Sprintf("%s %s=%q", line, kv.Key, kv.Value)
 			return true
 		})
-		fmt.Println(line)
+		fmt.Fprintln(l.w, line)
 	}
 	return nil
 }

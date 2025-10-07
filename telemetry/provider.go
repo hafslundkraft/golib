@@ -3,8 +3,11 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"sort"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -36,9 +39,18 @@ type Provider struct {
 }
 
 type config struct {
+	localW      io.Writer
 	local       bool
 	localColors bool
 	attributes  map[string]string
+	testIDGen   bool
+}
+
+func (c config) localWriter() io.Writer {
+	if c.localW != nil {
+		return c.localW
+	}
+	return os.Stdout
 }
 
 // New creates a telemetry provider for the OpenTelemetry stack.
@@ -48,11 +60,11 @@ type config struct {
 func New(
 	ctx context.Context,
 	serviceName string,
-	opts ...option,
+	opts ...OptionFunc,
 ) (provider *Provider, shutdown func(ctx context.Context) error) {
 	cfg := config{localColors: true}
 	for _, opt := range opts {
-		opt.apply(&cfg)
+		opt(&cfg)
 	}
 
 	shutdownFuncs := make([]func(context.Context) error, 0, 3)
@@ -76,8 +88,16 @@ func New(
 	propagator := newPropagator()
 
 	logger := otelslog.NewLogger(serviceName, otelslog.WithLoggerProvider(lp))
-	for k, v := range cfg.attributes {
-		logger = logger.With(k, v)
+
+	// Sort attribute keys for deterministic ordering
+	keys := make([]string, 0, len(cfg.attributes))
+	for k := range cfg.attributes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		logger = logger.With(k, cfg.attributes[k])
 	}
 
 	return &Provider{
@@ -149,10 +169,15 @@ func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider
 
 	var exporter tracesdk.SpanExporter = otlpExporter
 	if cfg.local {
-		exporter = &LineTraceExporter{cfg.localColors}
+		exporter = &LineTraceExporter{Colors: cfg.localColors, w: cfg.localWriter()}
 	}
 
-	return tracesdk.NewTracerProvider(tracesdk.WithBatcher(exporter))
+	opts := []tracesdk.TracerProviderOption{tracesdk.WithBatcher(exporter)}
+	if cfg.testIDGen {
+		opts = append(opts, tracesdk.WithIDGenerator(singleIDGenerator{}))
+	}
+
+	return tracesdk.NewTracerProvider(opts...)
 }
 
 func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider {
@@ -163,7 +188,7 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 
 	var exporter metricsdk.Exporter = otlpExporter
 	if cfg.local {
-		exporter = &LineMetricExporter{cfg.localColors}
+		exporter = &LineMetricExporter{Colors: cfg.localColors, w: cfg.localWriter()}
 	}
 
 	return metricsdk.NewMeterProvider(metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter)))
@@ -174,7 +199,9 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 	if cfg.local {
 		opts = append(
 			opts,
-			logsdk.WithProcessor(logsdk.NewBatchProcessor(&LineLogExporter{cfg.localColors})),
+			logsdk.WithProcessor(
+				logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()}),
+			),
 		)
 	} else {
 		otlpLogExporter, err := otlploghttp.New(ctx)
@@ -189,38 +216,4 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 	}
 
 	return logsdk.NewLoggerProvider(opts...)
-}
-
-type option interface {
-	apply(c *config)
-}
-
-type optionFunc func(*config)
-
-func (f optionFunc) apply(c *config) {
-	f(c)
-}
-
-// WithLocal switches the OpenTelemetry collector backends off and enables a
-// simple stdout backend for logs, metrics and traces.
-func WithLocal(isLocal bool) option {
-	return optionFunc(func(c *config) {
-		c.local = isLocal
-	})
-}
-
-// WithLocalColors allows you to disable or enable (the default) ANSI colors on
-// local terminal output.
-func WithLocalColors(localColors bool) option {
-	return optionFunc(func(c *config) {
-		c.localColors = localColors
-	})
-}
-
-// WithAttributes adds extra attributes/fields to the underlying telemetry
-// providers. Currently only works for logs.
-func WithAttributes(attrs map[string]string) option {
-	return optionFunc(func(c *config) {
-		c.attributes = attrs
-	})
 }
