@@ -14,7 +14,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	logsdk "go.opentelemetry.io/otel/sdk/log"
@@ -208,9 +207,7 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 		if err != nil {
 			panic(err)
 		}
-		stdoutLogExporter, _ := stdoutlog.New()
 		opts = append(opts,
-			logsdk.WithProcessor(logsdk.NewBatchProcessor(stdoutLogExporter)),
 			logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)),
 		)
 	}
