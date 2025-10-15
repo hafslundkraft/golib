@@ -11,6 +11,7 @@ import (
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -19,6 +20,7 @@ import (
 	logsdk "go.opentelemetry.io/otel/sdk/log"
 	metricsdk "go.opentelemetry.io/otel/sdk/metric"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -134,6 +136,12 @@ func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 		otelhttp.WithPropagators(p.propagator),
 		otelhttp.WithTracerProvider(p.tracerProvider),
 		otelhttp.WithMeterProvider(p.meterProvider),
+		otelhttp.WithMetricAttributesFn(func(r *http.Request) []attribute.KeyValue {
+			if r.Pattern != "" {
+				return []attribute.KeyValue{semconv.HTTPRoute(r.Pattern)}
+			}
+			return nil
+		}),
 		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
 			if r.Pattern == "" {
 				return r.Method + " 404 Not Found"
