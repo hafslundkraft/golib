@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -137,7 +138,11 @@ func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 		otelhttp.WithTracerProvider(p.tracerProvider),
 		otelhttp.WithMeterProvider(p.meterProvider),
 		otelhttp.WithMetricAttributesFn(func(r *http.Request) []attribute.KeyValue {
-			if r.Pattern != "" {
+			// Stripping the method to leave only the route
+			_, route, found := strings.Cut(r.Pattern, " ")
+			if found {
+				return []attribute.KeyValue{semconv.HTTPRoute(route)}
+			} else if r.Pattern != "" {
 				return []attribute.KeyValue{semconv.HTTPRoute(r.Pattern)}
 			}
 			return nil
