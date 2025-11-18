@@ -8,18 +8,20 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	logsdk "go.opentelemetry.io/otel/sdk/log"
 	metricsdk "go.opentelemetry.io/otel/sdk/metric"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -135,6 +137,16 @@ func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 		otelhttp.WithPropagators(p.propagator),
 		otelhttp.WithTracerProvider(p.tracerProvider),
 		otelhttp.WithMeterProvider(p.meterProvider),
+		otelhttp.WithMetricAttributesFn(func(r *http.Request) []attribute.KeyValue {
+			// Stripping the method to leave only the route
+			_, route, found := strings.Cut(r.Pattern, " ")
+			if found {
+				return []attribute.KeyValue{semconv.HTTPRoute(route)}
+			} else if r.Pattern != "" {
+				return []attribute.KeyValue{semconv.HTTPRoute(r.Pattern)}
+			}
+			return nil
+		}),
 		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
 			if r.Pattern == "" {
 				return r.Method + " 404 Not Found"
@@ -208,9 +220,7 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 		if err != nil {
 			panic(err)
 		}
-		stdoutLogExporter, _ := stdoutlog.New()
 		opts = append(opts,
-			logsdk.WithProcessor(logsdk.NewBatchProcessor(stdoutLogExporter)),
 			logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)),
 		)
 	}
