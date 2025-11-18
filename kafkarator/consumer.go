@@ -6,7 +6,6 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-
 type consumer struct {
 	reader *kafka.Reader
 }

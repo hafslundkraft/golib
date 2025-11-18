@@ -2,11 +2,11 @@ package kafkarator
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"sync"
 	"testing"
 
 	"github.com/segmentio/kafka-go"
+	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	testkafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 )
@@ -61,9 +61,12 @@ func Test_connection_Consumer(t *testing.T) {
 		"Content-Type": []byte("application/json"),
 	}
 
+	errChan := make(chan error)
 	go func() {
-		err = prdcr.Produce(ctx, msg, headers)
-		require.NoError(t, err)
+		produceErr := prdcr.Produce(ctx, msg, headers)
+		if produceErr != nil {
+			errChan <- produceErr
+		}
 	}()
 
 	wg := sync.WaitGroup{}
@@ -73,22 +76,31 @@ func Test_connection_Consumer(t *testing.T) {
 	require.NoError(t, err)
 
 	var receivedMessage *Message
-
+	var receivedError error
 	go func() {
-		m := <-messageChan
-		receivedMessage = &m
+		select {
+		case err := <-errChan:
+			receivedError = err
+			return
+		case m := <-messageChan:
+			receivedMessage = &m
+		}
 		defer wg.Done()
 	}()
 
 	wg.Wait()
 
+	require.NoError(t, receivedError)
 	require.NotNil(t, receivedMessage)
 	require.Equal(t, "hello world", string(receivedMessage.Value))
 	require.Equal(t, topicName, receivedMessage.Topic)
 	require.Equal(t, headers, receivedMessage.Headers)
 }
 
-func startTestContainer(ctx context.Context, t *testing.T) (kafkaContainer *testkafka.KafkaContainer, brokers []string, closer func()) {
+func startTestContainer(
+	ctx context.Context,
+	t *testing.T,
+) (kafkaContainer *testkafka.KafkaContainer, brokers []string, closer func()) {
 	t.Helper()
 
 	var err error
