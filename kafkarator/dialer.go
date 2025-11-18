@@ -28,37 +28,41 @@ type Config struct {
 }
 
 func dialer(c Config) (*kafka.Dialer, error) {
-	keypair, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("load key pair: %w", err)
-	}
-
-	caCert, err := os.ReadFile(c.CAFile)
-	if err != nil {
-		return nil, fmt.Errorf("read ca cert: %w", err)
-	}
-
-	// Start with the system's root CAs (for server certificate validation)
-	caCertPool, err := x509.SystemCertPool()
-	if err != nil {
-		// If we can't get system certs, create a new pool
-		caCertPool = x509.NewCertPool()
-	}
-
-	// Append the project CA (for client certificate validation in mTLS)
-	ok := caCertPool.AppendCertsFromPEM(caCert)
-	if !ok {
-		return nil, fmt.Errorf("failed to parse CA certificate file")
-	}
-
-	// Extract hostname from the first broker for ServerName in TLS config
-	// This is critical for certificate validation
-	serverName := extractHostname(c.Brokers[0])
-
 	d := &kafka.Dialer{
 		Timeout:   10 * time.Second,
 		DualStack: true,
-		TLS: &tls.Config{
+	}
+
+	// If TLS certificates are provided, configure TLS
+	if c.CertFile != "" || c.KeyFile != "" || c.CAFile != "" {
+		keypair, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load key pair: %w", err)
+		}
+
+		caCert, err := os.ReadFile(c.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read ca cert: %w", err)
+		}
+
+		// Start with the system's root CAs (for server certificate validation)
+		caCertPool, err := x509.SystemCertPool()
+		if err != nil {
+			// If we can't get system certs, create a new pool
+			caCertPool = x509.NewCertPool()
+		}
+
+		// Append the project CA (for client certificate validation in mTLS)
+		ok := caCertPool.AppendCertsFromPEM(caCert)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse CA certificate file")
+		}
+
+		// Extract hostname from the first broker for ServerName in TLS config
+		// This is critical for certificate validation
+		serverName := extractHostname(c.Brokers[0])
+
+		d.TLS = &tls.Config{
 			Certificates: []tls.Certificate{keypair},
 			RootCAs:      caCertPool,
 			ServerName:   serverName, // Required for proper certificate validation
@@ -70,7 +74,7 @@ func dialer(c Config) (*kafka.Dialer, error) {
 				return nil
 			},
 			InsecureSkipVerify: false, // Keep verification enabled
-		},
+		}
 	}
 
 	return d, nil
