@@ -7,38 +7,8 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// NewProducer returns a service able to write messages to a Kafka topic.
-func NewProducer(topic string, config Config) (Producer, error) {
-	d, err := dialer(config)
-	if err != nil {
-		return nil, err
-	}
-
-	w := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: config.Brokers,
-		Topic:   topic,
-		Dialer:  d,
-	})
-
-	p := &producer{
-		writer:  w,
-		topic:   topic,
-		dialer:  d,
-		brokers: config.Brokers,
-	}
-
-	return p, err
-}
-
 type producer struct {
-	writer  *kafka.Writer
-	dialer  *kafka.Dialer
-	brokers []string
-	topic   string
-}
-
-func (p *producer) Test(ctx context.Context) error {
-	return testConnection(ctx, p.brokers, p.dialer)
+	writer *kafka.Writer
 }
 
 func (p *producer) Produce(ctx context.Context, msg []byte, headers map[string][]byte) error {

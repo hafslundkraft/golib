@@ -7,23 +7,25 @@ type Connection interface {
 	// Test tests whether a connection to Kafka has been established. It is designed to be called early by the client
 	// application so that apps can fail early if something is wrong with the connection.
 	Test(ctx context.Context) error
+
+	// Producer returns a producer which is used to write messages to a Kafka topic
+	Producer(topic string) (Producer, error)
+
+	// Consumer return a producer which is used to read messages from a Kafka topic
+	Consumer(topic, consumerGroup string) (Consumer, error)
 }
 
 // Producer is able to write messaged to a Kafka topic.
 type Producer interface {
-	Connection
-
 	// Produce writes the given bytes as a message to Kafka with the given headers.
 	Produce(ctx context.Context, msg []byte, headers map[string][]byte) error
 }
 
 // Consumer is able to read messages from a Kafka topic.
 type Consumer interface {
-	Connection
-
 	// Consume returns a channel of Messages that have been read off of the given topic. A consumer group must also be
 	// provided. This means that the progress of this consumer is automatically tracked.
-	Consume(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
+	Consume(ctx context.Context) (<-chan Message, error)
 }
 
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is
