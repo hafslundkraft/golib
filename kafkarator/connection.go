@@ -9,7 +9,7 @@ import (
 )
 
 // New returns a new connection to the Kafka service.
-func New(config Config, tel telemetry.Provider) (Connection, error) {
+func New(config Config, tel *telemetry.Provider) (Connection, error) {
 	d, err := dialer(config)
 	if err != nil {
 		return nil, err
@@ -28,7 +28,7 @@ type connection struct {
 	dialer *kafka.Dialer
 	config Config
 
-	tel telemetry.Provider
+	tel *telemetry.Provider
 }
 
 func (c *connection) Test(ctx context.Context) error {

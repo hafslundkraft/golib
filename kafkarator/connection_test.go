@@ -2,6 +2,7 @@ package kafkarator
 
 import (
 	"context"
+	"github.com/hafslundkraft/golib/telemetry"
 	"sync"
 	"testing"
 
@@ -30,8 +31,11 @@ func Test_connection_Consumer(t *testing.T) {
 		Brokers: brokers,
 	}
 
+	tel, err := telemetry.New(ctx, "kafka-test", telemetry.WithLocal(true))
+	require.NoError(t, err)
+
 	// Initialize connection
-	conn, err := New(config)
+	conn, err := New(config, tel)
 	if err != nil {
 		t.Fatalf("failed to create connection: %v", err)
 	}

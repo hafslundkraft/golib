@@ -10,7 +10,7 @@ import (
 
 type producer struct {
 	writer *kafka.Writer
-	tel    telemetry.Provider
+	tel    *telemetry.Provider
 }
 
 func (p *producer) Produce(ctx context.Context, msg []byte, headers map[string][]byte) error {
