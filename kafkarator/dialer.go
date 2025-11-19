@@ -12,21 +12,6 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// Config contains all necessary configuration needed to connect to Kafla.
-type Config struct {
-	// Brokers is the list of Kafka brokers
-	Brokers []string
-
-	// CertFile is the certificate file of the Kafka service.
-	CertFile string
-
-	// KeyFile is the file containing the key to the Kafka service.
-	KeyFile string
-
-	// CAFile is the certificate authority file.
-	CAFile string
-}
-
 func dialer(c Config) (*kafka.Dialer, error) {
 	d := &kafka.Dialer{
 		Timeout:   10 * time.Second,
