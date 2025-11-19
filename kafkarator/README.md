@@ -118,6 +118,157 @@ for msg := range messageChan {
 }
 ```
 
+### Getting Topic Partition Count
+
+```go
+// Get the number of partitions for a topic
+partitionCount, err := conn.TopicPartitions(ctx, "my-topic")
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Topic has %d partitions\n", partitionCount)
+```
+
+## OpenTelemetry Trace Propagation
+
+This library automatically propagates OpenTelemetry trace context through Kafka messages when a telemetry provider is configured. This enables distributed tracing across your Kafka-based microservices.
+
+### Prerequisites
+
+Before trace propagation can work, you must configure the global OpenTelemetry text map propagator. This is typically done once at application startup:
+
+```go
+import (
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/propagation"
+)
+
+func init() {
+    // Configure the global propagator for W3C Trace Context
+    otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+        propagation.TraceContext{},
+        propagation.Baggage{},
+    ))
+}
+```
+
+**Note**: The `github.com/hafslundkraft/golib/telemetry` library may already configure this for you. Check your telemetry initialization code to avoid duplicate configuration.
+
+### Producer Side
+
+When you produce a message with an active trace context, the library automatically injects the trace context into the Kafka message headers:
+
+```go
+import (
+    "context"
+    "github.com/hafslundkraft/golib/kafkarator"
+    "github.com/hafslundkraft/golib/telemetry"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Initialize telemetry
+    tel, shutdown := telemetry.New(ctx, "my-service")
+    defer shutdown(ctx)
+
+    // Create Kafka connection with telemetry
+    config := kafkarator.Config{
+        Brokers: []string{"localhost:9092"},
+    }
+    conn, err := kafkarator.New(config, tel)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Create producer
+    producer, err := conn.Producer("my-topic")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Start a span (or use existing span from incoming request)
+    ctx, span := tel.Tracer().Start(ctx, "produce-message")
+    defer span.End()
+
+    // Produce message - trace context is automatically injected
+    msg := []byte(`{"event": "user.created"}`)
+    err = producer.Produce(ctx, msg, nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### Consumer Side
+
+On the consumer side, extract the trace context from received messages to continue the distributed trace:
+
+```go
+func main() {
+    ctx := context.Background()
+
+    // Initialize telemetry
+    tel, shutdown := telemetry.New(ctx, "consumer-service")
+    defer shutdown(ctx)
+
+    // Create Kafka connection with telemetry
+    config := kafkarator.Config{
+        Brokers: []string{"localhost:9092"},
+    }
+    conn, err := kafkarator.New(config, tel)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Create consumer
+    consumer, err := conn.Consumer("my-topic", "my-consumer-group")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    messageChan, err := consumer.Consume(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    for msg := range messageChan {
+        // Extract trace context from message headers
+        msgCtx := msg.ExtractTraceContext(ctx)
+
+        // Start a new span as a child of the extracted trace
+        msgCtx, span := tel.Tracer().Start(msgCtx, "process-message")
+
+        // Process the message - all operations will be part of the same trace
+        processMessage(msgCtx, msg.Value)
+
+        span.End()
+    }
+}
+
+func processMessage(ctx context.Context, data []byte) {
+    // This function and any downstream calls using ctx will be part of the trace
+    // ...
+}
+```
+
+### How It Works
+
+1. **Producer**: When `Produce()` is called with a context that has an active span, the library uses OpenTelemetry's `TextMapPropagator` to inject trace context (trace ID, span ID, trace flags) into the Kafka message headers.
+
+2. **Consumer**: When processing messages, call `msg.ExtractTraceContext(ctx)` to extract the trace context from the message headers. This creates a new context that continues the distributed trace.
+
+3. **No Telemetry**: If no telemetry provider is configured (i.e., `tel` is `nil`), the library works normally without trace propagation.
+
+### Trace Context Headers
+
+The library uses the W3C Trace Context standard headers:
+- `traceparent`: Contains trace ID, span ID, and trace flags
+- `tracestate`: Contains vendor-specific trace information (if configured)
+
+These headers are automatically managed by OpenTelemetry and don't require manual intervention.
+
 ## Testing
 
 Run the tests with:

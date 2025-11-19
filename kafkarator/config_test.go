@@ -69,7 +69,7 @@ func TestConfigFromEnvVars_MissingCertFile(t *testing.T) {
 	t.Setenv(EnvKeyFile, "/path/to/key.pem")
 	t.Setenv(EnvCAFile, "/path/to/ca.pem")
 
-	config, err := ConfigFromEnvVars()
+	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), EnvCertFile)
@@ -81,7 +81,7 @@ func TestConfigFromEnvVars_MissingKeyFile(t *testing.T) {
 	os.Unsetenv(EnvKeyFile)
 	t.Setenv(EnvCAFile, "/path/to/ca.pem")
 
-	config, err := ConfigFromEnvVars()
+	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), EnvKeyFile)
@@ -93,7 +93,7 @@ func TestConfigFromEnvVars_MissingCAFile(t *testing.T) {
 	t.Setenv(EnvKeyFile, "/path/to/key.pem")
 	os.Unsetenv(EnvCAFile)
 
-	config, err := ConfigFromEnvVars()
+	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), EnvCAFile)
@@ -120,7 +120,7 @@ func TestConfigFromEnvVars_EmptyBrokers(t *testing.T) {
 	t.Setenv(EnvKeyFile, "/path/to/key.pem")
 	t.Setenv(EnvCAFile, "/path/to/ca.pem")
 
-	config, err := ConfigFromEnvVars()
+	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), EnvBrokers)
@@ -132,7 +132,7 @@ func TestConfigFromEnvVars_EmptyPaths(t *testing.T) {
 	t.Setenv(EnvKeyFile, "/path/to/key.pem")
 	t.Setenv(EnvCAFile, "/path/to/ca.pem")
 
-	config, err := ConfigFromEnvVars()
+	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), EnvCertFile)

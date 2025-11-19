@@ -1,21 +1,49 @@
 package kafkarator
 
 import (
+	"bytes"
 	"context"
 	"github.com/hafslundkraft/golib/telemetry"
-	"sync"
-	"testing"
-
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	testkafka "github.com/testcontainers/testcontainers-go/modules/kafka"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"sync"
+	"testing"
+	"time"
 )
 
 const kafkaImage = "confluentinc/confluent-local:7.5.0"
 
 func Test_connection_Consumer(t *testing.T) {
 	ctx := context.Background()
+
+	// Set up the global text map propagator for W3C Trace Context
+	// This is required for trace context propagation to work
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	var buf bytes.Buffer
+
+	telClosed := false
+	tel, telClose := telemetry.New(
+		ctx,
+		"kafka-test",
+		telemetry.WithLocal(true),
+		telemetry.WithLocalWriter(&buf))
+	defer func() {
+		if telClosed {
+			return
+		}
+		telClose(ctx)
+	}()
+
+	ctx, span := tel.Tracer().Start(ctx, "test_connection")
+	defer span.End()
 
 	// Start Kafka container
 	_, brokers, closer := startTestContainer(ctx, t)
@@ -31,9 +59,6 @@ func Test_connection_Consumer(t *testing.T) {
 		Brokers: brokers,
 	}
 
-	tel, err := telemetry.New(ctx, "kafka-test", telemetry.WithLocal(true))
-	require.NoError(t, err)
-
 	// Initialize connection
 	conn, err := New(config, tel)
 	if err != nil {
@@ -47,7 +72,7 @@ func Test_connection_Consumer(t *testing.T) {
 	}
 
 	// Now you can test Consumer
-	cnsmr, err := conn.Consumer(topicName, "test-group")
+	cnsmr, err := conn.Consumer(ctx, topicName, "test-group")
 	if err != nil {
 		t.Fatalf("failed to create cnsmr: %v", err)
 	}
@@ -98,7 +123,70 @@ func Test_connection_Consumer(t *testing.T) {
 	require.NotNil(t, receivedMessage)
 	require.Equal(t, "hello world", string(receivedMessage.Value))
 	require.Equal(t, topicName, receivedMessage.Topic)
-	require.Equal(t, headers, receivedMessage.Headers)
+
+	// Check that original headers are present
+	require.Equal(t, headers["Content-Type"], receivedMessage.Headers["Content-Type"])
+
+	// Check that trace context headers were injected
+	traceparent, hasTraceparent := receivedMessage.Headers["traceparent"]
+	require.True(t, hasTraceparent, "traceparent header should be present")
+	require.NotEmpty(t, traceparent, "traceparent header should not be empty")
+
+	t.Logf("Trace context headers: traceparent=%s", string(traceparent))
+
+	// wait 50ms, and then close telemetry in order to flush all output to buf
+	time.Sleep(50 * time.Millisecond)
+	err = telClose(ctx)
+	require.NoError(t, err)
+	telClosed = true
+
+	telemetryOutput := buf.String()
+	require.Contains(t, telemetryOutput, "name=kafka_lag_partition_0 value=0")
+	require.Contains(t, telemetryOutput, "name=messages_produced_total value=1")
+}
+
+func Test_connection_TopicPartitions(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up the global text map propagator for W3C Trace Context
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	tel, telClose := telemetry.New(ctx, "kafka-test", telemetry.WithLocal(true))
+	defer telClose(ctx)
+
+	// Start Kafka container
+	_, brokers, closer := startTestContainer(ctx, t)
+	defer closer()
+
+	// Create a topic with 3 partitions
+	topicName := "multi-partition-topic"
+	adminConn, err := kafka.Dial("tcp", brokers[0])
+	require.NoError(t, err)
+	defer adminConn.Close()
+
+	err = adminConn.CreateTopics(kafka.TopicConfig{
+		Topic:             topicName,
+		NumPartitions:     3,
+		ReplicationFactor: 1,
+	})
+	require.NoError(t, err)
+
+	// Create connection
+	config := Config{
+		Brokers: brokers,
+	}
+	conn, err := New(config, tel)
+	require.NoError(t, err)
+
+	// Get partition count
+	partitionCount, err := conn.TopicPartitions(ctx, topicName)
+	require.NoError(t, err)
+	require.Equal(t, 3, partitionCount)
+
+	t.Logf("Topic %s has %d partitions", topicName, partitionCount)
 }
 
 func startTestContainer(

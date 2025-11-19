@@ -1,6 +1,11 @@
 package kafkarator
 
-import "context"
+import (
+	"context"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+)
 
 // Connection represents a connection to the Kafka service.
 type Connection interface {
@@ -12,7 +17,10 @@ type Connection interface {
 	Producer(topic string) (Producer, error)
 
 	// Consumer return a producer which is used to read messages from a Kafka topic
-	Consumer(topic, consumerGroup string) (Consumer, error)
+	Consumer(ctx context.Context, topic, consumerGroup string) (Consumer, error)
+
+	// TopicPartitions returns the number of partitions for the given topic
+	TopicPartitions(ctx context.Context, topic string) (int, error)
 }
 
 // Producer is able to write messaged to a Kafka topic.
@@ -49,4 +57,26 @@ type Message struct {
 
 	// Headers are keys value header pairs associated with the message.
 	Headers map[string][]byte
+}
+
+// ExtractTraceContext extracts the OpenTelemetry trace context from the message headers
+// and returns a new context with the extracted trace information. This allows consumers
+// to continue the trace that was started by the producer.
+//
+// Example usage:
+//
+//	for msg := range messageChan {
+//	    ctx := msg.ExtractTraceContext(ctx)
+//	    // Use ctx for downstream operations to continue the trace
+//	    processMessage(ctx, msg.Value)
+//	}
+func (m *Message) ExtractTraceContext(ctx context.Context) context.Context {
+	// Convert headers map to MapCarrier
+	carrier := propagation.MapCarrier{}
+	for k, v := range m.Headers {
+		carrier[k] = string(v)
+	}
+
+	// Extract trace context from headers and create new context
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
 }

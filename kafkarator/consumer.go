@@ -3,11 +3,21 @@ package kafkarator
 import (
 	"context"
 
+	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/metric"
+)
+
+const (
+	meterConsumedMessages = "kafka_messages_consumed"
+	gaugeLagTemplate      = "kafka_lag_partition_%d"
 )
 
 type consumer struct {
-	reader *kafka.Reader
+	reader     *kafka.Reader
+	tel        *telemetry.Provider
+	msgCounter metric.Int64Counter
+	lagGauges  map[int]metric.Int64Gauge
 }
 
 func (c *consumer) Consume(ctx context.Context) (<-chan Message, error) {
@@ -38,6 +48,8 @@ func (c *consumer) Consume(ctx context.Context) (<-chan Message, error) {
 					}
 					// Handle commit error (log, etc.)
 				}
+				lag := msg.HighWaterMark - msg.Offset - 1
+				c.lagGauges[msg.Partition].Record(ctx, lag)
 			case <-ctx.Done():
 				// Context canceled while trying to send message
 				return

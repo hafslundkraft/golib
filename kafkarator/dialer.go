@@ -76,7 +76,7 @@ func extractHostname(broker string) string {
 
 func testConnection(ctx context.Context, brokers []string, dialer *kafka.Dialer) error {
 	if dialer == nil {
-		return fmt.Errorf("kafkarator not initialized, call Init() first")
+		return fmt.Errorf("dialer is nil")
 	}
 	if len(brokers) == 0 {
 		return fmt.Errorf("no brokers configured")
