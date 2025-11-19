@@ -3,12 +3,14 @@ package kafkarator
 import (
 	"context"
 	"fmt"
+	"github.com/hafslundkraft/golib/telemetry"
 
 	"github.com/segmentio/kafka-go"
 )
 
 type producer struct {
 	writer *kafka.Writer
+	tel    telemetry.Provider
 }
 
 func (p *producer) Produce(ctx context.Context, msg []byte, headers map[string][]byte) error {

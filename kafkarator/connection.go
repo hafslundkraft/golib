@@ -3,12 +3,13 @@ package kafkarator
 import (
 	"context"
 	"fmt"
+	"github.com/hafslundkraft/golib/telemetry"
 
 	"github.com/segmentio/kafka-go"
 )
 
 // New returns a new connection to the Kafka service.
-func New(config Config) (Connection, error) {
+func New(config Config, tel telemetry.Provider) (Connection, error) {
 	d, err := dialer(config)
 	if err != nil {
 		return nil, err
@@ -17,6 +18,7 @@ func New(config Config) (Connection, error) {
 	c := &connection{
 		dialer: d,
 		config: config,
+		tel:    tel,
 	}
 
 	return c, nil
@@ -25,6 +27,8 @@ func New(config Config) (Connection, error) {
 type connection struct {
 	dialer *kafka.Dialer
 	config Config
+
+	tel telemetry.Provider
 }
 
 func (c *connection) Test(ctx context.Context) error {
@@ -44,6 +48,7 @@ func (c *connection) Producer(topic string) (Producer, error) {
 
 	p := &producer{
 		writer: w,
+		tel:    c.tel,
 	}
 
 	return p, nil
