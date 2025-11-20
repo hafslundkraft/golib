@@ -6,7 +6,8 @@ The reason for you to use this package, instead of just using a library such as 
 which is used internally here), is that this package integrates with the module `github.com/hafslundkraft/golib/telemetry`,
 providing automatic OpenTelemetry trace propagation as well as standard metrics.
 
-The main abstraction 
+The main abstraction is the *Connection* which is created with *New*. It exposes functions that return channels that
+are used to write and read to and from Kafka topics.
 
 ## Installation
 
