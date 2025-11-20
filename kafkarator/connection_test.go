@@ -3,6 +3,10 @@ package kafkarator
 import (
 	"bytes"
 	"context"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/require"
@@ -10,9 +14,6 @@ import (
 	testkafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	"sync"
-	"testing"
-	"time"
 )
 
 const kafkaImage = "confluentinc/confluent-local:7.5.0"

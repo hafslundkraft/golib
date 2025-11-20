@@ -11,8 +11,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
-const meterProducedMessages = "messages_produced_total"
-
 type producer struct {
 	writer     *kafka.Writer
 	tel        *telemetry.Provider
@@ -54,14 +52,3 @@ func (p *producer) injectTraceContext(ctx context.Context, headers map[string][]
 	return propagatedHeaders
 }
 
-func kafkaMessage(b []byte, headers map[string][]byte) kafka.Message {
-	headerList := make([]kafka.Header, 0, len(headers))
-	for k, v := range headers {
-		headerList = append(headerList, kafka.Header{Key: k, Value: v})
-	}
-
-	return kafka.Message{
-		Value:   b,
-		Headers: headerList,
-	}
-}

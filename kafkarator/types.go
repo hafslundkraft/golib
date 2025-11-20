@@ -7,6 +7,18 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
+type Connection2 interface {
+	// Test tests whether a connection to Kafka has been established. It is designed to be called early by the client
+	// application so that apps can fail early if something is wrong with the connection.
+	Test(ctx context.Context) error
+
+	// Writer returns a channel that is used to write messages to the Kafka topic.
+	Writer(ctx context.Context, topic string) (chan<- MessageAndContext, error)
+
+	// Reader returns a channel that sends out messages from Kafka.
+	Reader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
+}
+
 // Connection represents a connection to the Kafka service.
 type Connection interface {
 	// Test tests whether a connection to Kafka has been established. It is designed to be called early by the client
@@ -34,6 +46,16 @@ type Consumer interface {
 	// Consume returns a channel of Messages that have been read off of the given topic. A consumer group must also be
 	// provided. This means that the progress of this consumer is automatically tracked.
 	Consume(ctx context.Context) (<-chan Message, error)
+}
+
+// MessageAndContext associates a message with a context, the purpose being to be able to
+// propagate trace information over channels.
+type MessageAndContext struct {
+	// Message is the thing going onto the Kafka topic.
+	Message Message
+
+	// Context is the context.
+	Context context.Context
 }
 
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is

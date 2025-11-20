@@ -2,6 +2,10 @@
 
 A Go library for connecting to and interacting with Kafka services, with support for both TLS-secured and non-TLS connections.
 
+The main reason for you to use this package, instead of just using a library such as `github.com/segmentio/kafka-go` (
+which is used internally here), is that this package integrates with the module `github.com/hafslundkraft/golib/telemetry`,
+providing automatic OpenTelemetry trace propagation as well as standard metrics.
+
 ## Installation
 
 ```bash
@@ -268,6 +272,13 @@ The library uses the W3C Trace Context standard headers:
 - `tracestate`: Contains vendor-specific trace information (if configured)
 
 These headers are automatically managed by OpenTelemetry and don't require manual intervention.
+
+## Trace Metrics
+The following metric counters and gauges are automatically maintained:
+* **messages_produced_total** (counter): The total number of messages that have been written to the Kafka topic.
+* **kafka_lag_partition_N** (gauge): N here is the total number of partitions on the topic - 1. For instance,
+    if the topic has 16 partitions, the gauges named `kafka_lag_partition_0`, `kafka_lag_partition_1` ... `kafka_lag_partition_15`
+    will be maintained. Each gauge measures the number of messages remaining on the partition that service hasn't read yet.
 
 ## Testing
 

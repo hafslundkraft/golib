@@ -8,11 +8,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-const (
-	meterConsumedMessages = "kafka_messages_consumed"
-	gaugeLagTemplate      = "kafka_lag_partition_%d"
-)
-
 type consumer struct {
 	reader     *kafka.Reader
 	tel        *telemetry.Provider
@@ -60,17 +55,4 @@ func (c *consumer) Consume(ctx context.Context) (<-chan Message, error) {
 	return ch, nil
 }
 
-func message(m *kafka.Message) Message {
-	headers := make(map[string][]byte)
-	for _, header := range m.Headers {
-		headers[header.Key] = header.Value
-	}
-	return Message{
-		Topic:     m.Topic,
-		Partition: m.Partition,
-		Offset:    m.Offset,
-		Key:       m.Key,
-		Value:     m.Value,
-		Headers:   headers,
-	}
-}
+
