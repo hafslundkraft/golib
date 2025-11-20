@@ -2,9 +2,11 @@
 
 A Go library for connecting to and interacting with Kafka services, with support for both TLS-secured and non-TLS connections.
 
-The main reason for you to use this package, instead of just using a library such as `github.com/segmentio/kafka-go` (
+The reason for you to use this package, instead of just using a library such as `github.com/segmentio/kafka-go` (
 which is used internally here), is that this package integrates with the module `github.com/hafslundkraft/golib/telemetry`,
 providing automatic OpenTelemetry trace propagation as well as standard metrics.
+
+The main abstraction 
 
 ## Installation
 
@@ -103,6 +105,9 @@ if err != nil {
 ```
 
 ### Creating a Consumer
+This package consumes messages via consumer group. Currently, methods for starting at a specific point in time, or
+at a known offset directly, are not provided. This is a natural extension of this package that might be implemented in
+the future.
 
 ```go
 consumer, err := conn.Consumer("my-topic", "my-consumer-group")
@@ -120,18 +125,6 @@ for msg := range messageChan {
     fmt.Printf("Topic: %s, Partition: %d, Offset: %d\n",
         msg.Topic, msg.Partition, msg.Offset)
 }
-```
-
-### Getting Topic Partition Count
-
-```go
-// Get the number of partitions for a topic
-partitionCount, err := conn.TopicPartitions(ctx, "my-topic")
-if err != nil {
-    log.Fatal(err)
-}
-
-fmt.Printf("Topic has %d partitions\n", partitionCount)
 ```
 
 ## OpenTelemetry Trace Propagation
@@ -187,7 +180,7 @@ func main() {
     }
 
     // Create producer
-    producer, err := conn.Producer("my-topic")
+	writeChan, err := conn.Writer("my-topic")
     if err != nil {
         log.Fatal(err)
     }
@@ -197,11 +190,9 @@ func main() {
     defer span.End()
 
     // Produce message - trace context is automatically injected
-    msg := []byte(`{"event": "user.created"}`)
-    err = producer.Produce(ctx, msg, nil)
-    if err != nil {
-        log.Fatal(err)
-    }
+    msgBytes := []byte(`{"event": "user.created"}`)
+	msg := kafkarator.NewMessageAndContext(ctx, msgBytes, nil)
+    writeChan <- msg
 }
 ```
 
@@ -225,14 +216,8 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-
-    // Create consumer
-    consumer, err := conn.Consumer("my-topic", "my-consumer-group")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    messageChan, err := consumer.Consume(ctx)
+	
+    messageChan, err := conn.Reader(ctx, "my-topic", "my-consumer-group")
     if err != nil {
         log.Fatal(err)
     }
