@@ -86,49 +86,7 @@ if err := conn.Test(ctx); err != nil {
 }
 ```
 
-### Creating a Producer
-
-```go
-producer, err := conn.Producer("my-topic")
-if err != nil {
-    log.Fatal(err)
-}
-
-msg := []byte("hello world")
-headers := map[string][]byte{
-    "Content-Type": []byte("application/json"),
-}
-
-err = producer.Produce(ctx, msg, headers)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-### Creating a Consumer
-This package consumes messages via consumer group. Currently, methods for starting at a specific point in time, or
-at a known offset directly, are not provided. This is a natural extension of this package that might be implemented in
-the future.
-
-```go
-consumer, err := conn.Consumer("my-topic", "my-consumer-group")
-if err != nil {
-    log.Fatal(err)
-}
-
-messageChan, err := consumer.Consume(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-
-for msg := range messageChan {
-    fmt.Printf("Received: %s\n", string(msg.Value))
-    fmt.Printf("Topic: %s, Partition: %d, Offset: %d\n",
-        msg.Topic, msg.Partition, msg.Offset)
-}
-```
-
-## OpenTelemetry Trace Propagation
+### OpenTelemetry Trace Propagation
 
 This library automatically propagates OpenTelemetry trace context through Kafka messages when a telemetry provider is configured. This enables distributed tracing across your Kafka-based microservices.
 
@@ -153,7 +111,7 @@ func init() {
 
 **Note**: The `github.com/hafslundkraft/golib/telemetry` library may already configure this for you. Check your telemetry initialization code to avoid duplicate configuration.
 
-### Producer Side
+### Producer Side Sample with Tracing and General Usage
 
 When you produce a message with an active trace context, the library automatically injects the trace context into the Kafka message headers:
 
@@ -197,7 +155,7 @@ func main() {
 }
 ```
 
-### Consumer Side
+### Consumer Side Sample with Tracing and General Usage
 
 On the consumer side, extract the trace context from received messages to continue the distributed trace:
 
