@@ -43,12 +43,12 @@ func Test_connection_Consumer(t *testing.T) {
 		telClose(ctx)
 	}()
 
-	ctx, span := tel.Tracer().Start(ctx, "test_connection")
-	defer span.End()
-
 	// Start Kafka container
 	_, brokers, closer := startTestContainer(ctx, t)
 	defer closer()
+
+	ctx, span := tel.Tracer().Start(ctx, "test_connection")
+	defer span.End()
 
 	// Create a topic using kafka-go
 	topicName := "test-topic"
@@ -73,17 +73,17 @@ func Test_connection_Consumer(t *testing.T) {
 	}
 
 	// Now you can test Consumer
-	cnsmr, err := conn.Consumer(ctx, topicName, "test-group")
+	readChan, err := conn.Reader(ctx, topicName, "test-group")
 	if err != nil {
 		t.Fatalf("failed to create cnsmr: %v", err)
 	}
 
-	// Verify cnsmr was created successfully
-	if cnsmr == nil {
-		t.Fatal("cnsmr is nil")
+	// Verify messageChan was created successfully
+	if readChan == nil {
+		t.Fatal("readChan is nil")
 	}
 
-	prdcr, err := conn.Producer(topicName)
+	writeChan, err := conn.Writer(ctx, topicName)
 	require.NoError(t, err)
 
 	msg := []byte("hello world")
@@ -93,17 +93,11 @@ func Test_connection_Consumer(t *testing.T) {
 
 	errChan := make(chan error)
 	go func() {
-		produceErr := prdcr.Produce(ctx, msg, headers)
-		if produceErr != nil {
-			errChan <- produceErr
-		}
+		writeChan <- NewMessageAndContext(ctx, msg, headers)
 	}()
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-
-	messageChan, err := cnsmr.Consume(ctx)
-	require.NoError(t, err)
 
 	var receivedMessage *Message
 	var receivedError error
@@ -112,7 +106,7 @@ func Test_connection_Consumer(t *testing.T) {
 		case err := <-errChan:
 			receivedError = err
 			return
-		case m := <-messageChan:
+		case m := <-readChan:
 			receivedMessage = &m
 		}
 		defer wg.Done()
@@ -146,7 +140,7 @@ func Test_connection_Consumer(t *testing.T) {
 	require.Contains(t, telemetryOutput, "name=messages_produced_total value=1")
 }
 
-func Test_connection_TopicPartitions(t *testing.T) {
+func Test_connection_topicPartitions(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up the global text map propagator for W3C Trace Context
@@ -183,7 +177,7 @@ func Test_connection_TopicPartitions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get partition count
-	partitionCount, err := conn.TopicPartitions(ctx, topicName)
+	partitionCount, err := conn.topicPartitions(ctx, topicName)
 	require.NoError(t, err)
 	require.Equal(t, 3, partitionCount)
 
