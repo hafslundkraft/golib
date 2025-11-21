@@ -24,29 +24,6 @@ type Connection interface {
 // WriterFunc is a function able to write the message and headers to an (already determined) topic.
 type WriterFunc func(ctx context.Context, msg []byte, headers map[string][]byte) error
 
-//// NewMessageAndContext creates a message and associates it with a context.
-//func NewMessageAndContext(ctx context.Context, msg []byte, headers map[string][]byte) MessageAndContext {
-//	m := Message{
-//		Value:   msg,
-//		Headers: headers,
-//	}
-//
-//	return MessageAndContext{
-//		Context: ctx,
-//		Message: m,
-//	}
-//}
-
-//// MessageAndContext associates a message with a context, the purpose being to be able to
-//// propagate trace information over channels.
-//type MessageAndContext struct {
-//	// Message is the thing going onto the Kafka topic.
-//	Message Message
-//
-//	// Context is the context.
-//	Context context.Context
-//}
-
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is
 // implemented by the underlying kafka library. We choose to expose our own type in order to insulate the consumer from
 // such implementation details.

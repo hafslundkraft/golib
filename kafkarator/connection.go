@@ -66,7 +66,7 @@ func (c *connection) Writer(topic string) (WriterFunc, func(ctx context.Context)
 	closerF := func(ctx context.Context) error {
 		if err := w.Close(); err != nil {
 			c.logger.ErrorContext(ctx, fmt.Sprintf("failed to close writer %v", err))
-			return err
+			return fmt.Errorf("failed to close writer: %w", err)
 		}
 		return nil
 	}
@@ -75,7 +75,7 @@ func (c *connection) Writer(topic string) (WriterFunc, func(ctx context.Context)
 		traceHeaders := c.injectTraceContext(ctx, headers)
 		if err := w.WriteMessages(ctx, kafkaMessage(msg, traceHeaders)); err != nil {
 			c.logger.ErrorContext(ctx, fmt.Sprintf("while writing messages to Kafka %v", err))
-			return err
+			return fmt.Errorf("failed to write messages to Kafka %w", err)
 		}
 		producedMessagesCounter.Add(ctx, 1)
 		return nil
