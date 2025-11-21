@@ -143,7 +143,7 @@ func Test_connection_Consumer(t *testing.T) {
 	telClosed = true
 
 	telemetryOutput := buf.String()
-	require.Contains(t, telemetryOutput, "name=kafka_message_lag value=0")
+	require.Contains(t, telemetryOutput, "name=kafka_message_lag value=0 attributes: partition=0")
 	require.Contains(t, telemetryOutput, "name=messages_produced_total value=1")
 }
 
