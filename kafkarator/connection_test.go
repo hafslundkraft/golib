@@ -136,52 +136,8 @@ func Test_connection_Consumer(t *testing.T) {
 	telClosed = true
 
 	telemetryOutput := buf.String()
-	require.Contains(t, telemetryOutput, "name=kafka_lag_partition_0 value=0")
+	require.Contains(t, telemetryOutput, "name=kafka_message_lag value=0")
 	require.Contains(t, telemetryOutput, "name=messages_produced_total value=1")
-}
-
-func Test_connection_topicPartitions(t *testing.T) {
-	ctx := context.Background()
-
-	// Set up the global text map propagator for W3C Trace Context
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
-
-	tel, telClose := telemetry.New(ctx, "kafka-test", telemetry.WithLocal(true))
-	defer telClose(ctx)
-
-	// Start Kafka container
-	_, brokers, closer := startTestContainer(ctx, t)
-	defer closer()
-
-	// Create a topic with 3 partitions
-	topicName := "multi-partition-topic"
-	adminConn, err := kafka.Dial("tcp", brokers[0])
-	require.NoError(t, err)
-	defer adminConn.Close()
-
-	err = adminConn.CreateTopics(kafka.TopicConfig{
-		Topic:             topicName,
-		NumPartitions:     3,
-		ReplicationFactor: 1,
-	})
-	require.NoError(t, err)
-
-	// Create connection
-	config := Config{
-		Brokers: brokers,
-	}
-	conn, err := New(config, tel)
-	require.NoError(t, err)
-
-	// Get partition count
-	partitionCount, err := conn.topicPartitions(ctx, topicName)
-	require.NoError(t, err)
-	require.Equal(t, 3, partitionCount)
-
-	t.Logf("Topic %s has %d partitions", topicName, partitionCount)
 }
 
 func startTestContainer(

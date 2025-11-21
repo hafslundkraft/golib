@@ -18,9 +18,6 @@ type Connection interface {
 
 	// Reader returns a channel that sends out messages from Kafka.
 	Reader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
-
-	// topicPartitions returns the number of partitions for the given topic
-	topicPartitions(ctx context.Context, topic string) (int, error)
 }
 
 // Producer is able to write messaged to a Kafka topic.

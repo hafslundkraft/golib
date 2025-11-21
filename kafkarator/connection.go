@@ -8,6 +8,7 @@ import (
 	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -15,7 +16,7 @@ import (
 const (
 	meterProducedMessages = "messages_produced_total"
 	meterConsumedMessages = "kafka_messages_consumed"
-	gaugeLagTemplate      = "kafka_lag_partition_%d"
+	gaugeLag              = "kafka_message_lag"
 )
 
 // New creates and returns a new connection.
@@ -96,19 +97,10 @@ func (c *connection) Reader(ctx context.Context, topic, consumerGroup string) (<
 		Dialer:  c.dialer,
 	})
 
-	partitionCount, err := c.topicPartitions(ctx, topic)
-	if err != nil {
-		return nil, fmt.Errorf("kafkarator topic partitions: %w", err)
-	}
-
 	m := c.tel.Meter()
-	lagGauges := map[int]metric.Int64Gauge{}
-	for i := 0; i < partitionCount; i++ {
-		g, err := m.Int64Gauge(fmt.Sprintf(gaugeLagTemplate, i))
-		if err != nil {
-			return nil, fmt.Errorf("kafkarator msgCounter gauge %d: %w", i, err)
-		}
-		lagGauges[i] = g
+	lagGauge, err := m.Int64Gauge(gaugeLag)
+	if err != nil {
+		return nil, fmt.Errorf("while creating lag gauge: %w", err)
 	}
 
 	consumedMessagesCounter, err := c.tel.Meter().Int64Counter(meterConsumedMessages)
@@ -148,7 +140,13 @@ func (c *connection) Reader(ctx context.Context, topic, consumerGroup string) (<
 					// Handle commit error (log, etc.)
 				}
 				lag := msg.HighWaterMark - msg.Offset - 1
-				lagGauges[msg.Partition].Record(ctx, lag)
+				lagGauge.Record(
+					ctx,
+					lag,
+					metric.WithAttributes(
+						attribute.KeyValue{Key: "lag", Value: attribute.StringValue(fmt.Sprint(lag))},
+					),
+				)
 				consumedMessagesCounter.Add(ctx, int64(1))
 			case <-ctx.Done():
 				// Context canceled while trying to send message
@@ -158,23 +156,6 @@ func (c *connection) Reader(ctx context.Context, topic, consumerGroup string) (<
 	}()
 
 	return outgoing, nil
-}
-
-func (c *connection) topicPartitions(ctx context.Context, topic string) (int, error) {
-	// Connect to the first broker to get metadata
-	conn, err := c.dialer.DialContext(ctx, "tcp", c.config.Brokers[0])
-	if err != nil {
-		return 0, fmt.Errorf("dial broker: %w", err)
-	}
-	defer conn.Close()
-
-	// Get partition information for the topic
-	partitions, err := conn.ReadPartitions(topic)
-	if err != nil {
-		return 0, fmt.Errorf("read partitions for topic %s: %w", topic, err)
-	}
-
-	return len(partitions), nil
 }
 
 // injectTraceContext extracts the trace context from the current span and injects it into the headers
