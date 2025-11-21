@@ -4,10 +4,10 @@ A Go library for connecting to and interacting with Kafka services, with support
 
 The reason for you to use this package, instead of just using a library such as `github.com/segmentio/kafka-go` (
 which is used internally here), is that this package integrates with the module `github.com/hafslundkraft/golib/telemetry`,
-providing automatic OpenTelemetry trace propagation as well as standard metrics.
+providing automatic OpenTelemetry trace propagation as well as standardized metrics.
 
-The main abstraction is the *Connection* which is created with *New*. It exposes functions that return channels that
-are used to write and read to and from Kafka topics.
+The main abstraction is the *Connection* which is created with *New*. For writing messages it exposes the connection
+exposes a func returning a func that can be used for writing. For reading a channel is exposed.
 
 ## Installation
 
@@ -139,10 +139,11 @@ func main() {
     }
 
     // Create producer
-	writeChan, err := conn.Writer("my-topic")
+	writerFunc, closerFunc, err := conn.Writer("my-topic")
     if err != nil {
         log.Fatal(err)
     }
+	defer closerFunc(ctx)
 
     // Start a span (or use existing span from incoming request)
     ctx, span := tel.Tracer().Start(ctx, "produce-message")
@@ -150,8 +151,10 @@ func main() {
 
     // Produce message - trace context is automatically injected
     msgBytes := []byte(`{"event": "user.created"}`)
-	msg := kafkarator.NewMessageAndContext(ctx, msgBytes, nil)
-    writeChan <- msg
+	headers := map[string][]byte{"key": []byte("value")}
+    if err := writerFunc(ctx, msgBytes, headers); err != nil {
+        log.Fatal(err)	
+    }
 }
 ```
 

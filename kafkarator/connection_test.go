@@ -83,8 +83,13 @@ func Test_connection_Consumer(t *testing.T) {
 		t.Fatal("readChan is nil")
 	}
 
-	writeChan, err := conn.Writer(ctx, topicName)
+	writerF, writerCloserF, err := conn.Writer(topicName)
 	require.NoError(t, err)
+	defer func() {
+		if err := writerCloserF(ctx); err != nil {
+			t.Errorf("failed to close writer: %v", err)
+		}
+	}()
 
 	msg := []byte("hello world")
 	headers := map[string][]byte{
@@ -93,7 +98,9 @@ func Test_connection_Consumer(t *testing.T) {
 
 	errChan := make(chan error)
 	go func() {
-		writeChan <- NewMessageAndContext(ctx, msg, headers)
+		if err := writerF(ctx, msg, headers); err != nil {
+			errChan <- err
+		}
 	}()
 
 	wg := sync.WaitGroup{}

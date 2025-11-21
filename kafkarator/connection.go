@@ -51,42 +51,37 @@ func (c *connection) Test(ctx context.Context) error {
 	return nil
 }
 
-func (c *connection) Writer(ctx context.Context, topic string) (chan<- MessageAndContext, error) {
+func (c *connection) Writer(topic string) (WriterFunc, func(ctx context.Context) error, error) {
+	producedMessagesCounter, err := c.tel.Meter().Int64Counter(meterProducedMessages)
+	if err != nil {
+		return nil, nil, fmt.Errorf("kafkarator msgCounter produced messages: %w", err)
+	}
+
 	w := kafka.NewWriter(kafka.WriterConfig{
 		Brokers: c.config.Brokers,
 		Topic:   topic,
 		Dialer:  c.dialer,
 	})
 
-	producedMessagesCounter, err := c.tel.Meter().Int64Counter(meterProducedMessages)
-	if err != nil {
-		return nil, fmt.Errorf("kafkarator msgCounter produced messages: %w", err)
+	closerF := func(ctx context.Context) error {
+		if err := w.Close(); err != nil {
+			c.logger.ErrorContext(ctx, fmt.Sprintf("failed to close writer %v", err))
+			return err
+		}
+		return nil
 	}
 
-	incomingMessages := make(chan MessageAndContext)
-
-	go func() {
-		defer func() {
-			if err := w.Close(); err != nil {
-				c.logger.ErrorContext(ctx, fmt.Sprintf("failed to close writer %v", err))
-			}
-		}()
-		defer close(incomingMessages)
-
-		select {
-		case msg := <-incomingMessages:
-			headers := c.injectTraceContext(msg.Context, msg.Message.Headers)
-			if err := w.WriteMessages(ctx, kafkaMessage(msg.Message.Value, headers)); err != nil {
-				c.logger.ErrorContext(ctx, fmt.Sprintf("while writing messages to Kafka %v", err))
-			}
-			producedMessagesCounter.Add(ctx, 1)
-		case <-ctx.Done():
-			c.logger.InfoContext(ctx, "writer exiting")
-			return
+	writerF := func(ctx context.Context, msg []byte, headers map[string][]byte) error {
+		traceHeaders := c.injectTraceContext(ctx, headers)
+		if err := w.WriteMessages(ctx, kafkaMessage(msg, traceHeaders)); err != nil {
+			c.logger.ErrorContext(ctx, fmt.Sprintf("while writing messages to Kafka %v", err))
+			return err
 		}
-	}()
+		producedMessagesCounter.Add(ctx, 1)
+		return nil
+	}
 
-	return incomingMessages, nil
+	return writerF, closerF, nil
 }
 
 func (c *connection) Reader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {
