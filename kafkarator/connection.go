@@ -139,7 +139,7 @@ func (c *connection) Reader(ctx context.Context, topic, consumerGroup string) (<
 					ctx,
 					lag,
 					metric.WithAttributes(
-						attribute.KeyValue{Key: "lag", Value: attribute.StringValue(fmt.Sprint(lag))},
+						attribute.KeyValue{Key: "partition", Value: attribute.StringValue(fmt.Sprint(msg.Partition))},
 					),
 				)
 				consumedMessagesCounter.Add(ctx, int64(1))
