@@ -62,32 +62,22 @@ func Test_connection_Consumer(t *testing.T) {
 
 	// Initialize connection
 	conn, err := New(config, tel)
-	if err != nil {
-		t.Fatalf("failed to create connection: %v", err)
-	}
+	require.NoError(t, err, "failed to create connection")
 
 	// Test the connection
 	err = conn.Test(ctx)
-	if err != nil {
-		t.Fatalf("failed to test connection: %v", err)
-	}
+	require.NoError(t, err, "failed to test connection")
 
 	// Now you can test Consumer
 	readChan, err := conn.Reader(ctx, topicName, "test-group")
-	if err != nil {
-		t.Fatalf("failed to create cnsmr: %v", err)
-	}
-
-	// Verify messageChan was created successfully
-	if readChan == nil {
-		t.Fatal("readChan is nil")
-	}
+	require.NoError(t, err, "failed to create reader")
+	require.NotNil(t, t, readChan)
 
 	wCloser, err := conn.Writer(topicName)
 	require.NoError(t, err)
 	defer func() {
 		if err := wCloser.Close(ctx); err != nil {
-			t.Errorf("failed to close writer: %v", err)
+			require.NoError(t, err, "failed to close writer")
 		}
 	}()
 
@@ -109,6 +99,8 @@ func Test_connection_Consumer(t *testing.T) {
 	var receivedMessage *Message
 	var receivedError error
 	go func() {
+		defer wg.Done()
+
 		select {
 		case err := <-errChan:
 			receivedError = err
@@ -116,7 +108,6 @@ func Test_connection_Consumer(t *testing.T) {
 		case m := <-readChan:
 			receivedMessage = &m
 		}
-		defer wg.Done()
 	}()
 
 	wg.Wait()
@@ -159,18 +150,16 @@ func startTestContainer(
 		kafkaImage,
 		testkafka.WithClusterID("test-cluster"),
 	)
-	if err != nil {
-		t.Fatalf("failed to start kafka container: %v", err)
-	}
+	require.NoError(t, err, "failed to start test container")
 
 	brokers, err = kafkaContainer.Brokers(ctx)
 	if err != nil {
-		t.Fatalf("failed to get brokers: %v", err)
+		require.NoError(t, err, "failed to get brokers")
 	}
 
 	closer = func() {
 		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
-			t.Errorf("failed to terminate kafka container: %v", err)
+			require.NoError(t, err, "failed to terminate container")
 		}
 	}
 
@@ -181,9 +170,7 @@ func createTopic(t *testing.T, topicName, broker string) func() error {
 	t.Helper()
 
 	adminConn, err := kafka.Dial("tcp", broker)
-	if err != nil {
-		t.Fatalf("failed to dial kafka: %v", err)
-	}
+	require.NoError(t, err, "failed to dial kafka")
 
 	err = adminConn.CreateTopics(kafka.TopicConfig{
 		Topic:             topicName,
@@ -191,7 +178,7 @@ func createTopic(t *testing.T, topicName, broker string) func() error {
 		ReplicationFactor: 1,
 	})
 	if err != nil {
-		t.Fatalf("failed to create topic: %v", err)
+		require.NoError(t, err, "failed to create topic")
 	}
 
 	return adminConn.Close

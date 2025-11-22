@@ -28,6 +28,10 @@ type writerCloser struct {
 }
 
 func (wc *writerCloser) Close(ctx context.Context) error {
+	if wc.closed {
+		return nil // It's ok to close multiple times.
+	}
+
 	if err := wc.writer.Close(); err != nil {
 		wc.logger.ErrorContext(ctx, fmt.Sprintf("failed to close writer %v", err))
 		return fmt.Errorf("failed to close writer: %w", err)
@@ -38,7 +42,7 @@ func (wc *writerCloser) Close(ctx context.Context) error {
 
 func (wc *writerCloser) Write(ctx context.Context, msg []byte, headers map[string][]byte) error {
 	if wc.closed {
-		return fmt.Errorf("writer is already closed")
+		return fmt.Errorf("writer is closed")
 	}
 
 	traceHeaders := injectTraceContext(ctx, headers)

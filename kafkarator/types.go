@@ -16,7 +16,12 @@ type Connection interface {
 	// Writer returns a writer for writing messages to Kafka.
 	Writer(topic string) (WriterCloser, error)
 
-	// Reader returns a channel that sends out messages from Kafka.
+	// Reader returns a channel that sends out messages from the given Kafka topic. This library (currently)
+	// only supports message consumption via consumer group, so the group to use must be supplied. This means
+	// that multiple copies of the service using this library can be started simultaneously, and Kafka will
+	// automatically balance consumption between the consumers, i.e. the service can be scaled horizontally. Of
+	// course, this only makes sense if the topic has more than one partition. Another consequence/feature is that
+	// Kafka automatically tracks the progress of the worker.
 	Reader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
 }
 
