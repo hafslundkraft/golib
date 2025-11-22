@@ -13,16 +13,24 @@ type Connection interface {
 	// application so that apps can fail early if something is wrong with the connection.
 	Test(ctx context.Context) error
 
-	// Writer returns a writer for writing messages to Kafka. It also returns a function for closing the
-	// underlying infrastructure when you're done writing.
-	Writer(topic string) (WriterFunc, func(ctx context.Context) error, error)
+	// Writer returns a writer for writing messages to Kafka.
+	Writer(topic string) (WriterCloser, error)
 
 	// Reader returns a channel that sends out messages from Kafka.
 	Reader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
 }
 
-// WriterFunc is a function able to write the message and headers to an (already determined) topic.
-type WriterFunc func(ctx context.Context, msg []byte, headers map[string][]byte) error
+// WriterCloser provides an interface for writing messages to the Kafka topic, as well
+// as closing it when the client is done with writing.
+type WriterCloser interface {
+	// Close closes the underlying infrastructure, and renders this interface unusable for writing messages.
+	Close(ctx context.Context) error
+
+	// Write writes the given message with headers to the topic. An important side effect is
+	// that if there is an OpenTelemetry tracing span associated with the context, it is extracted
+	// and included in the header that is sent to Kafka.
+	Write(ctx context.Context, msg []byte, headers map[string][]byte) error
+}
 
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is
 // implemented by the underlying kafka library. We choose to expose our own type in order to insulate the consumer from
