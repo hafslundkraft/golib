@@ -15,9 +15,9 @@ import (
 // WorkloadCredential is a Credential for HAPPI workloads, reading a service
 // account token and using it as a client assertion to fetch a HAPPI token.
 type WorkloadCredential struct {
-	tokenFile string
-	clientID  string
-	tokenURL  string
+	TokenFile string
+	ClientID  string
+	TokenURL  string
 }
 
 var _ Credential = (*WorkloadCredential)(nil)
@@ -39,9 +39,9 @@ func NewWorkloadCredential() (WorkloadCredential, error) {
 	}
 
 	return WorkloadCredential{
-		clientID:  clientID,
-		tokenURL:  tokenURL,
-		tokenFile: clientTokenFilePath,
+		ClientID:  clientID,
+		TokenURL:  tokenURL,
+		TokenFile: clientTokenFilePath,
 	}, nil
 }
 
@@ -49,8 +49,8 @@ func NewWorkloadCredential() (WorkloadCredential, error) {
 func (w *WorkloadCredential) TokenSource(ctx context.Context, scopes ...string) oauth2.TokenSource {
 	return oauth2.ReuseTokenSource(nil, &tokenSource{
 		cfg: clientcredentials.Config{
-			ClientID: w.clientID,
-			TokenURL: w.tokenURL,
+			ClientID: w.ClientID,
+			TokenURL: w.TokenURL,
 			Scopes:   scopes,
 			EndpointParams: url.Values{
 				"client_assertion_type": []string{"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
@@ -59,7 +59,7 @@ func (w *WorkloadCredential) TokenSource(ctx context.Context, scopes ...string) 
 		},
 		ctx:       ctx,
 		mtx:       &sync.RWMutex{},
-		tokenFile: w.tokenFile,
+		tokenFile: w.TokenFile,
 	})
 }
 
