@@ -2,6 +2,7 @@ package kafkarator
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -26,7 +27,7 @@ type Connection interface {
 }
 
 // WriterCloser provides an interface for writing messages to the Kafka topic, as well
-// as closing it when the client is done with writing.
+// as closing it when the client is done writing.
 type WriterCloser interface {
 	// Close closes the underlying infrastructure, and renders this interface unusable for writing messages.
 	Close(ctx context.Context) error
@@ -35,6 +36,25 @@ type WriterCloser interface {
 	// that if there is an OpenTelemetry tracing span associated with the context, it is extracted
 	// and included in the header that is sent to Kafka.
 	Write(ctx context.Context, msg []byte, headers map[string][]byte) error
+}
+
+// ReadCloser provides an interface for reading messages from a Kafka topic, as well
+// as closing it when the client is done reading. Additionally, the act of fetching
+// messages and committing them ("committing" == registering the largest offset per
+// partition as the high watermark within the consumer group) is split giving the
+// client total control and responsibility.
+type ReadCloser interface {
+	// Close closes releases the underlying infrastructure, and renders this instance unusable.
+	Close(ctx context.Context) error
+
+	// Read returns a slice of messages at most maxMessages long. If the duration maxWait
+	// is exceeded before maxMessages have been fetched from the topic, the func will
+	// return with as many messages in the list as were fetched before timeout.
+	Read(ctx context.Context, maxMessages int, maxWait time.Duration) ([]Message, error)
+
+	// Commit commits the given messages within the consumer group. Internally, the max
+	// offset per partition is computed, and this offset+1 is set as high watermark.
+	Commit(ctx context.Context, messages []Message) error
 }
 
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is

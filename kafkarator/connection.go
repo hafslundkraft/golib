@@ -140,8 +140,8 @@ func kafkaMessage(b []byte, headers map[string][]byte) kafka.Message {
 	}
 
 	return kafka.Message{
-		Value:   b,
-		Headers: headerList,
+		Value:     b,
+		Headers:   headerList,
 	}
 }
 
