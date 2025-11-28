@@ -8,7 +8,11 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
-// Connection represents a connection to a Kafka service.
+// Connection represents a connection to a Kafka service. Connection (currently) only supports
+// message consumption via consumer group, so the group to use must be supplied. This means
+// that multiple copies of the service using this library can be started simultaneously, and Kafka
+// will automatically balance consumption between the consumers, i.e. the service can be scaled
+// horizontally. Of course, this only makes sense if the topic has more than one partition.
 type Connection interface {
 	// Test tests whether a connection to Kafka has been established. It is designed to be called early by the client
 	// application so that apps can fail early if something is wrong with the connection.
@@ -17,13 +21,16 @@ type Connection interface {
 	// Writer returns a writer for writing messages to Kafka.
 	Writer(topic string) (WriterCloser, error)
 
-	// Reader returns a channel that sends out messages from the given Kafka topic. This library (currently)
-	// only supports message consumption via consumer group, so the group to use must be supplied. This means
-	// that multiple copies of the service using this library can be started simultaneously, and Kafka will
-	// automatically balance consumption between the consumers, i.e. the service can be scaled horizontally. Of
-	// course, this only makes sense if the topic has more than one partition. Another consequence/feature is that
-	// Kafka automatically tracks the progress of the worker.
-	Reader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
+	Reader(topic, consumerGroup string) (ReadCloser, error)
+
+	// ChannelReader returns a channel that sends out messages from the given Kafka topic.
+	//
+	// If an internal error is raised, the error will be logged, and the channel will be closed.
+	//
+	// The high watermark offset is automatically committed for each message. This potentially has significant
+	// performance consequences. Also, it sacrifices control. Please use Reader if you are concerned about
+	// performance, or you want to explicitly commit offsets.
+	ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
 }
 
 // WriterCloser provides an interface for writing messages to the Kafka topic, as well
@@ -50,11 +57,16 @@ type ReadCloser interface {
 	// Read returns a slice of messages at most maxMessages long. If the duration maxWait
 	// is exceeded before maxMessages have been fetched from the topic, the func will
 	// return with as many messages in the list as were fetched before timeout.
-	Read(ctx context.Context, maxMessages int, maxWait time.Duration) ([]Message, error)
-
-	// Commit commits the given messages within the consumer group. Internally, the max
-	// offset per partition is computed, and this offset+1 is set as high watermark.
-	Commit(ctx context.Context, messages []Message) error
+	//
+	// commiter can be used to commit the high watermark per partition to the consumer group. It
+	// is up to the client if and when commiter is invoked. Committing often can affect
+	// performance considerably in a high-volume scenario, so the client could for example
+	// employ a strategy where commiter is only invoked every N iterations.
+	Read(
+		ctx context.Context,
+		maxMessages int,
+		maxWait time.Duration,
+	) (messages []Message, commiter func(ctx context.Context) error, err error)
 }
 
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is

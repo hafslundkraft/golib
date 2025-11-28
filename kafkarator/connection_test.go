@@ -69,7 +69,7 @@ func Test_connection_Consumer(t *testing.T) {
 	require.NoError(t, err, "failed to test connection")
 
 	// Now you can test Consumer
-	readChan, err := conn.Reader(ctx, topicName, "test-group")
+	readChan, err := conn.ChannelReader(ctx, topicName, "test-group")
 	require.NoError(t, err, "failed to create reader")
 	require.NotNil(t, t, readChan)
 

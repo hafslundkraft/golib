@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/segmentio/kafka-go"
@@ -64,7 +65,57 @@ func (c *connection) Writer(topic string) (WriterCloser, error) {
 	return newWriteCloser(w, producedMessagesCounter, c.logger), nil
 }
 
-func (c *connection) Reader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {
+func (c *connection) Reader(topic, consumerGroup string) (ReadCloser, error) {
+	m := c.tel.Meter()
+	lagGauge, err := m.Int64Gauge(gaugeLag)
+	if err != nil {
+		return nil, fmt.Errorf("while creating lag gauge: %w", err)
+	}
+
+	consumedMessagesCounter, err := c.tel.Meter().Int64Counter(meterConsumedMessages)
+	if err != nil {
+		return nil, fmt.Errorf("kafkarator msgCounter consumed messages: %w", err)
+	}
+
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: c.config.Brokers,
+		Topic:   topic,
+		GroupID: consumerGroup,
+		Dialer:  c.dialer,
+	})
+
+	return newReadCloser(reader, consumedMessagesCounter, lagGauge, c.logger), nil
+}
+
+func (c *connection) ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {
+	rc, err := c.Reader(topic, consumerGroup)
+	if err != nil {
+		return nil, fmt.Errorf("creating readCloser: %w", err)
+	}
+
+	outgoing := make(chan Message)
+
+	go func() {
+		defer rc.Close(ctx)
+		defer close(outgoing)
+		for {
+			messages, commiter, err := rc.Read(ctx, 1, 10*time.Second)
+			if err != nil {
+				return
+			}
+			for _, msg := range messages {
+				outgoing <- msg
+			}
+			if err := commiter(ctx); err != nil {
+				return
+			}
+		}
+	}()
+
+	return outgoing, nil
+}
+
+func (c *connection) ChannelReaderOld(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: c.config.Brokers,
 		Topic:   topic,
@@ -140,8 +191,8 @@ func kafkaMessage(b []byte, headers map[string][]byte) kafka.Message {
 	}
 
 	return kafka.Message{
-		Value:     b,
-		Headers:   headerList,
+		Value:   b,
+		Headers: headerList,
 	}
 }
 
