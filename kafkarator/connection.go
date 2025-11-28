@@ -8,8 +8,6 @@ import (
 
 	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/segmentio/kafka-go"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -107,75 +105,6 @@ func (c *connection) ChannelReader(ctx context.Context, topic, consumerGroup str
 				outgoing <- msg
 			}
 			if err := commiter(ctx); err != nil {
-				return
-			}
-		}
-	}()
-
-	return outgoing, nil
-}
-
-func (c *connection) ChannelReaderOld(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: c.config.Brokers,
-		Topic:   topic,
-		GroupID: consumerGroup,
-		Dialer:  c.dialer,
-	})
-
-	m := c.tel.Meter()
-	lagGauge, err := m.Int64Gauge(gaugeLag)
-	if err != nil {
-		return nil, fmt.Errorf("while creating lag gauge: %w", err)
-	}
-
-	consumedMessagesCounter, err := c.tel.Meter().Int64Counter(meterConsumedMessages)
-	if err != nil {
-		return nil, fmt.Errorf("kafkarator msgCounter consumed messages: %w", err)
-	}
-
-	outgoing := make(chan Message)
-
-	go func() {
-		defer close(outgoing)
-		defer func() {
-			if err := reader.Close(); err != nil {
-				c.logger.ErrorContext(ctx, fmt.Sprintf("failed to close reader %v", err))
-			}
-		}()
-
-		for {
-			msg, err := reader.FetchMessage(ctx)
-			if err != nil {
-				// Context canceled or error reading
-				if ctx.Err() != nil {
-					return
-				}
-				// Log error and continue (or handle differently based on your needs)
-				continue
-			}
-
-			select {
-			case outgoing <- message(&msg):
-				// Message sent successfully, commit it
-				if err := reader.CommitMessages(ctx, msg); err != nil {
-					// Context canceled during commit
-					if ctx.Err() != nil {
-						return
-					}
-					// Handle commit error (log, etc.)
-				}
-				lag := msg.HighWaterMark - msg.Offset - 1
-				lagGauge.Record(
-					ctx,
-					lag,
-					metric.WithAttributes(
-						attribute.KeyValue{Key: "partition", Value: attribute.StringValue(fmt.Sprint(msg.Partition))},
-					),
-				)
-				consumedMessagesCounter.Add(ctx, int64(1))
-			case <-ctx.Done():
-				// Context canceled while trying to send message
 				return
 			}
 		}

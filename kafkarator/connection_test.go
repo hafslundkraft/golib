@@ -3,65 +3,34 @@ package kafkarator
 import (
 	"bytes"
 	"context"
+	"github.com/hafslundkraft/golib/telemetry"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/hafslundkraft/golib/telemetry"
-	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	testkafka "github.com/testcontainers/testcontainers-go/modules/kafka"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 )
-
-const kafkaImage = "confluentinc/confluent-local:7.5.0"
 
 func Test_connection_Consumer(t *testing.T) {
 	ctx := context.Background()
 
-	// Set up the global text map propagator for W3C Trace Context
-	// This is required for trace context propagation to work
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
-
-	var buf bytes.Buffer
-
-	telClosed := false
-	tel, telClose := telemetry.New(
+	var telemetryBuf bytes.Buffer
+	telemetryProvider, telClose := telemetry.New(
 		ctx,
 		"kafka-test",
 		telemetry.WithLocal(true),
-		telemetry.WithLocalWriter(&buf))
-	defer func() {
-		if telClosed {
-			return
-		}
-		telClose(ctx)
-	}()
+		telemetry.WithLocalWriter(&telemetryBuf))
 
-	// Start Kafka container
-	_, brokers, closer := startTestContainer(ctx, t)
-	defer closer()
-
-	ctx, span := tel.Tracer().Start(ctx, "test_connection")
+	ctx, span := telemetryProvider.Tracer().Start(ctx, "test_connection")
 	defer span.End()
 
 	// Create a topic using kafka-go
 	topicName := "test-topic"
-	adminCloser := createTopic(t, topicName, brokers[0])
+	adminCloser := createTopic(t, topicName)
 	defer adminCloser()
 
-	// Create Config for New() - TLS is optional, so we can omit cert files for local testing
-	config := Config{
-		Brokers: brokers,
-	}
-
 	// Initialize connection
-	conn, err := New(config, tel)
+	conn, err := New(config, telemetryProvider)
 	require.NoError(t, err, "failed to create connection")
 
 	// Test the connection
@@ -127,59 +96,13 @@ func Test_connection_Consumer(t *testing.T) {
 
 	t.Logf("Trace context headers: traceparent=%s", string(traceparent))
 
+	telClose(ctx)
 	// wait 50ms, and then close telemetry in order to flush all output to buf
 	time.Sleep(50 * time.Millisecond)
-	err = telClose(ctx)
-	require.NoError(t, err)
-	telClosed = true
 
-	telemetryOutput := buf.String()
+	telemetryOutput := telemetryBuf.String()
 	require.Contains(t, telemetryOutput, "name=kafka_message_lag value=0 attributes: partition=0")
 	require.Contains(t, telemetryOutput, "name=messages_produced_total value=1")
 }
 
-func startTestContainer(
-	ctx context.Context,
-	t *testing.T,
-) (kafkaContainer *testkafka.KafkaContainer, brokers []string, closer func()) {
-	t.Helper()
-
-	var err error
-	kafkaContainer, err = testkafka.Run(
-		ctx,
-		kafkaImage,
-		testkafka.WithClusterID("test-cluster"),
-	)
-	require.NoError(t, err, "failed to start test container")
-
-	brokers, err = kafkaContainer.Brokers(ctx)
-	if err != nil {
-		require.NoError(t, err, "failed to get brokers")
-	}
-
-	closer = func() {
-		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
-			require.NoError(t, err, "failed to terminate container")
-		}
-	}
-
-	return
-}
-
-func createTopic(t *testing.T, topicName, broker string) func() error {
-	t.Helper()
-
-	adminConn, err := kafka.Dial("tcp", broker)
-	require.NoError(t, err, "failed to dial kafka")
-
-	err = adminConn.CreateTopics(kafka.TopicConfig{
-		Topic:             topicName,
-		NumPartitions:     1,
-		ReplicationFactor: 1,
-	})
-	if err != nil {
-		require.NoError(t, err, "failed to create topic")
-	}
-
-	return adminConn.Close
-}
+func Test_connection_Reader(t *testing.T) {}

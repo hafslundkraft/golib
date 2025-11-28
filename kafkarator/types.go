@@ -13,6 +13,12 @@ import (
 // that multiple copies of the service using this library can be started simultaneously, and Kafka
 // will automatically balance consumption between the consumers, i.e. the service can be scaled
 // horizontally. Of course, this only makes sense if the topic has more than one partition.
+//
+// Twp modes of reading are supported: ChannelReader and Reader. The former exposes a channel
+// that emits messages, while the latter exposes a writer. They support two different
+// use-cases where ChannelReader is best for low volume scenarios, while Reader is best for
+// high volume scenarios and/or situations where the client needs to control exactly how and
+// when high watermark offsets are committed.
 type Connection interface {
 	// Test tests whether a connection to Kafka has been established. It is designed to be called early by the client
 	// application so that apps can fail early if something is wrong with the connection.
@@ -21,6 +27,7 @@ type Connection interface {
 	// Writer returns a writer for writing messages to Kafka.
 	Writer(topic string) (WriterCloser, error)
 
+	// Reader returns a reader that is used to fetch messages from Kafka.
 	Reader(topic, consumerGroup string) (ReadCloser, error)
 
 	// ChannelReader returns a channel that sends out messages from the given Kafka topic.
@@ -28,8 +35,9 @@ type Connection interface {
 	// If an internal error is raised, the error will be logged, and the channel will be closed.
 	//
 	// The high watermark offset is automatically committed for each message. This potentially has significant
-	// performance consequences. Also, it sacrifices control. Please use Reader if you are concerned about
-	// performance, or you want to explicitly commit offsets.
+	// performance consequences. Also, it sacrifices control, for instance the client's handling of a message
+	// might fail its offset is committed. Please use Reader if you are concerned about performance, or you
+	// want to explicitly commit offsets.
 	ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
 }
 
