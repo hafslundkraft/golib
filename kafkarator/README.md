@@ -11,7 +11,7 @@ The main abstraction is the *Connection* which is created with *New*.
 ## Usage at a glance
 Ceremony exists in this package as with most packages: it must be configured, errors must be handled, etc. All such details
 are documented further down. Here, we want to give you an impression of what the package can offer once everything is
-set up.
+set up. For extra clarity, we've omitted all error handling from these sample, we assume that you know how to do that!
 
 ### Writing messages
 ```go
@@ -39,7 +39,7 @@ go func() {
         if !ok {
             // channel closed
         return
-        }
+	}
     handleMessage(msg)
 }
 }()
