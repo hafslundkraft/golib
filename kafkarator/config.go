@@ -7,17 +7,17 @@ import (
 )
 
 const (
-	// EnvBrokers is the environment variable for Kafka broker addresses (comma-separated)
-	EnvBrokers = "KAFKA_BROKERS"
+	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
+	envBrokers = "KAFKA_BROKERS"
 
-	// EnvCertFile is the environment variable for the Kafka certificate file path
-	EnvCertFile = "KAFKA_CERT_FILE"
+	// envCertFile is the environment variable for the Kafka certificate file path
+	envCertFile = "KAFKA_CERT_FILE"
 
-	// EnvKeyFile is the environment variable for the Kafka key file path
-	EnvKeyFile = "KAFKA_KEY_FILE"
+	// envKeyFile is the environment variable for the Kafka key file path
+	envKeyFile = "KAFKA_KEY_FILE"
 
-	// EnvCAFile is the environment variable for the Kafka CA file path
-	EnvCAFile = "KAFKA_CA_FILE"
+	// envCAFile is the environment variable for the Kafka CA file path
+	envCAFile = "KAFKA_CA_FILE"
 )
 
 // Config contains all necessary configuration needed to connect to Kafka.
@@ -38,24 +38,24 @@ type Config struct {
 // ConfigFromEnvVars loads and returns an instance with values that are fetched from environment variables defined
 // in this package. If any of these variables do not exist, an error is returned.
 func ConfigFromEnvVars() (Config, error) {
-	brokers := os.Getenv(EnvBrokers)
+	brokers := os.Getenv(envBrokers)
 	if brokers == "" {
-		return Config{}, fmt.Errorf("environment variable %s is not set", EnvBrokers)
+		return Config{}, fmt.Errorf("environment variable %s is not set", envBrokers)
 	}
 
-	certFile := os.Getenv(EnvCertFile)
+	certFile := os.Getenv(envCertFile)
 	if certFile == "" {
-		return Config{}, fmt.Errorf("environment variable %s is not set", EnvCertFile)
+		return Config{}, fmt.Errorf("environment variable %s is not set", envCertFile)
 	}
 
-	keyFile := os.Getenv(EnvKeyFile)
+	keyFile := os.Getenv(envKeyFile)
 	if keyFile == "" {
-		return Config{}, fmt.Errorf("environment variable %s is not set", EnvKeyFile)
+		return Config{}, fmt.Errorf("environment variable %s is not set", envKeyFile)
 	}
 
-	caFile := os.Getenv(EnvCAFile)
+	caFile := os.Getenv(envCAFile)
 	if caFile == "" {
-		return Config{}, fmt.Errorf("environment variable %s is not set", EnvCAFile)
+		return Config{}, fmt.Errorf("environment variable %s is not set", envCAFile)
 	}
 
 	// Split brokers by comma and trim whitespace

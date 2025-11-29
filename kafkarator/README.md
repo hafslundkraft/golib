@@ -6,8 +6,56 @@ The reason for you to use this package, instead of just using a library such as 
 which is used internally here), is that this package integrates with the module `github.com/hafslundkraft/golib/telemetry`,
 providing automatic OpenTelemetry trace propagation as well as standardized metrics.
 
-The main abstraction is the *Connection* which is created with *New*. For writing messages it exposes the connection
-exposes a func returning a func that can be used for writing. For reading a channel is exposed.
+The main abstraction is the *Connection* which is created with *New*. 
+
+## Usage at a glance
+Ceremony exists in this package as with most packages: it must be configured, errors must be handled, etc. All such details
+are documented further down. Here, we want to give you an impression of what the package can offer once everything is
+set up.
+
+### Writing messages
+```go
+ctx := context.Background()
+writer, _ := conn.Writer("my_topic")
+defer writer.Close(ctx)
+
+message := []byte("whatever you want marshaled as a byte slice. marshaling is your job!")
+headers := map[string][]byte{
+    "my-key": []byte("my-value"),
+}
+_ = writer.Write(ctx, message, headers)
+```
+
+### Reading messages with channel
+Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when
+the reader commits the high watermark is sacrificed; each message is committed automatically.
+```go
+ctx := context.Background()
+messageChan, _ := conn.ChannelReader(ctx, "my_topic", "my-consumer-group")
+
+go func() {
+    for {
+        msg, ok := <-messageChan
+        if !ok {
+            // channel closed
+        return
+        }
+    handleMessage(msg)
+}
+}()
+```
+
+### Reading messages with reader
+Read messages in batches, commit offsets only when you want. This is suitable for high-volume scenarios.
+```go
+ctx := context.Background()
+reader, err := conn.Reader("my-topic", "my-consumer-group")
+defer reader.Close(ctx)
+
+messages, committer, _ := reader.Read(ctx, 1000, 1*time.Second)
+_ = committer(ctx)
+handleManyMessages(messages)
+```
 
 ## Installation
 
@@ -111,107 +159,6 @@ func init() {
 
 **Note**: The `github.com/hafslundkraft/golib/telemetry` library may already configure this for you. Check your telemetry initialization code to avoid duplicate configuration.
 
-### Producer Side Sample with Tracing and General Usage
-
-When you produce a message with an active trace context, the library automatically injects the trace context into the Kafka message headers:
-
-```go
-import (
-    "context"
-    "github.com/hafslundkraft/golib/kafkarator"
-    "github.com/hafslundkraft/golib/telemetry"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Initialize telemetry
-    tel, shutdown := telemetry.New(ctx, "my-service")
-    defer shutdown(ctx)
-
-    // Create Kafka connection with telemetry
-    config := kafkarator.Config{
-        Brokers: []string{"localhost:9092"},
-    }
-    conn, err := kafkarator.New(config, tel)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Create producer
-	writerFunc, closerFunc, err := conn.Writer("my-topic")
-    if err != nil {
-        log.Fatal(err)
-    }
-	defer closerFunc(ctx)
-
-    // Start a span (or use existing span from incoming request)
-    ctx, span := tel.Tracer().Start(ctx, "produce-message")
-    defer span.End()
-
-    // Produce message - trace context is automatically injected
-    msgBytes := []byte(`{"event": "user.created"}`)
-	headers := map[string][]byte{"key": []byte("value")}
-    if err := writerFunc(ctx, msgBytes, headers); err != nil {
-        log.Fatal(err)	
-    }
-}
-```
-
-### Consumer Side Sample with Tracing and General Usage
-
-On the consumer side, extract the trace context from received messages to continue the distributed trace:
-
-```go
-func main() {
-    ctx := context.Background()
-
-    // Initialize telemetry
-    tel, shutdown := telemetry.New(ctx, "consumer-service")
-    defer shutdown(ctx)
-
-    // Create Kafka connection with telemetry
-    config := kafkarator.Config{
-        Brokers: []string{"localhost:9092"},
-    }
-    conn, err := kafkarator.New(config, tel)
-    if err != nil {
-        log.Fatal(err)
-    }
-	
-    messageChan, err := conn.Reader(ctx, "my-topic", "my-consumer-group")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    for msg := range messageChan {
-        // Extract trace context from message headers
-        msgCtx := msg.ExtractTraceContext(ctx)
-
-        // Start a new span as a child of the extracted trace
-        msgCtx, span := tel.Tracer().Start(msgCtx, "process-message")
-
-        // Process the message - all operations will be part of the same trace
-        processMessage(msgCtx, msg.Value)
-
-        span.End()
-    }
-}
-
-func processMessage(ctx context.Context, data []byte) {
-    // This function and any downstream calls using ctx will be part of the trace
-    // ...
-}
-```
-
-### How It Works
-
-1. **Producer**: When `Produce()` is called with a context that has an active span, the library uses OpenTelemetry's `TextMapPropagator` to inject trace context (trace ID, span ID, trace flags) into the Kafka message headers.
-
-2. **Consumer**: When processing messages, call `msg.ExtractTraceContext(ctx)` to extract the trace context from the message headers. This creates a new context that continues the distributed trace.
-
-3. **No Telemetry**: If no telemetry provider is configured (i.e., `tel` is `nil`), the library works normally without trace propagation.
-
 ### Trace Context Headers
 
 The library uses the W3C Trace Context standard headers:
@@ -223,9 +170,8 @@ These headers are automatically managed by OpenTelemetry and don't require manua
 ## Trace Metrics
 The following metric counters and gauges are automatically maintained:
 * **messages_produced_total** (counter): The total number of messages that have been written to the Kafka topic.
-* **kafka_lag_partition_N** (gauge): N here is the total number of partitions on the topic - 1. For instance,
-    if the topic has 16 partitions, the gauges named `kafka_lag_partition_0`, `kafka_lag_partition_1` ... `kafka_lag_partition_15`
-    will be maintained. Each gauge measures the number of messages remaining on the partition that service hasn't read yet.
+* **kafka_lag_partition** (gauge): Measures the number of messages remaining on the partition that service hasn't read 
+    yet. The partition is question is added as a attribute on the gauge.
 
 ## Testing
 

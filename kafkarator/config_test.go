@@ -9,10 +9,10 @@ import (
 
 func TestConfigFromEnvVars_Success(t *testing.T) {
 	// Set up environment variables
-	t.Setenv(EnvBrokers, "broker1:9092,broker2:9092,broker3:9092")
-	t.Setenv(EnvCertFile, "/path/to/cert.pem")
-	t.Setenv(EnvKeyFile, "/path/to/key.pem")
-	t.Setenv(EnvCAFile, "/path/to/ca.pem")
+	t.Setenv(envBrokers, "broker1:9092,broker2:9092,broker3:9092")
+	t.Setenv(envCertFile, "/path/to/cert.pem")
+	t.Setenv(envKeyFile, "/path/to/key.pem")
+	t.Setenv(envCAFile, "/path/to/ca.pem")
 
 	config, err := ConfigFromEnvVars()
 
@@ -25,10 +25,10 @@ func TestConfigFromEnvVars_Success(t *testing.T) {
 
 func TestConfigFromEnvVars_SingleBroker(t *testing.T) {
 	// Set up environment variables with single broker
-	t.Setenv(EnvBrokers, "localhost:9092")
-	t.Setenv(EnvCertFile, "/cert.pem")
-	t.Setenv(EnvKeyFile, "/key.pem")
-	t.Setenv(EnvCAFile, "/ca.pem")
+	t.Setenv(envBrokers, "localhost:9092")
+	t.Setenv(envCertFile, "/cert.pem")
+	t.Setenv(envKeyFile, "/key.pem")
+	t.Setenv(envCAFile, "/ca.pem")
 
 	config, err := ConfigFromEnvVars()
 
@@ -38,10 +38,10 @@ func TestConfigFromEnvVars_SingleBroker(t *testing.T) {
 
 func TestConfigFromEnvVars_BrokersWithWhitespace(t *testing.T) {
 	// Test that whitespace around broker names is trimmed
-	t.Setenv(EnvBrokers, " broker1:9092 , broker2:9092 ,  broker3:9092  ")
-	t.Setenv(EnvCertFile, "/path/to/cert.pem")
-	t.Setenv(EnvKeyFile, "/path/to/key.pem")
-	t.Setenv(EnvCAFile, "/path/to/ca.pem")
+	t.Setenv(envBrokers, " broker1:9092 , broker2:9092 ,  broker3:9092  ")
+	t.Setenv(envCertFile, "/path/to/cert.pem")
+	t.Setenv(envKeyFile, "/path/to/key.pem")
+	t.Setenv(envCAFile, "/path/to/ca.pem")
 
 	config, err := ConfigFromEnvVars()
 
@@ -51,89 +51,89 @@ func TestConfigFromEnvVars_BrokersWithWhitespace(t *testing.T) {
 
 func TestConfigFromEnvVars_MissingBrokers(t *testing.T) {
 	// Ensure brokers is not set
-	os.Unsetenv(EnvBrokers)
-	t.Setenv(EnvCertFile, "/path/to/cert.pem")
-	t.Setenv(EnvKeyFile, "/path/to/key.pem")
-	t.Setenv(EnvCAFile, "/path/to/ca.pem")
+	os.Unsetenv(envBrokers)
+	t.Setenv(envCertFile, "/path/to/cert.pem")
+	t.Setenv(envKeyFile, "/path/to/key.pem")
+	t.Setenv(envCAFile, "/path/to/ca.pem")
 
 	config, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), EnvBrokers)
+	require.Contains(t, err.Error(), envBrokers)
 	require.Empty(t, config.Brokers)
 }
 
 func TestConfigFromEnvVars_MissingCertFile(t *testing.T) {
-	t.Setenv(EnvBrokers, "broker1:9092")
-	os.Unsetenv(EnvCertFile)
-	t.Setenv(EnvKeyFile, "/path/to/key.pem")
-	t.Setenv(EnvCAFile, "/path/to/ca.pem")
+	t.Setenv(envBrokers, "broker1:9092")
+	os.Unsetenv(envCertFile)
+	t.Setenv(envKeyFile, "/path/to/key.pem")
+	t.Setenv(envCAFile, "/path/to/ca.pem")
 
 	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), EnvCertFile)
+	require.Contains(t, err.Error(), envCertFile)
 }
 
 func TestConfigFromEnvVars_MissingKeyFile(t *testing.T) {
-	t.Setenv(EnvBrokers, "broker1:9092")
-	t.Setenv(EnvCertFile, "/path/to/cert.pem")
-	os.Unsetenv(EnvKeyFile)
-	t.Setenv(EnvCAFile, "/path/to/ca.pem")
+	t.Setenv(envBrokers, "broker1:9092")
+	t.Setenv(envCertFile, "/path/to/cert.pem")
+	os.Unsetenv(envKeyFile)
+	t.Setenv(envCAFile, "/path/to/ca.pem")
 
 	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), EnvKeyFile)
+	require.Contains(t, err.Error(), envKeyFile)
 }
 
 func TestConfigFromEnvVars_MissingCAFile(t *testing.T) {
-	t.Setenv(EnvBrokers, "broker1:9092")
-	t.Setenv(EnvCertFile, "/path/to/cert.pem")
-	t.Setenv(EnvKeyFile, "/path/to/key.pem")
-	os.Unsetenv(EnvCAFile)
+	t.Setenv(envBrokers, "broker1:9092")
+	t.Setenv(envCertFile, "/path/to/cert.pem")
+	t.Setenv(envKeyFile, "/path/to/key.pem")
+	os.Unsetenv(envCAFile)
 
 	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), EnvCAFile)
+	require.Contains(t, err.Error(), envCAFile)
 }
 
 func TestConfigFromEnvVars_AllMissing(t *testing.T) {
 	// Ensure all env vars are not set
-	os.Unsetenv(EnvBrokers)
-	os.Unsetenv(EnvCertFile)
-	os.Unsetenv(EnvKeyFile)
-	os.Unsetenv(EnvCAFile)
+	os.Unsetenv(envBrokers)
+	os.Unsetenv(envCertFile)
+	os.Unsetenv(envKeyFile)
+	os.Unsetenv(envCAFile)
 
 	config, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), EnvBrokers)
+	require.Contains(t, err.Error(), envBrokers)
 	require.Empty(t, config.Brokers)
 }
 
 func TestConfigFromEnvVars_EmptyBrokers(t *testing.T) {
 	// Test empty string vs unset
-	t.Setenv(EnvBrokers, "")
-	t.Setenv(EnvCertFile, "/path/to/cert.pem")
-	t.Setenv(EnvKeyFile, "/path/to/key.pem")
-	t.Setenv(EnvCAFile, "/path/to/ca.pem")
+	t.Setenv(envBrokers, "")
+	t.Setenv(envCertFile, "/path/to/cert.pem")
+	t.Setenv(envKeyFile, "/path/to/key.pem")
+	t.Setenv(envCAFile, "/path/to/ca.pem")
 
 	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), EnvBrokers)
+	require.Contains(t, err.Error(), envBrokers)
 }
 
 func TestConfigFromEnvVars_EmptyPaths(t *testing.T) {
-	t.Setenv(EnvBrokers, "broker1:9092")
-	t.Setenv(EnvCertFile, "")
-	t.Setenv(EnvKeyFile, "/path/to/key.pem")
-	t.Setenv(EnvCAFile, "/path/to/ca.pem")
+	t.Setenv(envBrokers, "broker1:9092")
+	t.Setenv(envCertFile, "")
+	t.Setenv(envKeyFile, "/path/to/key.pem")
+	t.Setenv(envCAFile, "/path/to/ca.pem")
 
 	_, err := ConfigFromEnvVars()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), EnvCertFile)
+	require.Contains(t, err.Error(), envCertFile)
 }
