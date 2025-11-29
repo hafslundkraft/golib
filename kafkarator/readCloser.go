@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.opentelemetry.io/otel/attribute"
 	"log/slog"
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
-func newReadCloser(r *kafka.Reader, rmc metric.Int64Counter, lagGauge metric.Int64Gauge, logger *slog.Logger) ReadCloser {
+func newReadCloser(
+	r *kafka.Reader,
+	rmc metric.Int64Counter,
+	lagGauge metric.Int64Gauge,
+	logger *slog.Logger,
+) ReadCloser {
 	return &readCloser{
 		reader:              r,
 		readMessagesCounter: rmc,

@@ -14,11 +14,13 @@ import (
 // will automatically balance consumption between the consumers, i.e. the service can be scaled
 // horizontally. Of course, this only makes sense if the topic has more than one partition.
 //
-// Twp modes of reading are supported: ChannelReader and Reader. The former exposes a channel
-// that emits messages, while the latter exposes a writer. They support two different
+// Two modes of reading are supported: ChannelReader and Reader. The former exposes a channel
+// that emits messages, while the latter exposes a reader. They support two different
 // use-cases where ChannelReader is best for low volume scenarios, while Reader is best for
 // high volume scenarios and/or situations where the client needs to control exactly how and
 // when high watermark offsets are committed.
+//
+// For writing, a writer is exposed. It supported writing messages, one at a time.
 type Connection interface {
 	// Test tests whether a connection to Kafka has been established. It is designed to be called early by the client
 	// application so that apps can fail early if something is wrong with the connection.
@@ -30,7 +32,7 @@ type Connection interface {
 	// Reader returns a reader that is used to fetch messages from Kafka.
 	Reader(topic, consumerGroup string) (ReadCloser, error)
 
-	// ChannelReader returns a channel that sends out messages from the given Kafka topic.
+	// ChannelReader returns a channel that emits messages from the given Kafka topic.
 	//
 	// If an internal error is raised, the error will be logged, and the channel will be closed.
 	//

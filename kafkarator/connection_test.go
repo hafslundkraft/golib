@@ -3,15 +3,18 @@ package kafkarator
 import (
 	"bytes"
 	"context"
-	"github.com/hafslundkraft/golib/telemetry"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/stretchr/testify/require"
 )
 
-func Test_connection_Consumer(t *testing.T) {
+// Test_connection_ChannelConsumer is a test for the basics. We test that the channel
+// reader works as expected. Also, we test that the writer writes as expected. Finally,
+// we check that OpenTelemetry gauges and counters are set as expected.
+func Test_connection_ChannelConsumer(t *testing.T) {
 	ctx := context.Background()
 
 	var telemetryBuf bytes.Buffer
@@ -105,4 +108,94 @@ func Test_connection_Consumer(t *testing.T) {
 	require.Contains(t, telemetryOutput, "name=messages_produced_total value=1")
 }
 
-func Test_connection_Reader(t *testing.T) {}
+// Test_connection_committer is a test for Reader. Specifically, we test that the
+// logic around committing and not commtting to a consumer group works as expected.
+func Test_connection_committer(t *testing.T) {
+	ctx := context.Background()
+
+	var telemetryBuf bytes.Buffer
+	telemetryProvider, telClose := telemetry.New(
+		ctx,
+		"kafka-test",
+		telemetry.WithLocal(true),
+		telemetry.WithLocalWriter(&telemetryBuf))
+	defer telClose(ctx)
+
+	// Create a topic using kafka-go
+	topicName := "reader-consumer"
+	adminCloser := createTopic(t, topicName)
+	defer adminCloser()
+
+	// Initialize connection
+	conn, err := New(config, telemetryProvider)
+	require.NoError(t, err, "failed to create connection")
+
+	// Test the connection
+	err = conn.Test(ctx)
+	require.NoError(t, err, "failed to test connection")
+
+	msg1 := []byte("message 1")
+	headers1 := map[string][]byte{
+		"nr": []byte("1"),
+	}
+
+	msg2 := []byte("message 2")
+	headers2 := map[string][]byte{
+		"nr": []byte("2"),
+	}
+
+	writer, err := conn.Writer(topicName)
+	require.NoError(t, err)
+	err = writer.Write(ctx, msg1, headers1)
+	require.NoError(t, err)
+	err = writer.Write(ctx, msg2, headers2)
+	require.NoError(t, err)
+	err = writer.Close(ctx)
+	require.NoError(t, err)
+
+	group1 := "consumer-group-1"
+	group2 := "consumer-group-2"
+
+	longTime := 1 * time.Hour
+
+	// read message for group1 without committing, we should get the same message
+	// for this consumer group a second time
+	reader, err := conn.Reader(topicName, group1)
+	require.NoError(t, err)
+	messages, _, err := reader.Read(ctx, 1, longTime)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "1", string(messages[0].Headers["nr"]))
+	require.NoError(t, reader.Close(ctx))
+
+	// read message for group2, this time we commit. We should
+	// not get the same message again
+	reader, err = conn.Reader(topicName, group2)
+	require.NoError(t, err)
+	messages, committer, err := reader.Read(ctx, 1, longTime)
+	require.NoError(t, err)
+	require.NoError(t, committer(ctx))
+	require.Len(t, messages, 1)
+	require.Equal(t, "1", string(messages[0].Headers["nr"]))
+	require.NoError(t, reader.Close(ctx))
+
+	// read group1 a second time, we should get the first message again
+	// since we didn't commit the first time
+	reader, err = conn.Reader(topicName, group1)
+	require.NoError(t, err)
+	messages, _, err = reader.Read(ctx, 1, longTime)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "1", string(messages[0].Headers["nr"]))
+	require.NoError(t, reader.Close(ctx))
+
+	// read group2 a second time, we should get a new message since
+	// we committed the first message
+	reader, err = conn.Reader(topicName, group2)
+	require.NoError(t, err)
+	messages, _, err = reader.Read(ctx, 1, longTime)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "2", string(messages[0].Headers["nr"]))
+	require.NoError(t, reader.Close(ctx))
+}

@@ -2,14 +2,15 @@ package kafkarator
 
 import (
 	"context"
+	"log"
+	"os"
+	"testing"
+
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/require"
 	testkafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	"log"
-	"os"
-	"testing"
 )
 
 const kafkaImage = "confluentinc/confluent-local:7.5.0"
