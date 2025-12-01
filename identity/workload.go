@@ -2,9 +2,12 @@ package identity
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,7 +92,7 @@ func (t *TokenSource) Token() (*oauth2.Token, error) {
 }
 
 func (w *TokenSource) refreshAssertion() error {
-	// The code in this function is copied from https://github.com/Azure/azure-sdk-for-go/blob/d1a1a45f72a0a35372ebfeaaf042bdef642365df/sdk/azidentity/workload_identity.go#L132
+	// The code in this function is adapted from https://github.com/Azure/azure-sdk-for-go/blob/d1a1a45f72a0a35372ebfeaaf042bdef642365df/sdk/azidentity/workload_identity.go#L132
 	// which is licensed under the MIT license included here:
 	/*
 		MIT License
@@ -126,14 +129,40 @@ func (w *TokenSource) refreshAssertion() error {
 			if err != nil {
 				return fmt.Errorf("reading service account token file: %w", err)
 			}
-			w.cfg.EndpointParams.Set("client_assertion", string(content))
-			// Kubernetes rotates service account tokens when they reach 80% of their total TTL. The shortest TTL
-			// is 1 hour. That implies the token we just read is valid for at least 12 minutes (20% of 1 hour),
-			// but we add some margin for safety.
-			w.expires = now.Add(10 * time.Minute)
+			assertion := string(content)
+			w.cfg.EndpointParams.Set("client_assertion", assertion)
+			exp, err := readExpiry(assertion)
+			if err != nil {
+				return fmt.Errorf("parsing service account token: %w", err)
+			}
+			// Some margin for safety
+			w.expires = exp.Add(-30 * time.Second)
 		}
 	} else {
 		defer w.mtx.RUnlock()
 	}
 	return nil
+}
+
+// readExpiry reads the exp claim from a raw JWT input and returns the parsed
+// time.Time without any further validation.
+func readExpiry(rawToken string) (time.Time, error) {
+	parts := strings.SplitN(rawToken, ".", 3)
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("expected 3 parts, got %d", len(parts))
+	}
+
+	token, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("base64 decoding token: %w", err)
+	}
+
+	var c struct {
+		Expiry int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(token, &c); err != nil {
+		return time.Time{}, fmt.Errorf("parsing expiry: %w", err)
+	}
+
+	return time.Unix(c.Expiry, 0).UTC(), nil
 }
