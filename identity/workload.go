@@ -19,7 +19,6 @@ import (
 // account token and using it as a client assertion to fetch a HAPPI token.
 type WorkloadCredential struct {
 	TokenFile string
-	ClientID  string
 	TokenURL  string
 }
 
@@ -28,13 +27,9 @@ var _ Credential = (*WorkloadCredential)(nil)
 // NewWorkloadCredential creates a new WorkloadCredential based on configuration
 // set by the HAPPI platform in the environment.
 func NewWorkloadCredential() (WorkloadCredential, error) {
-	clientID := os.Getenv("HAPPI_CLIENT_ID")
-	if clientID == "" {
-		return WorkloadCredential{}, fmt.Errorf("HAPPI_CLIENT_ID not set")
-	}
 	clientTokenFilePath := os.Getenv("HAPPI_SERVICE_ACCOUNT_TOKEN_PATH")
 	if clientTokenFilePath == "" {
-		return WorkloadCredential{}, fmt.Errorf("HAPPI_SERVICE_ACCOUNT_TOKEN_PATH not set")
+		clientTokenFilePath = "/happi/idp-token" //nolint:gosec // This is not a secret
 	}
 	tokenURL := os.Getenv("HAPPI_TOKEN_URL")
 	if tokenURL == "" {
@@ -42,7 +37,6 @@ func NewWorkloadCredential() (WorkloadCredential, error) {
 	}
 
 	return WorkloadCredential{
-		ClientID:  clientID,
 		TokenURL:  tokenURL,
 		TokenFile: clientTokenFilePath,
 	}, nil
@@ -52,7 +46,6 @@ func NewWorkloadCredential() (WorkloadCredential, error) {
 func (w *WorkloadCredential) TokenSource(ctx context.Context, scopes ...string) oauth2.TokenSource {
 	return oauth2.ReuseTokenSource(nil, &TokenSource{
 		cfg: clientcredentials.Config{
-			ClientID: w.ClientID,
 			TokenURL: w.TokenURL,
 			Scopes:   scopes,
 			EndpointParams: url.Values{
