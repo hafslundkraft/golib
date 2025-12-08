@@ -48,16 +48,10 @@ func dialer(c Config) (*kafka.Dialer, error) {
 		serverName := extractHostname(c.Brokers[0])
 
 		d.TLS = &tls.Config{
-			Certificates: []tls.Certificate{keypair},
-			RootCAs:      caCertPool,
-			ServerName:   serverName, // Required for proper certificate validation
-			MinVersion:   tls.VersionTLS12,
-			// Enable verification callback for debugging
-			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-				// This is called after successful verification
-				// If we get here, the cert chain is valid
-				return nil
-			},
+			Certificates:       []tls.Certificate{keypair},
+			RootCAs:            caCertPool,
+			ServerName:         serverName, // Required for proper certificate validation
+			MinVersion:         tls.VersionTLS12,
 			InsecureSkipVerify: false, // Keep verification enabled
 		}
 	}

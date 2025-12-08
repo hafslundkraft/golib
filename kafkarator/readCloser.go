@@ -40,14 +40,10 @@ func (rc *readCloser) Close(ctx context.Context) error {
 		return nil // It's ok to close multiple times.
 	}
 
-	logger := rc.tel.Logger()
-
 	if err := rc.reader.Close(); err != nil {
-		logger.ErrorContext(ctx, fmt.Sprintf("error closing reader %v", err))
 		return fmt.Errorf("error closing reader: %w", err)
 	}
 	rc.closed = true
-	logger.InfoContext(ctx, fmt.Sprintf("closed reader %v", rc.reader))
 	return nil
 }
 
@@ -62,10 +58,10 @@ func (rc *readCloser) Read(
 	messages = make([]Message, 0, maxMessages)
 	deadline := time.Now().Add(maxWait)
 
-	partitionMap := map[int]int64{}
+	partitionOffsets := map[int]int64{}
 	commiter = func(ctx context.Context) error {
 		topic := rc.reader.Config().Topic
-		for p, o := range partitionMap {
+		for p, o := range partitionOffsets {
 			msg := kafka.Message{
 				Topic:     topic,
 				Partition: p,
@@ -78,7 +74,7 @@ func (rc *readCloser) Read(
 		return nil
 	}
 
-	lagMap := map[int]int64{}
+	partitionLags := map[int]int64{}
 
 	for len(messages) < maxMessages {
 		remaining := time.Until(deadline)
@@ -89,17 +85,6 @@ func (rc *readCloser) Read(
 		readCtx, cancel := context.WithTimeout(spanCtx, remaining)
 		msg, err := rc.reader.FetchMessage(readCtx)
 		cancel()
-
-		var hwm int64
-		var ok bool
-		if hwm, ok = partitionMap[msg.Partition]; !ok {
-			hwm = -1
-		}
-		if msg.Offset > hwm {
-			partitionMap[msg.Partition] = msg.Offset
-			lag := msg.HighWaterMark - msg.Offset - 1
-			lagMap[msg.Partition] = lag
-		}
 
 		if err != nil {
 			if errors.Is(readCtx.Err(), context.DeadlineExceeded) {
@@ -114,10 +99,21 @@ func (rc *readCloser) Read(
 			return messages, commiter, fmt.Errorf("error fetching message: %w", err)
 		}
 
+		var hwm int64
+		var ok bool
+		if hwm, ok = partitionOffsets[msg.Partition]; !ok {
+			hwm = -1
+		}
+		if msg.Offset > hwm {
+			partitionOffsets[msg.Partition] = msg.Offset
+			lag := msg.HighWaterMark - msg.Offset - 1
+			partitionLags[msg.Partition] = lag
+		}
+
 		messages = append(messages, message(&msg))
 
 		rc.readMessagesCounter.Add(spanCtx, 1)
-		for p, l := range lagMap {
+		for p, l := range partitionLags {
 			rc.lagGauge.Record(
 				spanCtx,
 				l,

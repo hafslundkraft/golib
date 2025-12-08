@@ -45,7 +45,7 @@ func (c *connection) Test(ctx context.Context) error {
 	return nil
 }
 
-func (c *connection) Writer(topic string) (WriterCloser, error) {
+func (c *connection) Writer(topic string) (WriteCloser, error) {
 	producedMessagesCounter, err := c.tel.Meter().Int64Counter(meterProducedMessages)
 	if err != nil {
 		return nil, fmt.Errorf("kafkarator msgCounter produced messages: %w", err)
@@ -108,31 +108,4 @@ func (c *connection) ChannelReader(ctx context.Context, topic, consumerGroup str
 	}()
 
 	return outgoing, nil
-}
-
-func kafkaMessage(b []byte, headers map[string][]byte) kafka.Message {
-	headerList := make([]kafka.Header, 0, len(headers))
-	for k, v := range headers {
-		headerList = append(headerList, kafka.Header{Key: k, Value: v})
-	}
-
-	return kafka.Message{
-		Value:   b,
-		Headers: headerList,
-	}
-}
-
-func message(m *kafka.Message) Message {
-	headers := make(map[string][]byte)
-	for _, header := range m.Headers {
-		headers[header.Key] = header.Value
-	}
-	return Message{
-		Topic:     m.Topic,
-		Partition: m.Partition,
-		Offset:    m.Offset,
-		Key:       m.Key,
-		Value:     m.Value,
-		Headers:   headers,
-	}
 }

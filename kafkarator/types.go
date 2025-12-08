@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -27,7 +28,7 @@ type Connection interface {
 	Test(ctx context.Context) error
 
 	// Writer returns a writer for writing messages to Kafka.
-	Writer(topic string) (WriterCloser, error)
+	Writer(topic string) (WriteCloser, error)
 
 	// Reader returns a reader that is used to fetch messages from Kafka.
 	Reader(topic, consumerGroup string) (ReadCloser, error)
@@ -43,9 +44,9 @@ type Connection interface {
 	ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
 }
 
-// WriterCloser provides an interface for writing messages to the Kafka topic, as well
+// WriteCloser provides an interface for writing messages to the Kafka topic, as well
 // as closing it when the client is done writing.
-type WriterCloser interface {
+type WriteCloser interface {
 	// Close closes the underlying infrastructure, and renders this interface unusable for writing messages.
 	Close(ctx context.Context) error
 
@@ -122,4 +123,31 @@ func (m *Message) ExtractTraceContext(ctx context.Context) context.Context {
 
 	// Extract trace context from headers and create new context
 	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
+
+func kafkaMessage(b []byte, headers map[string][]byte) kafka.Message {
+	headerList := make([]kafka.Header, 0, len(headers))
+	for k, v := range headers {
+		headerList = append(headerList, kafka.Header{Key: k, Value: v})
+	}
+
+	return kafka.Message{
+		Value:   b,
+		Headers: headerList,
+	}
+}
+
+func message(m *kafka.Message) Message {
+	headers := make(map[string][]byte, len(m.Headers))
+	for _, header := range m.Headers {
+		headers[header.Key] = header.Value
+	}
+	return Message{
+		Topic:     m.Topic,
+		Partition: m.Partition,
+		Offset:    m.Offset,
+		Key:       m.Key,
+		Value:     m.Value,
+		Headers:   headers,
+	}
 }

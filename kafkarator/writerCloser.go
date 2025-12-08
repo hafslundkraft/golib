@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
-func newWriteCloser(w *kafka.Writer, pmc metric.Int64Counter, tel *telemetry.Provider) WriterCloser {
+func newWriteCloser(w *kafka.Writer, pmc metric.Int64Counter, tel *telemetry.Provider) WriteCloser {
 	return &writerCloser{
 		writer:                  w,
 		tel:                     tel,
