@@ -83,7 +83,7 @@ func testConnection(ctx context.Context, brokers []string, dialer *kafka.Dialer)
 	}
 	defer conn.Close()
 
-	// Try to get broker metadata to verify the connection works
+	// Try to get broker metadata to verify the Connection works
 	_, err = conn.Brokers()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve broker metadata: %w", err)

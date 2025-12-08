@@ -2,83 +2,11 @@ package kafkarator
 
 import (
 	"context"
-	"time"
 
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
-
-// Connection represents a connection to a Kafka service. Connection (currently) only supports
-// message consumption via consumer group, so the group to use must be supplied. This means
-// that multiple copies of the service using this library can be started simultaneously, and Kafka
-// will automatically balance consumption between the consumers, i.e. the service can be scaled
-// horizontally. Of course, this only makes sense if the topic has more than one partition.
-//
-// Two modes of reading are supported: ChannelReader and Reader. The former exposes a channel
-// that emits messages, while the latter exposes a reader. They support two different
-// use-cases where ChannelReader is best for low volume scenarios, while Reader is best for
-// high volume scenarios and/or situations where the client needs to control exactly how and
-// when high watermark offsets are committed.
-//
-// For writing, a writer is exposed. It supported writing messages, one at a time.
-type Connection interface {
-	// Test tests whether a connection to Kafka has been established. It is designed to be called early by the client
-	// application so that apps can fail early if something is wrong with the connection.
-	Test(ctx context.Context) error
-
-	// Writer returns a writer for writing messages to Kafka.
-	Writer(topic string) (WriteCloser, error)
-
-	// Reader returns a reader that is used to fetch messages from Kafka.
-	Reader(topic, consumerGroup string) (ReadCloser, error)
-
-	// ChannelReader returns a channel that emits messages from the given Kafka topic.
-	//
-	// If an internal error is raised, the error will be logged, and the channel will be closed.
-	//
-	// The high watermark offset is automatically committed for each message. This potentially has significant
-	// performance consequences. Also, it sacrifices control, for instance the client's handling of a message
-	// might fail its offset is committed. Please use Reader if you are concerned about performance, or you
-	// want to explicitly commit offsets.
-	ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error)
-}
-
-// WriteCloser provides an interface for writing messages to the Kafka topic, as well
-// as closing it when the client is done writing.
-type WriteCloser interface {
-	// Close closes the underlying infrastructure, and renders this interface unusable for writing messages.
-	Close(ctx context.Context) error
-
-	// Write writes the given message with headers to the topic. An important side effect is
-	// that if there is an OpenTelemetry tracing span associated with the context, it is extracted
-	// and included in the header that is sent to Kafka.
-	Write(ctx context.Context, msg []byte, headers map[string][]byte) error
-}
-
-// ReadCloser provides an interface for reading messages from a Kafka topic, as well
-// as closing it when the client is done reading. Additionally, the act of fetching
-// messages and committing them ("committing" == registering the largest offset per
-// partition as the high watermark within the consumer group) is split giving the
-// client total control and responsibility.
-type ReadCloser interface {
-	// Close closes releases the underlying infrastructure, and renders this instance unusable.
-	Close(ctx context.Context) error
-
-	// Read returns a slice of messages at most maxMessages long. If the duration maxWait
-	// is exceeded before maxMessages have been fetched from the topic, the func will
-	// return with as many messages in the list as were fetched before timeout.
-	//
-	// commiter can be used to commit the high watermark per partition to the consumer group. It
-	// is up to the client if and when commiter is invoked. Committing often can affect
-	// performance considerably in a high-volume scenario, so the client could for example
-	// employ a strategy where commiter is only invoked every N iterations.
-	Read(
-		ctx context.Context,
-		maxMessages int,
-		maxWait time.Duration,
-	) (messages []Message, commiter func(ctx context.Context) error, err error)
-}
 
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is
 // implemented by the underlying kafka library. We choose to expose our own type in order to insulate the consumer from

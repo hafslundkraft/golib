@@ -12,13 +12,13 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-func newReadCloser(
+func newReader(
 	r *kafka.Reader,
 	rmc metric.Int64Counter,
 	lagGauge metric.Int64Gauge,
 	tel *telemetry.Provider,
-) ReadCloser {
-	return &readCloser{
+) *Reader {
+	return &Reader{
 		reader:              r,
 		readMessagesCounter: rmc,
 		lagGauge:            lagGauge,
@@ -27,7 +27,12 @@ func newReadCloser(
 	}
 }
 
-type readCloser struct {
+// Reader provides an interface for reading messages from a Kafka topic, as well
+// as closing it when the client is done reading. Additionally, the act of fetching
+// messages and committing them ("committing" == registering the largest offset per
+// partition as the high watermark within the consumer group) is split giving the
+// client total control and responsibility.
+type Reader struct {
 	reader              *kafka.Reader
 	readMessagesCounter metric.Int64Counter
 	lagGauge            metric.Int64Gauge
@@ -35,7 +40,8 @@ type readCloser struct {
 	closed              bool
 }
 
-func (rc *readCloser) Close(ctx context.Context) error {
+// Close closes releases the underlying infrastructure, and renders this instance unusable.
+func (rc *Reader) Close(ctx context.Context) error {
 	if rc.closed {
 		return nil // It's ok to close multiple times.
 	}
@@ -47,12 +53,20 @@ func (rc *readCloser) Close(ctx context.Context) error {
 	return nil
 }
 
-func (rc *readCloser) Read(
+// Read returns a slice of messages at most maxMessages long. If the duration maxWait
+// is exceeded before maxMessages have been fetched from the topic, the func will
+// return with as many messages in the list as were fetched before timeout.
+//
+// commiter can be used to commit the high watermark per partition to the consumer group. It
+// is up to the client if and when commiter is invoked. Committing often can affect
+// performance considerably in a high-volume scenario, so the client could for example
+// employ a strategy where commiter is only invoked every N iterations.
+func (rc *Reader) Read(
 	ctx context.Context,
 	maxMessages int,
 	maxWait time.Duration,
 ) (messages []Message, commiter func(ctx context.Context) error, err error) {
-	spanCtx, span := rc.tel.Tracer().Start(ctx, "kafkarator.readCloser.Read")
+	spanCtx, span := rc.tel.Tracer().Start(ctx, "kafkarator.Reader.Read")
 	defer span.End()
 
 	messages = make([]Message, 0, maxMessages)

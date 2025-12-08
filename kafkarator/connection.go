@@ -15,14 +15,14 @@ const (
 	gaugeLag              = "kafka_message_lag"
 )
 
-// New creates and returns a new connection.
-func New(config Config, tel *telemetry.Provider) (Connection, error) {
+// New creates and returns a new Connection.
+func New(config Config, tel *telemetry.Provider) (*Connection, error) {
 	d, err := dialer(config)
 	if err != nil {
 		return nil, err
 	}
 
-	c := &connection{
+	c := &Connection{
 		dialer: d,
 		config: config,
 		tel:    tel,
@@ -31,13 +31,28 @@ func New(config Config, tel *telemetry.Provider) (Connection, error) {
 	return c, nil
 }
 
-type connection struct {
+// Connection represents a Connection to a Kafka service. Connection (currently) only supports
+// message consumption via consumer group, so the group to use must be supplied. This means
+// that multiple copies of the service using this library can be started simultaneously, and Kafka
+// will automatically balance consumption between the consumers, i.e. the service can be scaled
+// horizontally. Of course, this only makes sense if the topic has more than one partition.
+//
+// Two modes of reading are supported: ChannelReader and Reader. The former exposes a channel
+// that emits messages, while the latter exposes a reader. They support two different
+// use-cases where ChannelReader is best for low volume scenarios, while Reader is best for
+// high volume scenarios and/or situations where the client needs to control exactly how and
+// when high watermark offsets are committed.
+//
+// For writing, a writer is exposed. It supported writing messages, one at a time.
+type Connection struct {
 	dialer *kafka.Dialer
 	config Config
 	tel    *telemetry.Provider
 }
 
-func (c *connection) Test(ctx context.Context) error {
+// Test tests whether a Connection to Kafka has been established. It is designed to be called early by the client
+// application so that apps can fail early if something is wrong with the Connection.
+func (c *Connection) Test(ctx context.Context) error {
 	if err := testConnection(ctx, c.config.Brokers, c.dialer); err != nil {
 		return fmt.Errorf("kafkarator test brokers: %w", err)
 	}
@@ -45,7 +60,8 @@ func (c *connection) Test(ctx context.Context) error {
 	return nil
 }
 
-func (c *connection) Writer(topic string) (WriteCloser, error) {
+// Writer returns a writer for writing messages to Kafka.
+func (c *Connection) Writer(topic string) (*Writer, error) {
 	producedMessagesCounter, err := c.tel.Meter().Int64Counter(meterProducedMessages)
 	if err != nil {
 		return nil, fmt.Errorf("kafkarator msgCounter produced messages: %w", err)
@@ -57,10 +73,11 @@ func (c *connection) Writer(topic string) (WriteCloser, error) {
 		Dialer:  c.dialer,
 	})
 
-	return newWriteCloser(w, producedMessagesCounter, c.tel), nil
+	return newWriter(w, producedMessagesCounter, c.tel), nil
 }
 
-func (c *connection) Reader(topic, consumerGroup string) (ReadCloser, error) {
+// Reader returns a reader that is used to fetch messages from Kafka.
+func (c *Connection) Reader(topic, consumerGroup string) (*Reader, error) {
 	m := c.tel.Meter()
 	lagGauge, err := m.Int64Gauge(gaugeLag)
 	if err != nil {
@@ -79,13 +96,21 @@ func (c *connection) Reader(topic, consumerGroup string) (ReadCloser, error) {
 		Dialer:  c.dialer,
 	})
 
-	return newReadCloser(reader, consumedMessagesCounter, lagGauge, c.tel), nil
+	return newReader(reader, consumedMessagesCounter, lagGauge, c.tel), nil
 }
 
-func (c *connection) ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {
+// ChannelReader returns a channel that emits messages from the given Kafka topic.
+//
+// If an internal error is raised, the error will be logged, and the channel will be closed.
+//
+// The high watermark offset is automatically committed for each message. This potentially has significant
+// performance consequences. Also, it sacrifices control, for instance the client's handling of a message
+// might fail its offset is committed. Please use Reader if you are concerned about performance, or you
+// want to explicitly commit offsets.
+func (c *Connection) ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {
 	rc, err := c.Reader(topic, consumerGroup)
 	if err != nil {
-		return nil, fmt.Errorf("creating readCloser: %w", err)
+		return nil, fmt.Errorf("creating Reader: %w", err)
 	}
 
 	outgoing := make(chan Message)

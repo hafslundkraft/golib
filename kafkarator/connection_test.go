@@ -32,13 +32,13 @@ func Test_connection_ChannelConsumer(t *testing.T) {
 	adminCloser := createTopic(t, topicName)
 	defer adminCloser()
 
-	// Initialize connection
+	// Initialize Connection
 	conn, err := New(config, telemetryProvider)
-	require.NoError(t, err, "failed to create connection")
+	require.NoError(t, err, "failed to create Connection")
 
-	// Test the connection
+	// Test the Connection
 	err = conn.Test(ctx)
-	require.NoError(t, err, "failed to test connection")
+	require.NoError(t, err, "failed to test Connection")
 
 	// Now you can test Consumer
 	readChan, err := conn.ChannelReader(ctx, topicName, "test-group")
@@ -126,13 +126,13 @@ func Test_connection_committer(t *testing.T) {
 	adminCloser := createTopic(t, topicName)
 	defer adminCloser()
 
-	// Initialize connection
+	// Initialize Connection
 	conn, err := New(config, telemetryProvider)
-	require.NoError(t, err, "failed to create connection")
+	require.NoError(t, err, "failed to create Connection")
 
-	// Test the connection
+	// Test the Connection
 	err = conn.Test(ctx)
-	require.NoError(t, err, "failed to test connection")
+	require.NoError(t, err, "failed to test Connection")
 
 	msg1 := []byte("message 1")
 	headers1 := map[string][]byte{

@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
-func newWriteCloser(w *kafka.Writer, pmc metric.Int64Counter, tel *telemetry.Provider) WriteCloser {
-	return &writerCloser{
+func newWriter(w *kafka.Writer, pmc metric.Int64Counter, tel *telemetry.Provider) *Writer {
+	return &Writer{
 		writer:                  w,
 		tel:                     tel,
 		producedMessagesCounter: pmc,
@@ -20,14 +20,17 @@ func newWriteCloser(w *kafka.Writer, pmc metric.Int64Counter, tel *telemetry.Pro
 	}
 }
 
-type writerCloser struct {
+// Writer provides an interface for writing messages to the Kafka topic, as well
+// as closing it when the client is done writing.
+type Writer struct {
 	producedMessagesCounter metric.Int64Counter
 	writer                  *kafka.Writer
 	tel                     *telemetry.Provider
 	closed                  bool
 }
 
-func (wc *writerCloser) Close(ctx context.Context) error {
+// Close closes the underlying infrastructure, and renders this interface unusable for writing messages.
+func (wc *Writer) Close(ctx context.Context) error {
 	if wc.closed {
 		return nil // It's ok to close multiple times.
 	}
@@ -40,7 +43,10 @@ func (wc *writerCloser) Close(ctx context.Context) error {
 	return nil
 }
 
-func (wc *writerCloser) Write(ctx context.Context, msg []byte, headers map[string][]byte) error {
+// Write writes the given message with headers to the topic. An important side effect is
+// that if there is an OpenTelemetry tracing span associated with the context, it is extracted
+// and included in the header that is sent to Kafka.
+func (wc *Writer) Write(ctx context.Context, msg []byte, headers map[string][]byte) error {
 	if wc.closed {
 		return fmt.Errorf("writer is closed")
 	}
