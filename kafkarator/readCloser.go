@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
+	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -16,13 +16,13 @@ func newReadCloser(
 	r *kafka.Reader,
 	rmc metric.Int64Counter,
 	lagGauge metric.Int64Gauge,
-	logger *slog.Logger,
+	tel *telemetry.Provider,
 ) ReadCloser {
 	return &readCloser{
 		reader:              r,
 		readMessagesCounter: rmc,
 		lagGauge:            lagGauge,
-		logger:              logger,
+		tel:                 tel,
 		closed:              false,
 	}
 }
@@ -31,7 +31,7 @@ type readCloser struct {
 	reader              *kafka.Reader
 	readMessagesCounter metric.Int64Counter
 	lagGauge            metric.Int64Gauge
-	logger              *slog.Logger
+	tel                 *telemetry.Provider
 	closed              bool
 }
 
@@ -40,11 +40,14 @@ func (rc *readCloser) Close(ctx context.Context) error {
 		return nil // It's ok to close multiple times.
 	}
 
+	logger := rc.tel.Logger()
+
 	if err := rc.reader.Close(); err != nil {
-		rc.logger.ErrorContext(ctx, fmt.Sprintf("error closing reader %v", err))
+		logger.ErrorContext(ctx, fmt.Sprintf("error closing reader %v", err))
 		return fmt.Errorf("error closing reader: %w", err)
 	}
 	rc.closed = true
+	logger.InfoContext(ctx, fmt.Sprintf("closed reader %v", rc.reader))
 	return nil
 }
 
@@ -53,6 +56,9 @@ func (rc *readCloser) Read(
 	maxMessages int,
 	maxWait time.Duration,
 ) (messages []Message, commiter func(ctx context.Context) error, err error) {
+	spanCtx, span := rc.tel.Tracer().Start(ctx, "kafkarator.readCloser.Read")
+	defer span.End()
+
 	messages = make([]Message, 0, maxMessages)
 	deadline := time.Now().Add(maxWait)
 
@@ -80,7 +86,7 @@ func (rc *readCloser) Read(
 			break
 		}
 
-		readCtx, cancel := context.WithTimeout(ctx, remaining)
+		readCtx, cancel := context.WithTimeout(spanCtx, remaining)
 		msg, err := rc.reader.FetchMessage(readCtx)
 		cancel()
 
@@ -100,19 +106,20 @@ func (rc *readCloser) Read(
 				// Timeout reached, return what we have
 				break
 			}
-			if ctx.Err() != nil {
+			if readCtx.Err() != nil {
 				// Parent context canceled
 				return messages, commiter, fmt.Errorf("parent context canceled: %w", ctx.Err())
 			}
+			span.RecordError(err)
 			return messages, commiter, fmt.Errorf("error fetching message: %w", err)
 		}
 
 		messages = append(messages, message(&msg))
 
-		rc.readMessagesCounter.Add(ctx, 1)
+		rc.readMessagesCounter.Add(spanCtx, 1)
 		for p, l := range lagMap {
 			rc.lagGauge.Record(
-				ctx,
+				spanCtx,
 				l,
 				metric.WithAttributes(
 					attribute.KeyValue{Key: "partition", Value: attribute.StringValue(fmt.Sprint(p))},
@@ -120,6 +127,8 @@ func (rc *readCloser) Read(
 			)
 		}
 	}
+
+	span.SetAttributes(attribute.Int("message_count", len(messages)))
 
 	return messages, commiter, nil
 }

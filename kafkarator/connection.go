@@ -3,7 +3,6 @@ package kafkarator
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/hafslundkraft/golib/telemetry"
@@ -27,7 +26,6 @@ func New(config Config, tel *telemetry.Provider) (Connection, error) {
 		dialer: d,
 		config: config,
 		tel:    tel,
-		logger: tel.Logger(),
 	}
 
 	return c, nil
@@ -37,7 +35,6 @@ type connection struct {
 	dialer *kafka.Dialer
 	config Config
 	tel    *telemetry.Provider
-	logger *slog.Logger
 }
 
 func (c *connection) Test(ctx context.Context) error {
@@ -60,7 +57,7 @@ func (c *connection) Writer(topic string) (WriterCloser, error) {
 		Dialer:  c.dialer,
 	})
 
-	return newWriteCloser(w, producedMessagesCounter, c.logger), nil
+	return newWriteCloser(w, producedMessagesCounter, c.tel), nil
 }
 
 func (c *connection) Reader(topic, consumerGroup string) (ReadCloser, error) {
@@ -82,7 +79,7 @@ func (c *connection) Reader(topic, consumerGroup string) (ReadCloser, error) {
 		Dialer:  c.dialer,
 	})
 
-	return newReadCloser(reader, consumedMessagesCounter, lagGauge, c.logger), nil
+	return newReadCloser(reader, consumedMessagesCounter, lagGauge, c.tel), nil
 }
 
 func (c *connection) ChannelReader(ctx context.Context, topic, consumerGroup string) (<-chan Message, error) {

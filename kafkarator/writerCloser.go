@@ -3,18 +3,18 @@ package kafkarator
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
+	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 )
 
-func newWriteCloser(w *kafka.Writer, pmc metric.Int64Counter, logger *slog.Logger) WriterCloser {
+func newWriteCloser(w *kafka.Writer, pmc metric.Int64Counter, tel *telemetry.Provider) WriterCloser {
 	return &writerCloser{
 		writer:                  w,
-		logger:                  logger,
+		tel:                     tel,
 		producedMessagesCounter: pmc,
 		closed:                  false,
 	}
@@ -23,7 +23,7 @@ func newWriteCloser(w *kafka.Writer, pmc metric.Int64Counter, logger *slog.Logge
 type writerCloser struct {
 	producedMessagesCounter metric.Int64Counter
 	writer                  *kafka.Writer
-	logger                  *slog.Logger
+	tel                     *telemetry.Provider
 	closed                  bool
 }
 
@@ -33,7 +33,7 @@ func (wc *writerCloser) Close(ctx context.Context) error {
 	}
 
 	if err := wc.writer.Close(); err != nil {
-		wc.logger.ErrorContext(ctx, fmt.Sprintf("failed to close writer %v", err))
+		wc.tel.Logger().ErrorContext(ctx, fmt.Sprintf("failed to close writer %v", err))
 		return fmt.Errorf("failed to close writer: %w", err)
 	}
 	wc.closed = true
@@ -47,7 +47,7 @@ func (wc *writerCloser) Write(ctx context.Context, msg []byte, headers map[strin
 
 	traceHeaders := injectTraceContext(ctx, headers)
 	if err := wc.writer.WriteMessages(ctx, kafkaMessage(msg, traceHeaders)); err != nil {
-		wc.logger.ErrorContext(ctx, fmt.Sprintf("while writing messages to Kafka %v", err))
+		wc.tel.Logger().ErrorContext(ctx, fmt.Sprintf("while writing messages to Kafka %v", err))
 		return fmt.Errorf("failed to write messages to Kafka %w", err)
 	}
 	wc.producedMessagesCounter.Add(ctx, 1)
