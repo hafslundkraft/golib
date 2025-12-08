@@ -187,4 +187,3 @@ func (l *LineLogExporter) ForceFlush(ctx context.Context) error {
 }
 
 var _ logsdk.Exporter = (*LineLogExporter)(nil)
-
