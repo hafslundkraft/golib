@@ -3,10 +3,11 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"github.com/bradleyjkemp/cupaloy"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+
+	"github.com/bradleyjkemp/cupaloy"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_deterministicIDGenerator_NewSpanID(t *testing.T) {
@@ -16,7 +17,7 @@ func Test_deterministicIDGenerator_NewSpanID(t *testing.T) {
 	}
 	tests := []newSpanIDTestCase{
 		{
-			seed:       defaultSeed,
+			seed:       42,
 			iterations: 150,
 		},
 		{

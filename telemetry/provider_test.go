@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bytes"
+	"github.com/bradleyjkemp/cupaloy"
 	"os"
 	"testing"
 	"testing/synctest"
@@ -50,7 +51,7 @@ func TestProvider_withLocalWriter(t *testing.T) {
 		tel, shutdown := New(ctx, "test",
 			WithLocalWriter(&buf),
 			WithLocalColors(false),
-			WithTestIDGenerator(),
+			WithDeterministicTestIDGenerator(42),
 			WithAttributes(map[string]string{
 				"app": "test",
 			}),
@@ -73,25 +74,8 @@ func TestProvider_withLocalWriter(t *testing.T) {
 
 		require.NoError(t, shutdown(ctx))
 
-		expectedContents := []string{
-			// Log line
-			`sev=DEBUG msg="testing testing" app="test" some-field="some-value"`,
+		snapshotter := cupaloy.New(cupaloy.SnapshotSubdirectory("testdata"))
+		snapshotter.SnapshotT(t, buf.String())
 
-			// Trace
-			`[trace] id=8bef2b2824b41029c148c2769d143fcf name="test"`,
-			"start=2000-01-01T",
-			"status=Error",
-
-			// Metric
-			"[metric] 2000-01-01T",
-			"name=test-counter value=42",
-		}
-
-		loggedContent := buf.Bytes()
-		for _, e := range expectedContents {
-			if !bytes.Contains(loggedContent, []byte(e)) {
-				t.Errorf("Expected log to contain %q, but it did not. Full log:\n%s", e, loggedContent)
-			}
-		}
 	})
 }

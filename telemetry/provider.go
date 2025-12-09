@@ -47,7 +47,7 @@ type config struct {
 	local        bool
 	localColors  bool
 	attributes   map[string]string
-	testIDGen    bool
+	idGenSeed    int64
 }
 
 func (c config) localLoggerWriter() io.Writer {
@@ -201,8 +201,8 @@ func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider
 	}
 
 	opts := []tracesdk.TracerProviderOption{tracesdk.WithBatcher(exporter)}
-	if cfg.testIDGen {
-		opts = append(opts, tracesdk.WithIDGenerator(singleIDGenerator{}))
+	if cfg.idGenSeed > 0 {
+		opts = append(opts, tracesdk.WithIDGenerator(newDeterministicIDGenerator(cfg.idGenSeed)))
 	}
 
 	return tracesdk.NewTracerProvider(opts...)

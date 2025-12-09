@@ -8,8 +8,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-var defaultSeed int64 = 42
-
 // deterministicIDGenerator generates deterministic IDs based on a seed.
 // Useful for testing where reproducible IDs are needed across test runs.
 type deterministicIDGenerator struct {
@@ -18,7 +16,7 @@ type deterministicIDGenerator struct {
 
 func newDeterministicIDGenerator(seed int64) *deterministicIDGenerator {
 	return &deterministicIDGenerator{
-		rng: rand.New(rand.NewSource(seed)),
+		rng: rand.New(rand.NewSource(seed)), //nolint:gosec // Intentionally using math/rand for deterministic test IDs
 	}
 }
 
