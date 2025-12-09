@@ -3,7 +3,6 @@ package kafkarator
 import (
 	"context"
 
-	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -51,31 +50,4 @@ func (m *Message) ExtractTraceContext(ctx context.Context) context.Context {
 
 	// Extract trace context from headers and create new context
 	return otel.GetTextMapPropagator().Extract(ctx, carrier)
-}
-
-func kafkaMessage(b []byte, headers map[string][]byte) kafka.Message {
-	headerList := make([]kafka.Header, 0, len(headers))
-	for k, v := range headers {
-		headerList = append(headerList, kafka.Header{Key: k, Value: v})
-	}
-
-	return kafka.Message{
-		Value:   b,
-		Headers: headerList,
-	}
-}
-
-func message(m *kafka.Message) Message {
-	headers := make(map[string][]byte, len(m.Headers))
-	for _, header := range m.Headers {
-		headers[header.Key] = header.Value
-	}
-	return Message{
-		Topic:     m.Topic,
-		Partition: m.Partition,
-		Offset:    m.Offset,
-		Key:       m.Key,
-		Value:     m.Value,
-		Headers:   headers,
-	}
 }

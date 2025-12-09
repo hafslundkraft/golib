@@ -2,28 +2,26 @@ package kafkarator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/hafslundkraft/golib/telemetry"
-	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
 func newReader(
-	r *kafka.Reader,
+	c *kafka.Consumer,
 	rmc metric.Int64Counter,
 	lagGauge metric.Int64Gauge,
 	tel *telemetry.Provider,
 ) *Reader {
 	return &Reader{
-		reader:              r,
+		consumer:            c,
 		readMessagesCounter: rmc,
 		lagGauge:            lagGauge,
 		tel:                 tel,
-		closed:              false,
 	}
 }
 
@@ -33,7 +31,7 @@ func newReader(
 // partition as the high watermark within the consumer group) is split giving the
 // client total control and responsibility.
 type Reader struct {
-	reader              *kafka.Reader
+	consumer            *kafka.Consumer
 	readMessagesCounter metric.Int64Counter
 	lagGauge            metric.Int64Gauge
 	tel                 *telemetry.Provider
@@ -41,15 +39,15 @@ type Reader struct {
 }
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
-func (rc *Reader) Close(ctx context.Context) error {
-	if rc.closed {
+func (r *Reader) Close(ctx context.Context) error {
+	if r.closed {
 		return nil // It's ok to close multiple times.
 	}
 
-	if err := rc.reader.Close(); err != nil {
+	if err := r.consumer.Close(); err != nil {
 		return fmt.Errorf("error closing reader: %w", err)
 	}
-	rc.closed = true
+	r.closed = true
 	return nil
 }
 
@@ -65,80 +63,80 @@ func (rc *Reader) Read(
 	ctx context.Context,
 	maxMessages int,
 	maxWait time.Duration,
-) (messages []Message, commiter func(ctx context.Context) error, err error) {
-	spanCtx, span := rc.tel.Tracer().Start(ctx, "kafkarator.Reader.Read")
+) ([]Message, func(ctx context.Context) error, error) {
+
+	ctx, span := rc.tel.Tracer().Start(ctx, "kafkarator.Reader.Read")
 	defer span.End()
 
-	messages = make([]Message, 0, maxMessages)
 	deadline := time.Now().Add(maxWait)
+	msgs := make([]Message, 0, maxMessages)
 
-	partitionOffsets := map[int]int64{}
-	commiter = func(ctx context.Context) error {
-		topic := rc.reader.Config().Topic
-		for p, o := range partitionOffsets {
-			msg := kafka.Message{
-				Topic:     topic,
-				Partition: p,
-				Offset:    o,
-			}
-			if err := rc.reader.CommitMessages(ctx, msg); err != nil {
-				return fmt.Errorf("error committing messages: %w", err)
+	// Track last seen offsets per partition
+	latestOffsets := map[int32]kafka.Offset{}
+
+	commiter := func(ctx context.Context) error {
+		for partition, off := range latestOffsets {
+			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
+				{
+					Topic:     nil, // Use last polled topic
+					Partition: partition,
+					Offset:    off + 1,
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("commit failed: %w", err)
 			}
 		}
 		return nil
 	}
 
-	partitionLags := map[int]int64{}
-
-	for len(messages) < maxMessages {
+	for len(msgs) < maxMessages {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
 
-		readCtx, cancel := context.WithTimeout(spanCtx, remaining)
-		msg, err := rc.reader.FetchMessage(readCtx)
-		cancel()
+		ev := rc.consumer.Poll(int(remaining.Milliseconds()))
+		if ev == nil {
+			break
+		}
 
-		if err != nil {
-			if errors.Is(readCtx.Err(), context.DeadlineExceeded) {
-				// Timeout reached, return what we have
-				break
+		switch e := ev.(type) {
+
+		case *kafka.Message:
+			msgs = append(msgs, Message{
+				Topic:     *e.TopicPartition.Topic,
+				Partition: int(e.TopicPartition.Partition),
+				Offset:    int64(e.TopicPartition.Offset),
+				Key:       e.Key,
+				Value:     e.Value,
+				Headers:   convertHeaders(e.Headers),
+			})
+
+			latestOffsets[e.TopicPartition.Partition] = e.TopicPartition.Offset
+			rc.readMessagesCounter.Add(ctx, 1)
+
+		case kafka.Error:
+			if e.IsTimeout() {
+				return msgs, commiter, nil
 			}
-			if readCtx.Err() != nil {
-				// Parent context canceled
-				return messages, commiter, fmt.Errorf("parent context canceled: %w", ctx.Err())
-			}
-			span.RecordError(err)
-			return messages, commiter, fmt.Errorf("error fetching message: %w", err)
-		}
+			span.RecordError(e)
+			return msgs, commiter, fmt.Errorf("poll error: %w", e)
 
-		var hwm int64
-		var ok bool
-		if hwm, ok = partitionOffsets[msg.Partition]; !ok {
-			hwm = -1
-		}
-		if msg.Offset > hwm {
-			partitionOffsets[msg.Partition] = msg.Offset
-			lag := msg.HighWaterMark - msg.Offset - 1
-			partitionLags[msg.Partition] = lag
-		}
-
-		messages = append(messages, message(&msg))
-
-		rc.readMessagesCounter.Add(spanCtx, 1)
-		for p, l := range partitionLags {
-			rc.lagGauge.Record(
-				spanCtx,
-				l,
-				metric.WithAttributes(
-					attribute.KeyValue{Key: "partition", Value: attribute.StringValue(fmt.Sprint(p))},
-				),
-			)
+		default:
+			// ignore rebalance events etc.
 		}
 	}
 
-	span.SetAttributes(attribute.Int("message_count", len(messages)))
+	span.SetAttributes(attribute.Int("message_count", len(msgs)))
 
-	return messages, commiter, nil
+	return msgs, commiter, nil
+}
+
+func convertHeaders(hdrs []kafka.Header) map[string][]byte {
+	m := make(map[string][]byte, len(hdrs))
+	for _, h := range hdrs {
+		m[h.Key] = h.Value
+	}
+	return m
 }
