@@ -2,11 +2,11 @@ package telemetry
 
 import (
 	"bytes"
-	"github.com/bradleyjkemp/cupaloy"
 	"os"
 	"testing"
 	"testing/synctest"
 
+	"github.com/bradleyjkemp/cupaloy"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -76,6 +76,5 @@ func TestProvider_withLocalWriter(t *testing.T) {
 
 		snapshotter := cupaloy.New(cupaloy.SnapshotSubdirectory("testdata"))
 		snapshotter.SnapshotT(t, buf.String())
-
 	})
 }
