@@ -5,6 +5,7 @@ A collection of Hafslund Go libraries.
 ## Available Packages
 
 - **[telemetry](./telemetry)** - OpenTelemetry integration providing logging, metrics, and tracing capabilities
+- **[kafkarator](./kafkarator)** - Reading/writing messages from Kafka topics, integrated with *telemetry*
 
 ## Development
 
