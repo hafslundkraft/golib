@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/bradleyjkemp/cupaloy"
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,7 @@ func TestProvider(t *testing.T) {
 func TestProvider_withLocalWriter(t *testing.T) {
 	//nolint:thelper // synctest.Test takes a test function, not a helper
 	synctest.Test(t, func(t *testing.T) {
+		time.Local = time.UTC // in order to ensure consistent time formatting locally and on GitHub actions
 		ctx := t.Context()
 		var buf bytes.Buffer
 		tel, shutdown := New(ctx, "test",
@@ -83,6 +85,7 @@ func TestProvider_withLocalWriter(t *testing.T) {
 func TestProvider_withLocalWriter_splitWriters(t *testing.T) {
 	//nolint:thelper // synctest.Test takes a test function, not a helper
 	synctest.Test(t, func(t *testing.T) {
+		time.Local = time.UTC // in order to ensure consistent time formatting locally and on GitHub actions
 		ctx := t.Context()
 		var logBuf, meterBuf, traceBuf bytes.Buffer
 		tel, shutdown := New(ctx, "test",

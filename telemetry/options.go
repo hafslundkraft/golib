@@ -72,6 +72,7 @@ func WithAttributes(attrs map[string]string) OptionFunc {
 
 // WithDeterministicTestIDGenerator enables deterministic trace and span ID generation for testing.
 // This should only be used in tests.
+// NB! The given seed should be a positive value other than 0.
 func WithDeterministicTestIDGenerator(seed int64) OptionFunc {
 	return func(c *config) {
 		c.idGenSeed = seed
