@@ -6,8 +6,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/segmentio/kafka-go"
-	"github.com/stretchr/testify/require"
 	testkafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -29,6 +27,12 @@ func TestMain(m *testing.M) {
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
+
+	os.Setenv("ENV", "test")
+	os.Setenv("USE_SCHEMA_REGISTRY", "false")
+	os.Setenv("KAFKA_SASL_SCOPE", "dummy-scope")
+	os.Setenv("KAFKA_AUTH_TYPE", "tls")
+	os.Setenv("SCHEMA_REGISTRY_PASSWORD", "dummy")
 
 	kafkaContainer, err := testkafka.Run(
 		ctx,
@@ -52,6 +56,11 @@ func TestMain(m *testing.M) {
 
 	config = Config{
 		Brokers: brokers,
+		SchemaRegistryConfig: SchemaRegistryConfig{
+			SchemaRegistryPassword: "dummy",
+			SchemaRegistryUser:     "none",
+			SchemaRegistryURL:      "",
+		},
 	}
 
 	// Run all tests
@@ -64,20 +73,33 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func createTopic(t *testing.T, topicName string) func() error {
-	t.Helper()
-
-	adminConn, err := kafka.Dial("tcp", broker)
-	require.NoError(t, err, "failed to dial kafka")
-
-	err = adminConn.CreateTopics(kafka.TopicConfig{
-		Topic:             topicName,
-		NumPartitions:     1,
-		ReplicationFactor: 1,
-	})
-	if err != nil {
-		require.NoError(t, err, "failed to create topic")
-	}
-
-	return adminConn.Close
-}
+// func createTopic(t *testing.T, topicName string) func() error {
+// 	t.Helper()
+//
+// 	admin, err := kafka.NewAdminClient(&kafka.ConfigMap{
+// 		"bootstrap.servers": broker,
+// 	})
+// 	require.NoError(t, err)
+//
+// 	results, err := admin.CreateTopics(
+// 		context.Background(),
+// 		[]kafka.TopicSpecification{
+// 			{
+// 				Topic:             topicName,
+// 				NumPartitions:     1,
+// 				ReplicationFactor: 1,
+// 			},
+// 		},
+// 	)
+// 	require.NoError(t, err)
+// 	require.Len(t, results, 1)
+//
+// 	if results[0].Error.Code() != kafka.ErrNoError {
+// 		require.NoError(t, results[0].Error)
+// 	}
+//
+// 	return func() error {
+// 		admin.Close()
+// 		return nil
+// 	}
+// }

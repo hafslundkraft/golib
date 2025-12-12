@@ -17,13 +17,18 @@ set up. For extra clarity, we've omitted all error handling from these sample, w
 ```go
 ctx := context.Background()
 writer, _ := conn.Writer("my_topic")
+serializer, _ := conn.Serializer("my_topic")
 defer writer.Close(ctx)
 
+key := []byte("key")
 message := []byte("whatever you want marshaled as a byte slice. marshaling is your job!")
 headers := map[string][]byte{
     "my-key": []byte("my-value"),
 }
-_ = writer.Write(ctx, message, headers)
+
+
+encoded, _ := serializer.Serialize(ctx, message)
+_ = writer.Write(ctx, key, encoded, headers)
 ```
 
 ### Reading messages with channel
@@ -31,6 +36,7 @@ Receive messages, one at a time, as quickly as possible. Suitable for low-volume
 the reader commits the high watermark is sacrificed; each message is committed automatically.
 ```go
 ctx := context.Background()
+deserializer := conn.Deserializer("my-topic")
 messageChan, _ := conn.ChannelReader(ctx, "my_topic", "my-consumer-group")
 
 go func() {
@@ -40,7 +46,8 @@ go func() {
             // channel closed
         return
 	}
-    handleMessage(msg)
+	decoded, _ := deserializer.Deserialize(ctx, msg)
+    handleMessage(decoded)
 }
 }()
 ```
@@ -50,6 +57,7 @@ Read messages in batches, commit offsets only when you want. This is suitable fo
 ```go
 ctx := context.Background()
 reader, err := conn.Reader("my-topic", "my-consumer-group")
+deserializer := conn.Deserializer("my-topic")
 defer reader.Close(ctx)
 
 messages, committer, _ := reader.Read(ctx, 1000, 1*time.Second)
@@ -85,10 +93,55 @@ if err != nil {
 
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `ENV` | Environment determines which Kafka service and authentication mode | `env` |
 | `KAFKA_BROKERS` | Comma-separated list of Kafka broker addresses | `broker1:9092,broker2:9092` |
+| `USE_SCHEMA_REGISTRY` | Boolean on whether schema registry should be used or not | `true` |
+
+##### TLS mode
+
+These environment variables are necessary as well for TLS mode
+| Variable | Description | Example |
+|----------|-------------|---------|
 | `KAFKA_CERT_FILE` | Path to the client certificate file | `/path/to/client-cert.pem` |
 | `KAFKA_KEY_FILE` | Path to the client key file | `/path/to/client-key.pem` |
 | `KAFKA_CA_FILE` | Path to the Certificate Authority file | `/path/to/ca-cert.pem` |
+
+##### SASL mode
+
+These environment variables are necessary as well for SASL mode
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `KAFKA_SASL_SCOPE` | Scope | `api://aaaa-bbbb-cccc` |
+
+##### Using schema registry 
+
+These environment variables are necessary as well if you want to use schema registry 
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `SCHEMA_REGISTRY_PASSWORD` | Password to authenticate with to Aiven Schema Registry | `pass` |
+
+#### Optional Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `KAFKA_BROKERS` | Comma-separated list of Kafka broker addresses to use | `broker1:9092,broker2:9092` |
+| `SCHEMA_REGISTRY_URL` | URL to the desired schema registry you want to use | `https://url.com:9090` |
+| `SCHEMA_REGISTRY_USER` | Username to authenticate with to the desired schema registry | `username` |
+
+If any of the above variables are not set, they will default to:
+
+Test/local environment:
+- KAFKA_BROKERS = kafka-test-ture-test.com
+- SCHEMA_REGISTRY_URL = kafka-test-ture-test.com:9090
+- SCHEMA_REGISTRY_USER = avnadmin 
+
+Prod environment:
+- KAFKA_BROKERS = kafka-prod-ture-prod.com
+- SCHEMA_REGISTRY_URL = kafka-prod-ture-prod.com:9090
+- SCHEMA_REGISTRY_USER = avnadmin 
+
 
 ### Programmatic Configuration
 

@@ -11,18 +11,24 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+const magicByte = 0
+
 func newReader(
 	c *kafka.Consumer,
 	rmc metric.Int64Counter,
 	lagGauge metric.Int64Gauge,
 	tel *telemetry.Provider,
-) *Reader {
-	return &Reader{
+	topic string,
+) (*Reader, error) {
+	r := &Reader{
 		consumer:            c,
 		readMessagesCounter: rmc,
 		lagGauge:            lagGauge,
 		tel:                 tel,
+		topic:               topic,
 	}
+
+	return r, nil
 }
 
 // Reader provides an interface for reading messages from a Kafka topic, as well
@@ -36,6 +42,7 @@ type Reader struct {
 	lagGauge            metric.Int64Gauge
 	tel                 *telemetry.Provider
 	closed              bool
+	topic               string
 }
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
@@ -64,7 +71,6 @@ func (rc *Reader) Read(
 	maxMessages int,
 	maxWait time.Duration,
 ) ([]Message, func(ctx context.Context) error, error) {
-
 	ctx, span := rc.tel.Tracer().Start(ctx, "kafkarator.Reader.Read")
 	defer span.End()
 
@@ -78,7 +84,7 @@ func (rc *Reader) Read(
 		for partition, off := range latestOffsets {
 			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
 				{
-					Topic:     nil, // Use last polled topic
+					Topic:     &rc.topic, // Use last polled topic
 					Partition: partition,
 					Offset:    off + 1,
 				},

@@ -7,6 +7,16 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
+const (
+	kafkaTestBrokerSASL        = "kafka-ture-test-ture-test.g.aivencloud.com:18361"
+	kafkaTestBrokerTLS         = "kafka-ture-test-ture-test.g.aivencloud.com:18350"
+	kafkaProdBrokerSASL        = "kafka-ture-prod-ture-prod.g.aivencloud.com:11140"
+	kafkaProdBrokerTLS         = "kafka-ture-prod-ture-prod.g.aivencloud.com:11129"
+	kafkaTestSchemaRegistryURL = "https://kafka-ture-test-ture-test.g.aivencloud.com:18353"
+	kafkaProdSchemaRegistryURL = "https://kafka-ture-prod-ture-prod.g.aivencloud.com:11132"
+	kafkaUsername              = "avnadmin"
+)
+
 // Message is a message that has been read off of a topic. It is more or less identical to the struct that is
 // implemented by the underlying kafka library. We choose to expose our own type in order to insulate the consumer from
 // such implementation details.
@@ -25,6 +35,8 @@ type Message struct {
 
 	// Value is the actual payload of the message. This is what you want to unmarshal!
 	Value []byte
+
+	Decoded any
 
 	// Headers are keys value header pairs associated with the message.
 	Headers map[string][]byte

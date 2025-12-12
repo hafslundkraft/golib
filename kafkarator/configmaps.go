@@ -2,24 +2,25 @@ package kafkarator
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/hafslundkraft/golib/telemetry"
 )
 
-func buildKafkaConfigMap(c Config, tel *telemetry.Provider) (*kafka.ConfigMap, error) {
-	if c.SASL.Enabled {
-		return saslConfigMap(c, tel)
+func buildKafkaConfigMap(c *Config) (*kafka.ConfigMap, error) {
+	if c.AuthMode == "sasl" {
+		return saslConfigMap(c)
 	}
 	return tlsConfigMap(c)
 }
 
-func saslConfigMap(c Config, tel *telemetry.Provider) (*kafka.ConfigMap, error) {
+func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 	if c.SASL.Scope == "" {
-		return nil, fmt.Errorf("failed to create Azure token provider: %w")
+		return nil, fmt.Errorf("failed to create Azure token provider")
 	}
 
 	return &kafka.ConfigMap{
-		"bootstrap.servers": c.Brokers,
+		"bootstrap.servers": strings.Join(c.Brokers, ","),
 		"security.protocol": "SASL_SSL",
 		"sasl.mechanisms":   "OAUTHBEARER",
 
@@ -28,17 +29,17 @@ func saslConfigMap(c Config, tel *telemetry.Provider) (*kafka.ConfigMap, error) 
 	}, nil
 }
 
-func tlsConfigMap(c Config) (*kafka.ConfigMap, error) {
-	if c.CertFile == "" || c.KeyFile == "" || c.CAFile == "" {
+func tlsConfigMap(c *Config) (*kafka.ConfigMap, error) {
+	if c.TLS.CertFile == "" || c.TLS.KeyFile == "" || c.TLS.CAFile == "" {
 		return nil, fmt.Errorf("TLS mode enabled but certificate variables are missing")
 	}
 
 	conf := &kafka.ConfigMap{
-		"bootstrap.servers":        c.Brokers,
+		"bootstrap.servers":        strings.Join(c.Brokers, ","),
 		"security.protocol":        "SSL",
-		"ssl.key.location":         c.KeyFile,
-		"ssl.certificate.location": c.CertFile,
-		"ssl.ca.location":          c.CAFile,
+		"ssl.key.location":         c.TLS.KeyFile,
+		"ssl.certificate.location": c.TLS.CertFile,
+		"ssl.ca.location":          c.TLS.CAFile,
 	}
 
 	return conf, nil

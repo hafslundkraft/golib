@@ -3,24 +3,36 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"time"
 )
 
+// TokenReceiver receives OAuth bearer tokens and forwards them to the Kafka client.
+// It is typically implemented by a Kafka producer or consumer.
 type TokenReceiver interface {
+	// SetOAuthBearerToken provides a valid OAuth bearer token to Kafka.
 	SetOAuthBearerToken(token kafka.OAuthBearerToken) error
+
+	// SetOAuthBearerTokenFailure reports a token refresh failure to Kafka.
 	SetOAuthBearerTokenFailure(errStr string) error
 }
 
+// StartOAuthRefreshLoop performs an initial OAuth token refresh and starts a
+// background goroutine that periodically refreshes the token until the context
+// is canceled.
+//
+// The refresh interval is derived from the token expiration time and includes
+// exponential backoff on failures.
 func StartOAuthRefreshLoop(
 	ctx context.Context,
 	tp AccessTokenProvider,
 	tr TokenReceiver,
 	tracer trace.Tracer,
 ) error {
-	// Initial token
+	// Initial token refresh
 	token, err := refreshOAuthToken(ctx, tp, tr, tracer)
 	if err != nil {
 		return err
@@ -36,7 +48,6 @@ func StartOAuthRefreshLoop(
 				return
 
 			case <-time.After(refreshDelay):
-				// Refresh
 				tkn, err := refreshOAuthToken(ctx, tp, tr, tracer)
 				if err != nil {
 					backoffDelay = backoff(backoffDelay)
@@ -52,13 +63,16 @@ func StartOAuthRefreshLoop(
 	return nil
 }
 
+// refreshOAuthToken fetches a new OAuth access token and delivers it to Kafka
+// using the provided TokenReceiver.
+//
+// On failure, the error is reported to Kafka and returned to the caller.
 func refreshOAuthToken(
 	ctx context.Context,
 	tp AccessTokenProvider,
 	tr TokenReceiver,
 	tracer trace.Tracer,
 ) (kafka.OAuthBearerToken, error) {
-
 	ctx, span := tracer.Start(ctx, "kafka.refresh_oauth_token")
 	defer span.End()
 
@@ -86,6 +100,8 @@ func refreshOAuthToken(
 	return token, nil
 }
 
+// refreshInterval calculates the next refresh interval based on the token
+// expiration time, ensuring a minimum refresh interval of one minute.
 func refreshInterval(t kafka.OAuthBearerToken) time.Duration {
 	d := time.Until(t.Expiration) - 2*time.Minute
 	if d < time.Minute {
@@ -94,6 +110,7 @@ func refreshInterval(t kafka.OAuthBearerToken) time.Duration {
 	return d
 }
 
+// backoff applies exponential backoff with an upper bound of 30 seconds.
 func backoff(current time.Duration) time.Duration {
 	if current < 30*time.Second {
 		return current * 2

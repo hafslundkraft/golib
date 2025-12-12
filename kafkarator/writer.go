@@ -3,16 +3,21 @@ package kafkarator
 import (
 	"context"
 	"fmt"
-
-	"github.com/hafslundkraft/golib/telemetry"
+	"maps"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/hafslundkraft/golib/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 )
 
-func newWriter(p *kafka.Producer, topic string, pmc metric.Int64Counter, tel *telemetry.Provider) *Writer {
+func newWriter(
+	p *kafka.Producer,
+	topic string,
+	pmc metric.Int64Counter,
+	tel *telemetry.Provider,
+) *Writer {
 	w := &Writer{
 		producer:                p,
 		topic:                   topic,
@@ -53,7 +58,7 @@ func (w *Writer) Close(ctx context.Context) error {
 // Write writes the given message with headers to the topic. An important side effect is
 // that if there is an OpenTelemetry tracing span associated with the context, it is extracted
 // and included in the header that is sent to Kafka.
-func (w *Writer) Write(ctx context.Context, value []byte, headers map[string][]byte) error {
+func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[string][]byte) error {
 	if w.closed {
 		return fmt.Errorf("writer is closed")
 	}
@@ -71,11 +76,11 @@ func (w *Writer) Write(ctx context.Context, value []byte, headers map[string][]b
 			Partition: kafka.PartitionAny,
 		},
 		Value:   value,
+		Key:     key,
 		Headers: kafkaHeaders,
 	}
 
 	// Produce messages synchronously
-
 	deliveryChan := make(chan kafka.Event, 1)
 	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
@@ -102,9 +107,7 @@ func (w *Writer) Write(ctx context.Context, value []byte, headers map[string][]b
 func injectTraceContext(ctx context.Context, headers map[string][]byte) map[string][]byte {
 	// Create a new map to avoid modifying the original
 	propagatedHeaders := make(map[string][]byte, len(headers))
-	for k, v := range headers {
-		propagatedHeaders[k] = v
-	}
+	maps.Copy(propagatedHeaders, headers)
 
 	// Use a MapCarrier to inject trace context
 	carrier := propagation.MapCarrier{}
@@ -124,7 +127,8 @@ func (w *Writer) handleDeliveryReports() {
 		switch ev := e.(type) {
 		case *kafka.Message:
 			if ev.TopicPartition.Error != nil {
-				w.tel.Logger().Error("delivery failed",
+				w.tel.Logger().Error(
+					"delivery failed",
 					"topic", *ev.TopicPartition.Topic,
 					"partition", ev.TopicPartition.Partition,
 					"offset", ev.TopicPartition.Offset,
