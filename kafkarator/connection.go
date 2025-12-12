@@ -53,7 +53,7 @@ func New(config *Config, tel *telemetry.Provider) (*Connection, error) {
 	}
 
 	var srClient sr.Client
-	if config.UseSchemaRegistry == true {
+	if config.UseSchemaRegistry {
 		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig)
 		if err != nil {
 			return nil, fmt.Errorf("schema registry client: %w", err)

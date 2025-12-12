@@ -36,7 +36,6 @@ func newAvroSerializer(srClient sr.Client, topic string, tel *telemetry.Provider
 		panic("telemetry provider is nil")
 	}
 	if srClient == nil {
-		fmt.Errorf("sr is nil")
 		panic("srClient provider is nil")
 	}
 	return &AvroSerializer{

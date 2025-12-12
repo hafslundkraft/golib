@@ -122,6 +122,8 @@ func injectTraceContext(ctx context.Context, headers map[string][]byte) map[stri
 }
 
 // handleDeliveryReports logs delivery failures for observability.
+//
+//nolint:sloglint // context not available in kafka delivery callback
 func (w *Writer) handleDeliveryReports() {
 	for e := range w.producer.Events() {
 		switch ev := e.(type) {
