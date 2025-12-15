@@ -2,7 +2,6 @@ package kafkarator
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
@@ -20,7 +19,7 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 	}
 
 	return &kafka.ConfigMap{
-		"bootstrap.servers": strings.Join(c.Brokers, ","),
+		"bootstrap.servers": c.Broker,
 		"security.protocol": "SASL_SSL",
 		"sasl.mechanisms":   "OAUTHBEARER",
 
@@ -35,7 +34,7 @@ func tlsConfigMap(c *Config) (*kafka.ConfigMap, error) {
 	}
 
 	conf := &kafka.ConfigMap{
-		"bootstrap.servers":        strings.Join(c.Brokers, ","),
+		"bootstrap.servers":        c.Broker,
 		"security.protocol":        "SSL",
 		"ssl.key.location":         c.TLS.KeyFile,
 		"ssl.certificate.location": c.TLS.CertFile,

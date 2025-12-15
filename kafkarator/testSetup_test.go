@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 	broker = brokers[0]
 
 	config = Config{
-		Brokers: brokers,
+		Broker: broker,
 		SchemaRegistryConfig: SchemaRegistryConfig{
 			SchemaRegistryPassword: "dummy",
 			SchemaRegistryUser:     "none",

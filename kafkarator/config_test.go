@@ -36,34 +36,6 @@ func withEnv(t *testing.T, env map[string]string, fn func()) {
 	fn()
 }
 
-func TestSplitAndCleanBrokers(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    []string
-		wantErr bool
-	}{
-		{"single", "broker1:9092", []string{"broker1:9092"}, false},
-		{"multiple", "a:1, b:2 ,c:3", []string{"a:1", "b:2", "c:3"}, false},
-		{"empty parts", " , , ", nil, true},
-		{"empty string", "", nil, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := splitAndCleanBrokers(tt.input)
-
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestGetTLSConfig_Success(t *testing.T) {
 	withEnv(t, map[string]string{
 		envCertFile: "cert.pem",
@@ -119,7 +91,7 @@ func TestGetSRConfig_Success(t *testing.T) {
 		envSchemaRegistryURL: "url.com",
 		envKafkaPassword:     "secret",
 	}, func() {
-		cfg, err := getSRConfig("test")
+		cfg, err := getSRConfig()
 
 		require.NoError(t, err)
 		assert.Equal(t, "secret", cfg.SchemaRegistryPassword)
@@ -133,7 +105,7 @@ func TestGetSRConfig_MissingPassword(t *testing.T) {
 		envSchemaRegistryURL: "url.com",
 		envKafkaPassword:     "",
 	}, func() {
-		_, err := getSRConfig("test")
+		_, err := getSRConfig()
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), envKafkaPassword)
@@ -154,6 +126,6 @@ func TestConfigFromEnvVars_TLS(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "test", cfg.Env)
 		assert.Equal(t, "tls", cfg.AuthMode)
-		assert.NotEmpty(t, cfg.Brokers)
+		assert.NotEmpty(t, cfg.Broker)
 	})
 }

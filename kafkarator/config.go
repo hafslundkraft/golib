@@ -3,7 +3,6 @@ package kafkarator
 import (
 	"fmt"
 	"os"
-	"strings"
 )
 
 const (
@@ -76,8 +75,8 @@ type SchemaRegistryConfig struct {
 type Config struct {
 	Env string
 
-	// Brokers is the list of Kafka brokers
-	Brokers []string
+	// Broker is the Kafka broker
+	Broker string
 
 	// Which authentication mode to use towards Kafka service
 	AuthMode string
@@ -117,13 +116,13 @@ func ConfigFromEnvVars() (*Config, error) {
 		return &Config{}, fmt.Errorf("env is not set (%s)", envBroker)
 	}
 
-	cfg.Brokers = []string{broker}
+	cfg.Broker = broker
 
 	useSchemaRegistry := os.Getenv(envUseSchemaRegistry)
 
 	if useSchemaRegistry != "" && useSchemaRegistry == "true" {
 		cfg.UseSchemaRegistry = true
-		srConfig, err := getSRConfig(env)
+		srConfig, err := getSRConfig()
 		if err != nil {
 			return &Config{}, err
 		}
@@ -183,7 +182,7 @@ func getTLSConfig() (*TLSConfig, error) {
 	}, nil
 }
 
-func getSRConfig(env string) (*SchemaRegistryConfig, error) {
+func getSRConfig() (*SchemaRegistryConfig, error) {
 	srURL := os.Getenv(envSchemaRegistryURL)
 	if srURL == "" {
 		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envSchemaRegistryURL)
@@ -204,22 +203,4 @@ func getSRConfig(env string) (*SchemaRegistryConfig, error) {
 		SchemaRegistryUser:     srUser,
 		SchemaRegistryPassword: srPassword,
 	}, nil
-}
-
-func splitAndCleanBrokers(brokers string) ([]string, error) {
-	parts := strings.Split(brokers, ",")
-	out := make([]string, 0, len(parts))
-
-	for _, b := range parts {
-		b = strings.TrimSpace(b)
-		if b != "" {
-			out = append(out, b)
-		}
-	}
-
-	if len(out) == 0 {
-		return nil, fmt.Errorf("broker list resolved to empty")
-	}
-
-	return out, nil
 }
