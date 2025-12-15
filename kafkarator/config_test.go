@@ -64,15 +64,6 @@ func TestSplitAndCleanBrokers(t *testing.T) {
 	}
 }
 
-func TestGetBrokers_InvalidAuthMode(t *testing.T) {
-	withEnv(t, nil, func() {
-		_, err := getBrokers("prod", "invalid")
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported auth mode")
-	})
-}
-
 func TestGetTLSConfig_Success(t *testing.T) {
 	withEnv(t, map[string]string{
 		envCertFile: "cert.pem",

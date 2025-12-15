@@ -11,9 +11,6 @@ const (
 	envEnv = "ENV"
 
 	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
-	envBrokers = "KAFKA_BROKERS"
-
-	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
 	envBroker = "KAFKA_BROKER"
 
 	// envCertFile is the environment variable for the Kafka certificate file path
@@ -115,17 +112,12 @@ func ConfigFromEnvVars() (*Config, error) {
 	}
 	cfg.AuthMode = authType
 
-	if os.Getenv(envBrokers) != "" {
-		brokers, err := getBrokers(env, authType)
-		if err != nil {
-			return nil, err
-		}
-		cfg.Brokers = brokers
-	} else {
-		// No broker was sat, use default
-		broker := os.Getenv(envBroker)
-		cfg.Brokers = []string{broker}
+	broker := os.Getenv(envBroker)
+	if broker == "" {
+		return &Config{}, fmt.Errorf("env is not set (%s)", envBroker)
 	}
+
+	cfg.Brokers = []string{broker}
 
 	useSchemaRegistry := os.Getenv(envUseSchemaRegistry)
 
@@ -194,18 +186,12 @@ func getTLSConfig() (*TLSConfig, error) {
 func getSRConfig(env string) (*SchemaRegistryConfig, error) {
 	srURL := os.Getenv(envSchemaRegistryURL)
 	if srURL == "" {
-		switch env {
-		case "prod":
-			srURL = kafkaProdSchemaRegistryURL
-		case "test":
-			srURL = kafkaTestSchemaRegistryURL
-		default:
-		}
+		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envSchemaRegistryURL)
 	}
 
 	srUser := os.Getenv(envKafkaUser)
 	if srUser == "" {
-		srUser = kafkaUsername
+		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envKafkaUser)
 	}
 
 	srPassword := os.Getenv(envKafkaPassword)
@@ -218,67 +204,6 @@ func getSRConfig(env string) (*SchemaRegistryConfig, error) {
 		SchemaRegistryUser:     srUser,
 		SchemaRegistryPassword: srPassword,
 	}, nil
-}
-
-// getBrokers resolves the Kafka broker list based on:
-//  1. Explicit KAFKA_BROKERS env var (always wins if set)
-//  2. Environment (prod / test / local)
-//  3. Auth mode (e.g. sasl / tls)
-//
-// It returns a cleaned slice suitable for kafka.ConfigMap.
-func getBrokers(env, authMode string) ([]string, error) {
-	// 1. Explicit override always wins
-	if brokers := strings.TrimSpace(os.Getenv(envBrokers)); brokers != "" {
-		return splitAndCleanBrokers(brokers)
-	}
-
-	// 2. Defaults based on env + auth mode
-	var brokers string
-
-	switch env {
-	case "prod":
-		switch authMode {
-		case "sasl":
-			brokers = kafkaProdBrokerSASL
-		case "tls":
-			brokers = kafkaProdBrokerTLS
-		default:
-			return nil, fmt.Errorf("unsupported auth mode %q for env=prod", authMode)
-		}
-
-	case "test":
-		switch authMode {
-		case "sasl":
-			brokers = kafkaTestBrokerSASL
-		case "tls":
-			brokers = kafkaTestBrokerTLS
-		default:
-			return nil, fmt.Errorf("unsupported auth mode %q for env=test", authMode)
-		}
-
-	case "local":
-		switch authMode {
-		case "tls":
-			brokers = kafkaTestBrokerTLS
-		default:
-			return nil, fmt.Errorf(
-				"KAFKA_BROKERS must be set for env=local with authMode=%q",
-				authMode,
-			)
-		}
-
-	default:
-		return nil, fmt.Errorf("unknown ENV=%q", env)
-	}
-
-	if brokers == "" {
-		return nil, fmt.Errorf(
-			"no default brokers configured for env=%q authMode=%q",
-			env, authMode,
-		)
-	}
-
-	return splitAndCleanBrokers(brokers)
 }
 
 func splitAndCleanBrokers(brokers string) ([]string, error) {
