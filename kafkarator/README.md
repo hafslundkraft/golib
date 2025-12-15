@@ -114,7 +114,7 @@ These environment variables are necessary as well for SASL mode
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `AZURE_CLIENT_OBJECT_ID` | Azure Client Object ID to use for authenticating with Aiven | `aaaa-bbbb-cccc-dddd` |
+| `AZURE_SCOPE` | Azure scope to use for fetching tokens to authenticate with to Aiven | `api://aaaa-bbbb-cccc-dddd` |
 
 ##### Using schema registry 
 

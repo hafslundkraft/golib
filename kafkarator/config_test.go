@@ -102,23 +102,23 @@ func TestGetTLSConfig_MissingCert(t *testing.T) {
 
 func TestGetSASLConfig_Success(t *testing.T) {
 	withEnv(t, map[string]string{
-		envAzureOID: "api://scope",
+		envAzureScope: "api://scope",
 	}, func() {
 		cfg, err := getSASLConfig()
 
 		require.NoError(t, err)
-		assert.Equal(t, "api://scope", cfg.OID)
+		assert.Equal(t, "api://scope", cfg.Scope)
 	})
 }
 
-func TestGetSASLConfig_MissingOID(t *testing.T) {
+func TestGetSASLConfig_MissingScope(t *testing.T) {
 	withEnv(t, map[string]string{
-		envAzureOID: "",
+		envAzureScope: "",
 	}, func() {
 		_, err := getSASLConfig()
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), envAzureOID)
+		assert.Contains(t, err.Error(), envAzureScope)
 	})
 }
 

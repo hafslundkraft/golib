@@ -15,7 +15,7 @@ func buildKafkaConfigMap(c *Config) (*kafka.ConfigMap, error) {
 }
 
 func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
-	if c.SASL.OID == "" {
+	if c.SASL.Scope == "" {
 		return nil, fmt.Errorf("failed to create Azure token provider")
 	}
 
