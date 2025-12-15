@@ -208,7 +208,7 @@ func (c *Connection) ChannelReader(
 }
 
 func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) {
-	tp, err := auth.NewDefaultTokenProvider(c.config.SASL.Scope)
+	tp, err := auth.NewDefaultTokenProvider(c.config.SASL.OID)
 	if err != nil {
 		c.tel.Logger().ErrorContext(ctx, "failed to create token provider", "error", err)
 		return

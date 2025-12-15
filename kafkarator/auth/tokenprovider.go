@@ -17,7 +17,7 @@ type AccessTokenProvider interface {
 	GetAccessToken(ctx context.Context) (string, error)
 }
 
-// TokenProvider implements AccessTokenProvider using Azure AD credentials.
+// TokenProvider implements AccessTokenProvider using Azure credentials.
 type TokenProvider struct {
 	cred  azcore.TokenCredential
 	scope string

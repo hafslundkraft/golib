@@ -14,6 +14,8 @@ are documented further down. Here, we want to give you an impression of what the
 set up. For extra clarity, we've omitted all error handling from these sample, we assume that you know how to do that!
 
 ### Writing messages
+In order to use the serializer, a schema for the topic must be available in the schema registry.
+
 ```go
 ctx := context.Background()
 writer, _ := conn.Writer("my_topic")
@@ -53,6 +55,7 @@ go func() {
 ```
 
 ### Reading messages with reader
+In order to use the deserializer, a schema for the topic must be available in the schema registry.
 Read messages in batches, commit offsets only when you want. This is suitable for high-volume scenarios.
 ```go
 ctx := context.Background()
@@ -93,8 +96,7 @@ if err != nil {
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `ENV` | Environment determines which Kafka service and authentication mode | `env` |
-| `KAFKA_BROKERS` | Comma-separated list of Kafka broker addresses | `broker1:9092,broker2:9092` |
+| `ENV` | Environment determines which Kafka service and authentication mode | `prod` |
 | `USE_SCHEMA_REGISTRY` | Boolean on whether schema registry should be used or not | `true` |
 
 ##### TLS mode
@@ -112,7 +114,7 @@ These environment variables are necessary as well for SASL mode
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `KAFKA_SASL_SCOPE` | Scope | `api://aaaa-bbbb-cccc` |
+| `AZURE_CLIENT_OBJECT_ID` | Azure Client Object ID to use for authenticating with Aiven | `aaaa-bbbb-cccc-dddd` |
 
 ##### Using schema registry 
 
@@ -153,21 +155,6 @@ config := kafkarator.Config{
     CertFile: "/path/to/client-cert.pem",
     KeyFile:  "/path/to/client-key.pem",
     CAFile:   "/path/to/ca-cert.pem",
-}
-
-conn, err := kafkarator.New(config)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-### Non-TLS Configuration (for local development/testing)
-
-For local development or testing without TLS, you can omit the certificate fields:
-
-```go
-config := kafkarator.Config{
-    Brokers: []string{"localhost:9092"},
 }
 
 conn, err := kafkarator.New(config)

@@ -22,8 +22,8 @@ const (
 	// envCAFile is the environment variable for the Kafka CA file path
 	envCAFile = "KAFKA_CA_FILE"
 
-	// envSASLScope is the scope for the app in Azure
-	envSASLScope = "KAFKA_SASL_SCOPE"
+	// envAzureOID is the client object id for the app in Azure
+	envAzureOID = "AZURE_CLIENT_OBJECT_ID"
 
 	// envAuthMode tells which auth mode to use for Kafka
 	envAuthMode = "KAFKA_AUTH_MODE"
@@ -44,7 +44,7 @@ const (
 
 // SASLConfig contains necessary configuration needed to connect to Kafka with SASL
 type SASLConfig struct {
-	Scope       string // Azure AD scope (audience)
+	OID         string // Azure OID
 	ExpectedOID string // Optional: validate service account OID
 }
 
@@ -150,13 +150,13 @@ func ConfigFromEnvVars() (*Config, error) {
 }
 
 func getSASLConfig() (*SASLConfig, error) {
-	scope := os.Getenv(envSASLScope)
-	if scope == "" {
-		return &SASLConfig{}, fmt.Errorf("env variable %s is not set for SASL", envSASLScope)
+	oid := os.Getenv(envAzureOID)
+	if oid == "" {
+		return &SASLConfig{}, fmt.Errorf("env variable %s is not set for SASL", envAzureOID)
 	}
 
 	return &SASLConfig{
-		Scope:       scope,
+		OID:         oid,
 		ExpectedOID: os.Getenv("KAFKA_SASL_EXPECTED_OID"),
 	}, nil
 }
