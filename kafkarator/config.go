@@ -23,20 +23,20 @@ const (
 	envCAFile = "KAFKA_CA_FILE"
 
 	// envAzureOID is the client object id for the app in Azure
-	envAzureScope = "AZURE_SCOPE"
+	envAzureScope = "AZURE_KAFKA_SCOPE"
 
 	// envAuthMode tells which auth mode to use for Kafka
-	envAuthMode = "KAFKA_AUTH_MODE"
+	envAuthType = "KAFKA_AUTH_TYPE"
 
 	// envSchemaRegistryUser is the user for the Aiven Schema Registry
-	envSchemaRegistryUser = "SCHEMA_REGISTRY_USER"
+	envKafkaUser = "KAFKA_USERNAME"
 
 	// envSchemaRegistryPassword is the password for the Aiven Schema Registry user
 	// #nosec G101 -- This is an environment variable *name*, not a credential.
-	envSchemaRegistryPassword = "SCHEMA_REGISTRY_PASSWORD"
+	envKafkaPassword = "KAFKA_PASSWORD"
 
 	// envSchemaRegistryURL is the URL for the Aiven Schema Registry
-	envSchemaRegistryURL = "SCHEMA_REGISTRY_URL"
+	envSchemaRegistryURL = "KAFKA_SCHEMA_REGISTRY_URL"
 
 	// envUseSchemaRegistry tells us whether schema registry should be used or not
 	envUseSchemaRegistry = "USE_SCHEMA_REGISTRY"
@@ -105,14 +105,14 @@ func ConfigFromEnvVars() (*Config, error) {
 	}
 	cfg.Env = env
 
-	authMode := os.Getenv(envAuthMode)
+	authType := os.Getenv(envAuthType)
 
-	if authMode == "" {
-		return &Config{}, fmt.Errorf("env is not set (%s)", envAuthMode)
+	if authType == "" {
+		return &Config{}, fmt.Errorf("env is not set (%s)", envAuthType)
 	}
-	cfg.AuthMode = authMode
+	cfg.AuthMode = authType
 
-	brokers, err := getBrokers(env, authMode)
+	brokers, err := getBrokers(env, authType)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func ConfigFromEnvVars() (*Config, error) {
 		cfg.SchemaRegistryConfig = *srConfig
 	}
 
-	if authMode == "sasl" {
+	if authType == "sasl" {
 		saslConfig, err := getSASLConfig()
 		if err != nil {
 			return &Config{}, err
@@ -194,14 +194,14 @@ func getSRConfig(env string) (*SchemaRegistryConfig, error) {
 		}
 	}
 
-	srUser := os.Getenv(envSchemaRegistryUser)
+	srUser := os.Getenv(envKafkaUser)
 	if srUser == "" {
 		srUser = kafkaUsername
 	}
 
-	srPassword := os.Getenv(envSchemaRegistryPassword)
+	srPassword := os.Getenv(envKafkaPassword)
 	if srPassword == "" {
-		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envSchemaRegistryPassword)
+		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envKafkaPassword)
 	}
 
 	return &SchemaRegistryConfig{

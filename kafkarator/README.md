@@ -98,6 +98,7 @@ if err != nil {
 |----------|-------------|---------|
 | `ENV` | Environment determines which Kafka service and authentication mode | `prod` |
 | `USE_SCHEMA_REGISTRY` | Boolean on whether schema registry should be used or not | `true` |
+| `KAFKA_AUTH_TYPE` | Determines how to authenticate with to Aiven | `sasl` or `tls`|
 
 ##### TLS mode
 
@@ -114,35 +115,31 @@ These environment variables are necessary as well for SASL mode
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `AZURE_SCOPE` | Azure scope to use for fetching tokens to authenticate with to Aiven | `api://aaaa-bbbb-cccc-dddd` |
+| `AZURE_KAFKA_SCOPE` | Azure scope to use for fetching tokens to authenticate with to Aiven | `api://aaaa-bbbb-cccc-dddd` |
 
-##### Using schema registry 
-
-These environment variables are necessary as well if you want to use schema registry 
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `SCHEMA_REGISTRY_PASSWORD` | Password to authenticate with to Aiven Schema Registry | `pass` |
 
 #### Optional Environment Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `KAFKA_BROKERS` | Comma-separated list of Kafka broker addresses to use | `broker1:9092,broker2:9092` |
-| `SCHEMA_REGISTRY_URL` | URL to the desired schema registry you want to use | `https://url.com:9090` |
-| `SCHEMA_REGISTRY_USER` | Username to authenticate with to the desired schema registry | `username` |
+| `KAFKA_SCHEMA_REGISTRY_URL` | URL to the desired schema registry you want to use | `https://url.com:9090` |
+| `KAFKA_USER` | Username to authenticate with to the desired schema registry | `username` |
+| `KAFKA_PASSWORD` | Password to authenticate with to Aiven Schema Registry | `pass` |
 
 If any of the above variables are not set, they will default to:
 
-Test/local environment:
+Test environment:
 - KAFKA_BROKERS = kafka-test-ture-test.com
-- SCHEMA_REGISTRY_URL = kafka-test-ture-test.com:9090
-- SCHEMA_REGISTRY_USER = avnadmin 
+- KAFKA_SCHEMA_REGISTRY_URL = kafka-test-ture-test.com:18360
+- KAFKA_USER: object ID as username for the application
+- KAFKA_PASSWORD: password associated with the user in Aiven
 
 Prod environment:
 - KAFKA_BROKERS = kafka-prod-ture-prod.com
-- SCHEMA_REGISTRY_URL = kafka-prod-ture-prod.com:9090
-- SCHEMA_REGISTRY_USER = avnadmin 
+- KAFKA_SCHEMA_REGISTRY_URL = kafka-prod-ture-prod.com:11132
+- KAFKA_USER: object ID as username for the application
+- KAFKA_PASSWORD: password associated with the user in Aiven
 
 
 ### Programmatic Configuration
