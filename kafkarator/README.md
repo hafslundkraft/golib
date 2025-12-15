@@ -8,6 +8,8 @@ providing automatic OpenTelemetry trace propagation as well as standardized metr
 
 The main abstraction is the *Connection* which is created with *New*. 
 
+Since the library uses github.com/confluentinc/confluent-kafka-go/v2 which uses the librdkafka which is a C library, CGO_ENABLED must be set to 1.
+
 ## Usage at a glance
 Ceremony exists in this package as with most packages: it must be configured, errors must be handled, etc. All such details
 are documented further down. Here, we want to give you an impression of what the package can offer once everything is

@@ -13,6 +13,9 @@ const (
 	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
 	envBrokers = "KAFKA_BROKERS"
 
+	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
+	envBroker = "KAFKA_BROKER"
+
 	// envCertFile is the environment variable for the Kafka certificate file path
 	envCertFile = "KAFKA_CERT_FILE"
 
@@ -112,11 +115,17 @@ func ConfigFromEnvVars() (*Config, error) {
 	}
 	cfg.AuthMode = authType
 
-	brokers, err := getBrokers(env, authType)
-	if err != nil {
-		return nil, err
+	if os.Getenv(envBrokers) != "" {
+		brokers, err := getBrokers(env, authType)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Brokers = brokers
+	} else {
+		// No broker was sat, use default
+		broker := os.Getenv(envBroker)
+		cfg.Brokers = []string{broker}
 	}
-	cfg.Brokers = brokers
 
 	useSchemaRegistry := os.Getenv(envUseSchemaRegistry)
 
