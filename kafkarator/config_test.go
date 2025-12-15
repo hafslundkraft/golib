@@ -115,7 +115,9 @@ func TestGetSASLConfig_MissingScope(t *testing.T) {
 
 func TestGetSRConfig_Success(t *testing.T) {
 	withEnv(t, map[string]string{
-		envKafkaPassword: "secret",
+		envKafkaUser:         "user",
+		envSchemaRegistryURL: "url.com",
+		envKafkaPassword:     "secret",
 	}, func() {
 		cfg, err := getSRConfig("test")
 
@@ -127,7 +129,9 @@ func TestGetSRConfig_Success(t *testing.T) {
 
 func TestGetSRConfig_MissingPassword(t *testing.T) {
 	withEnv(t, map[string]string{
-		envKafkaPassword: "",
+		envKafkaUser:         "user",
+		envSchemaRegistryURL: "url.com",
+		envKafkaPassword:     "",
 	}, func() {
 		_, err := getSRConfig("test")
 
@@ -143,6 +147,7 @@ func TestConfigFromEnvVars_TLS(t *testing.T) {
 		envCertFile: "cert.pem",
 		envKeyFile:  "key.pem",
 		envCAFile:   "ca.pem",
+		envBroker:   "broker:9090",
 	}, func() {
 		cfg, err := ConfigFromEnvVars()
 
