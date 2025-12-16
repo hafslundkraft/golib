@@ -27,12 +27,16 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 		return nil, fmt.Errorf("failed to resolve CA cert: %w", err)
 	}
 
-	return &kafka.ConfigMap{
+	conf := &kafka.ConfigMap{
 		"bootstrap.servers": c.Broker,
 		"security.protocol": "sasl_ssl",
 		"sasl.mechanisms":   "OAUTHBEARER",
 		"ssl.ca.location":   resolvedCA,
-	}, nil
+	}
+
+	fmt.Printf("config map: %+v", conf)
+
+	return conf, nil
 }
 
 func tlsConfigMap(c *Config) (*kafka.ConfigMap, error) {
