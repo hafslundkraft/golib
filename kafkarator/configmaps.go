@@ -29,12 +29,9 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 
 	return &kafka.ConfigMap{
 		"bootstrap.servers": c.Broker,
-		"security.protocol": "SASL_SSL",
+		"security.protocol": "sasl_ssl",
 		"sasl.mechanisms":   "OAUTHBEARER",
 		"ssl.ca.location":   resolvedCA,
-
-		// Required for OAuthBearer
-		"enable.sasl.oauthbearer.unsecure.jwt": true,
 	}, nil
 }
 
