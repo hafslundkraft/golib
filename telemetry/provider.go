@@ -41,16 +41,32 @@ type Provider struct {
 }
 
 type config struct {
-	localW      io.Writer
-	local       bool
-	localColors bool
-	attributes  map[string]string
-	testIDGen   bool
+	localMeterW  io.Writer
+	localLoggerW io.Writer
+	localTracerW io.Writer
+	local        bool
+	localColors  bool
+	attributes   map[string]string
+	idGenSeed    int64
 }
 
-func (c config) localWriter() io.Writer {
-	if c.localW != nil {
-		return c.localW
+func (c config) localLoggerWriter() io.Writer {
+	if c.localLoggerW != nil {
+		return c.localLoggerW
+	}
+	return os.Stdout
+}
+
+func (c config) localTracerWriter() io.Writer {
+	if c.localTracerW != nil {
+		return c.localTracerW
+	}
+	return os.Stdout
+}
+
+func (c config) localMeterWriter() io.Writer {
+	if c.localMeterW != nil {
+		return c.localMeterW
 	}
 	return os.Stdout
 }
@@ -181,12 +197,12 @@ func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider
 
 	var exporter tracesdk.SpanExporter = otlpExporter
 	if cfg.local {
-		exporter = &LineTraceExporter{Colors: cfg.localColors, w: cfg.localWriter()}
+		exporter = &LineTraceExporter{Colors: cfg.localColors, w: cfg.localTracerWriter()}
 	}
 
 	opts := []tracesdk.TracerProviderOption{tracesdk.WithBatcher(exporter)}
-	if cfg.testIDGen {
-		opts = append(opts, tracesdk.WithIDGenerator(singleIDGenerator{}))
+	if cfg.idGenSeed > 0 {
+		opts = append(opts, tracesdk.WithIDGenerator(newDeterministicIDGenerator(cfg.idGenSeed)))
 	}
 
 	return tracesdk.NewTracerProvider(opts...)
@@ -200,7 +216,7 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 
 	var exporter metricsdk.Exporter = otlpExporter
 	if cfg.local {
-		exporter = &LineMetricExporter{Colors: cfg.localColors, w: cfg.localWriter()}
+		exporter = &LineMetricExporter{Colors: cfg.localColors, w: cfg.localMeterWriter()}
 	}
 
 	return metricsdk.NewMeterProvider(metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter)))
@@ -212,7 +228,7 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 		opts = append(
 			opts,
 			logsdk.WithProcessor(
-				logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()}),
+				logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localLoggerWriter()}),
 			),
 		)
 	} else {

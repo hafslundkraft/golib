@@ -49,13 +49,14 @@ func (e *LineTraceExporter) ExportSpans(ctx context.Context, spans []tracesdk.Re
 		}
 		fmt.Fprintf(
 			e.w,
-			"%s id=%s name=%q start=%s dur=%s status=%s\n",
+			"%s id=%s name=%q start=%s dur=%s status=%s attributes=%s\n",
 			tag,
 			s.SpanContext().TraceID().String(),
 			s.Name(),
 			s.StartTime().Format(time.RFC3339),
 			s.EndTime().Sub(s.StartTime()),
 			status,
+			attributeString(s.Attributes()),
 		)
 	}
 	return nil
@@ -107,19 +108,19 @@ func (l LineMetricExporter) Export(ctx context.Context, metrics *metricdata.Reso
 			switch data := m.Data.(type) {
 			case metricdata.Sum[int64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%d attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(l.w, "%s %s name=%s value=%d attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes.ToSlice()))
 				}
 			case metricdata.Sum[float64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%f attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(l.w, "%s %s name=%s value=%f attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes.ToSlice()))
 				}
 			case metricdata.Gauge[int64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%d attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(l.w, "%s %s name=%s value=%d attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes.ToSlice()))
 				}
 			case metricdata.Gauge[float64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%f attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(l.w, "%s %s name=%s value=%f attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes.ToSlice()))
 				}
 			default:
 				// Ignoring histograms, summaries, etc.
@@ -130,9 +131,9 @@ func (l LineMetricExporter) Export(ctx context.Context, metrics *metricdata.Reso
 	return nil
 }
 
-func attributeString(set attribute.Set) string {
+func attributeString(attributes []attribute.KeyValue) string {
 	builder := strings.Builder{}
-	for i, v := range set.ToSlice() {
+	for i, v := range attributes {
 		if i > 0 {
 			builder.WriteString(", ")
 		}
