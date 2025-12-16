@@ -109,7 +109,7 @@ These environment variables are necessary as well for TLS mode
 |----------|-------------|---------|
 | `KAFKA_CERT_FILE` | Path to the client certificate file | `/path/to/client-cert.pem` |
 | `KAFKA_KEY_FILE` | Path to the client key file | `/path/to/client-key.pem` |
-| `KAFKA_CA_FILE` | Path to the Certificate Authority file | `/path/to/ca-cert.pem` |
+| `KAFKA_CA_CERT` | Either path to the Certificate Authority file or the certificate itself | `/path/to/ca-cert.pem` |
 
 ##### SASL mode
 
@@ -124,7 +124,7 @@ These environment variables are necessary as well for SASL mode
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `KAFKA_BROKERS` | Comma-separated list of Kafka broker addresses to use | `broker1:9092,broker2:9092` |
+| `KAFKA_BROKER` | Kafka broker address to use | `broker1:9092` |
 | `KAFKA_SCHEMA_REGISTRY_URL` | URL to the desired schema registry you want to use | `https://url.com:9090` |
 | `KAFKA_USER` | Username to authenticate with to the desired schema registry | `username` |
 | `KAFKA_PASSWORD` | Password to authenticate with to Aiven Schema Registry | `pass` |
@@ -134,13 +134,13 @@ If any of the above variables are not set, they will default to:
 Test environment:
 - KAFKA_BROKERS = kafka-test-ture-test.com
 - KAFKA_SCHEMA_REGISTRY_URL = kafka-test-ture-test.com:18360
-- KAFKA_USER: object ID as username for the application
+- KAFKA_USER: object ID from Azure as username for the application
 - KAFKA_PASSWORD: password associated with the user in Aiven
 
 Prod environment:
 - KAFKA_BROKERS = kafka-prod-ture-prod.com
 - KAFKA_SCHEMA_REGISTRY_URL = kafka-prod-ture-prod.com:11132
-- KAFKA_USER: object ID as username for the application
+- KAFKA_USER: object ID from Azure as username for the application
 - KAFKA_PASSWORD: password associated with the user in Aiven
 
 
@@ -150,10 +150,11 @@ Alternatively, you can create a `Config` struct directly:
 
 ```go
 config := kafkarator.Config{
-    Brokers:  []string{"broker1:9092", "broker2:9092"},
+    Broker:  "broker1:9092",
     CertFile: "/path/to/client-cert.pem",
     KeyFile:  "/path/to/client-key.pem",
-    CAFile:   "/path/to/ca-cert.pem",
+    CACert:   "/path/to/ca-cert.pem",
+    UseSchemaRegistry: "false",
 }
 
 conn, err := kafkarator.New(config)

@@ -1,6 +1,7 @@
 package kafkarator
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -64,12 +65,15 @@ func cloneConfigMap(src *kafka.ConfigMap) kafka.ConfigMap {
 }
 
 func resolveCertPath(certEnv, prefix string) (string, error) {
+	// the env is already a file path
 	if fi, err := os.Stat(certEnv); err == nil && !fi.IsDir() {
-		return certEnv, nil // already a valid file
+		return certEnv, nil
 	}
 
 	trimmed := strings.TrimSpace(certEnv)
-	if strings.HasPrefix(trimmed, "-----BEGIN") {
+
+	// helper to write cert content to a temp file
+	writeTemp := func(content string) (string, error) {
 		tmpFile, err := os.CreateTemp("", prefix)
 		if err != nil {
 			return "", fmt.Errorf("failed to create temp cert file: %w", err)
@@ -77,14 +81,31 @@ func resolveCertPath(certEnv, prefix string) (string, error) {
 
 		defer func() {
 			if cerr := tmpFile.Close(); cerr != nil {
-				log.Printf("failed to close temp cert file %q: %v", tmpFile.Name(), err)
+				log.Printf("failed to close temp cert file %q: %v", tmpFile.Name(), cerr)
 			}
 		}()
-		if _, err := tmpFile.WriteString(trimmed); err != nil {
+
+		if _, err := tmpFile.WriteString(content); err != nil {
 			return "", fmt.Errorf("failed to write cert content: %w", err)
 		}
+
 		return tmpFile.Name(), nil
 	}
 
-	return "", fmt.Errorf("KAFKA_CA_CERT is neither a valid file nor PEM content")
+	// raw PEM content
+	if strings.HasPrefix(trimmed, "-----BEGIN") {
+		return writeTemp(trimmed)
+	}
+
+	// base64-encoded PEM
+	if decoded, err := base64.StdEncoding.DecodeString(trimmed); err == nil {
+		decodedStr := strings.TrimSpace(string(decoded))
+		if strings.HasPrefix(decodedStr, "-----BEGIN") {
+			return writeTemp(decodedStr)
+		}
+	}
+
+	return "", fmt.Errorf(
+		"KAFKA_CA_CERT is neither a valid file, PEM content, nor base64-encoded PEM",
+	)
 }
