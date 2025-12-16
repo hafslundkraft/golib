@@ -65,20 +65,24 @@ func cloneConfigMap(src *kafka.ConfigMap) kafka.ConfigMap {
 }
 
 func resolveCertPath(certEnv, prefix string) (string, error) {
-	// the env is already a file path
+	certEnv = strings.TrimSpace(certEnv)
+	if certEnv == "" {
+		return "", fmt.Errorf("KAFKA_CA_CERT is empty")
+	}
+
+	// Replace escaped newlines (VERY important for K8s/Helm)
+	certEnv = strings.ReplaceAll(certEnv, `\n`, "\n")
+
+	// Already a file path
 	if fi, err := os.Stat(certEnv); err == nil && !fi.IsDir() {
 		return certEnv, nil
 	}
 
-	trimmed := strings.TrimSpace(certEnv)
-
-	// helper to write cert content to a temp file
 	writeTemp := func(content string) (string, error) {
 		tmpFile, err := os.CreateTemp("", prefix)
 		if err != nil {
 			return "", fmt.Errorf("failed to create temp cert file: %w", err)
 		}
-
 		defer func() {
 			if cerr := tmpFile.Close(); cerr != nil {
 				log.Printf("failed to close temp cert file %q: %v", tmpFile.Name(), cerr)
@@ -88,24 +92,25 @@ func resolveCertPath(certEnv, prefix string) (string, error) {
 		if _, err := tmpFile.WriteString(content); err != nil {
 			return "", fmt.Errorf("failed to write cert content: %w", err)
 		}
-
 		return tmpFile.Name(), nil
 	}
 
-	// raw PEM content
-	if strings.HasPrefix(trimmed, "-----BEGIN") {
-		return writeTemp(trimmed)
+	// PEM content
+	if strings.Contains(certEnv, "BEGIN CERTIFICATE") {
+		return writeTemp(certEnv)
 	}
 
-	// base64-encoded PEM
-	if decoded, err := base64.StdEncoding.DecodeString(trimmed); err == nil {
+	// Base64 PEM (edge cases)
+	clean := strings.ReplaceAll(certEnv, "\n", "")
+	if decoded, err := base64.StdEncoding.DecodeString(clean); err == nil {
 		decodedStr := strings.TrimSpace(string(decoded))
-		if strings.HasPrefix(decodedStr, "-----BEGIN") {
+		if strings.Contains(decodedStr, "BEGIN CERTIFICATE") {
 			return writeTemp(decodedStr)
 		}
 	}
 
 	return "", fmt.Errorf(
-		"KAFKA_CA_CERT is neither a valid file, PEM content, nor base64-encoded PEM",
+		"KAFKA_CA_CERT is not a file, PEM, or base64 PEM (starts with %.30q)",
+		certEnv,
 	)
 }
