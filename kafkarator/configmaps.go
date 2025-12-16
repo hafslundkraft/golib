@@ -22,6 +22,7 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 		"bootstrap.servers": c.Broker,
 		"security.protocol": "SASL_SSL",
 		"sasl.mechanisms":   "OAUTHBEARER",
+		"ssl.ca.location":   c.TLS.CACert,
 
 		// Required for OAuthBearer
 		"enable.sasl.oauthbearer.unsecure.jwt": true,
@@ -29,7 +30,7 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 }
 
 func tlsConfigMap(c *Config) (*kafka.ConfigMap, error) {
-	if c.TLS.CertFile == "" || c.TLS.KeyFile == "" || c.TLS.CAFile == "" {
+	if c.TLS.CertFile == "" || c.TLS.KeyFile == "" || c.TLS.CACert == "" {
 		return nil, fmt.Errorf("TLS mode enabled but certificate variables are missing")
 	}
 
@@ -38,7 +39,7 @@ func tlsConfigMap(c *Config) (*kafka.ConfigMap, error) {
 		"security.protocol":        "SSL",
 		"ssl.key.location":         c.TLS.KeyFile,
 		"ssl.certificate.location": c.TLS.CertFile,
-		"ssl.ca.location":          c.TLS.CAFile,
+		"ssl.ca.location":          c.TLS.CACert,
 	}
 
 	return conf, nil

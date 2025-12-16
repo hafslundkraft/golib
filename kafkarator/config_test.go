@@ -40,21 +40,21 @@ func TestGetTLSConfig_Success(t *testing.T) {
 	withEnv(t, map[string]string{
 		envCertFile: "cert.pem",
 		envKeyFile:  "key.pem",
-		envCAFile:   "ca.pem",
+		envCACert:   "ca.pem",
 	}, func() {
 		cfg, err := getTLSConfig()
 
 		require.NoError(t, err)
 		assert.Equal(t, "cert.pem", cfg.CertFile)
 		assert.Equal(t, "key.pem", cfg.KeyFile)
-		assert.Equal(t, "ca.pem", cfg.CAFile)
+		assert.Equal(t, "ca.pem", cfg.CACert)
 	})
 }
 
 func TestGetTLSConfig_MissingCert(t *testing.T) {
 	withEnv(t, map[string]string{
 		envKeyFile: "key.pem",
-		envCAFile:  "ca.pem",
+		envCACert:  "ca.pem",
 	}, func() {
 		_, err := getTLSConfig()
 
@@ -118,7 +118,7 @@ func TestConfigFromEnvVars_TLS(t *testing.T) {
 		envAuthType: "tls",
 		envCertFile: "cert.pem",
 		envKeyFile:  "key.pem",
-		envCAFile:   "ca.pem",
+		envCACert:   "ca.pem",
 		envBroker:   "broker:9090",
 	}, func() {
 		cfg, err := ConfigFromEnvVars()
