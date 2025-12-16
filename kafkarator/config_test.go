@@ -40,14 +40,12 @@ func TestGetTLSConfig_Success(t *testing.T) {
 	withEnv(t, map[string]string{
 		envCertFile: "cert.pem",
 		envKeyFile:  "key.pem",
-		envCACert:   "ca.pem",
 	}, func() {
 		cfg, err := getTLSConfig()
 
 		require.NoError(t, err)
 		assert.Equal(t, "cert.pem", cfg.CertFile)
 		assert.Equal(t, "key.pem", cfg.KeyFile)
-		assert.Equal(t, "ca.pem", cfg.CACert)
 	})
 }
 

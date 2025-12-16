@@ -54,9 +54,6 @@ type TLSConfig struct {
 
 	// KeyFile is the file containing the key to the Kafka service.
 	KeyFile string
-
-	// CACert is the certificate authority file.
-	CACert string
 }
 
 // SchemaRegistryConfig contains the config for the schema registry
@@ -83,6 +80,9 @@ type Config struct {
 
 	// UseSchemaRegistry enables or unenables creation of schema registry client
 	UseSchemaRegistry bool
+
+	// CA certificate for the service
+	CACert string
 
 	// SASL configuration
 	SASL SASLConfig
@@ -117,6 +117,13 @@ func ConfigFromEnvVars() (*Config, error) {
 	}
 
 	cfg.Broker = broker
+
+	caCert := os.Getenv(envCACert)
+	if caCert == "" {
+		return &Config{}, fmt.Errorf("env is not set (%s)", envCACert)
+	}
+
+	cfg.CACert = caCert
 
 	useSchemaRegistry := os.Getenv(envUseSchemaRegistry)
 
@@ -170,14 +177,9 @@ func getTLSConfig() (*TLSConfig, error) {
 	if keyFile == "" {
 		return &TLSConfig{}, fmt.Errorf("environment variable %s is not set", envKeyFile)
 	}
-	caCert := os.Getenv(envCACert)
-	if caCert == "" {
-		return &TLSConfig{}, fmt.Errorf("environment variable %s is not set", envCACert)
-	}
 
 	return &TLSConfig{
 		KeyFile:  keyFile,
-		CACert:   caCert,
 		CertFile: certFile,
 	}, nil
 }

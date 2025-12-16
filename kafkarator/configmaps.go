@@ -22,7 +22,7 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 		return nil, fmt.Errorf("failed to create Azure token provider")
 	}
 
-	resolvedCA, err := resolveCertPath(c.TLS.CACert, "kafka-ca-cert-")
+	resolvedCA, err := resolveCertPath(c.CACert, "kafka-ca-cert-")
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve CA cert: %w", err)
 	}
@@ -39,8 +39,13 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 }
 
 func tlsConfigMap(c *Config) (*kafka.ConfigMap, error) {
-	if c.TLS.CertFile == "" || c.TLS.KeyFile == "" || c.TLS.CACert == "" {
+	if c.TLS.CertFile == "" || c.TLS.KeyFile == "" {
 		return nil, fmt.Errorf("TLS mode enabled but certificate variables are missing")
+	}
+
+	resolvedCA, err := resolveCertPath(c.CACert, "kafka-ca-cert-")
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve CA cert: %w", err)
 	}
 
 	conf := &kafka.ConfigMap{
@@ -48,7 +53,7 @@ func tlsConfigMap(c *Config) (*kafka.ConfigMap, error) {
 		"security.protocol":        "SSL",
 		"ssl.key.location":         c.TLS.KeyFile,
 		"ssl.certificate.location": c.TLS.CertFile,
-		"ssl.ca.location":          c.TLS.CACert,
+		"ssl.ca.location":          resolvedCA,
 	}
 
 	return conf, nil
