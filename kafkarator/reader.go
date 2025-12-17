@@ -84,7 +84,7 @@ func (rc *Reader) Read(
 		for partition, off := range latestOffsets {
 			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
 				{
-					Topic:     &rc.topic, // Use last polled topic
+					Topic:     &rc.topic,
 					Partition: partition,
 					Offset:    off + 1,
 				},

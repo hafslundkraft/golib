@@ -16,8 +16,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.38.0
 )
 
-replace github.com/confluentinc/confluent-kafka-go => github.com/confluentinc/confluent-kafka-go/v2 v2.12.0
-
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect

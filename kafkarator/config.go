@@ -18,7 +18,7 @@ const (
 	// envKeyFile is the environment variable for the Kafka key file path
 	envKeyFile = "KAFKA_KEY_FILE"
 
-	// envCACert is the environment variable for the Kafka CA certitfication
+	// envCACert is the environment variable for the Kafka CA certification
 	envCACert = "KAFKA_CA_CERT"
 
 	// envAzureOID is the client object id for the app in Azure

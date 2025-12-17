@@ -67,9 +67,10 @@ func (s *AvroSerializer) ensureSchemaLoaded(ctx context.Context) error {
 	}
 
 	if meta.Schema == "" {
+		emptyErr := fmt.Errorf("empty schema returned for subject %s", s.schemaSubject)
 		s.tel.Logger().ErrorContext(spanCtx, "empty schema returned",
 			"subject", s.schemaSubject)
-		span.RecordError(err)
+		span.RecordError(emptyErr)
 		return fmt.Errorf("returned empty: %s", s.schemaSubject)
 	}
 

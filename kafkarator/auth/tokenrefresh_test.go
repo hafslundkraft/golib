@@ -11,17 +11,20 @@ import (
 )
 
 type fakeAccessTokenProvider struct {
-	token string
+	value string
 	err   error
 	calls int
 }
 
-func (f *fakeAccessTokenProvider) GetAccessToken(ctx context.Context) (string, error) {
+func (f *fakeAccessTokenProvider) GetAccessToken(ctx context.Context) (kafka.OAuthBearerToken, error) {
 	f.calls++
 	if f.err != nil {
-		return "", f.err
+		return kafka.OAuthBearerToken{}, f.err
 	}
-	return f.token, nil
+	return kafka.OAuthBearerToken{
+		TokenValue: f.value,
+		Expiration: time.Now().Add(10 * time.Minute),
+	}, nil
 }
 
 type fakeTokenReceiver struct {
@@ -49,7 +52,7 @@ func (r *fakeTokenReceiver) SetOAuthBearerTokenFailure(errStr string) error {
 
 func TestRefreshOAuthToken_Success(t *testing.T) {
 	ctx := context.Background()
-	tp := &fakeAccessTokenProvider{token: "tok123"}
+	tp := &fakeAccessTokenProvider{value: "tok123"}
 	tr := &fakeTokenReceiver{}
 	tracer := sdktrace.NewTracerProvider().Tracer("test")
 
@@ -100,7 +103,7 @@ func TestRefreshOAuthToken_TokenProviderError(t *testing.T) {
 
 func TestRefreshOAuthToken_TokenReceiverError(t *testing.T) {
 	ctx := context.Background()
-	tp := &fakeAccessTokenProvider{token: "tok123"}
+	tp := &fakeAccessTokenProvider{value: "tok123"}
 	tr := &fakeTokenReceiver{forceSetError: errors.New("set fail")}
 	tracer := sdktrace.NewTracerProvider().Tracer("test")
 
@@ -204,7 +207,7 @@ func TestStartOAuthRefreshLoop_InitialSuccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tp := &fakeAccessTokenProvider{token: "tok123"}
+	tp := &fakeAccessTokenProvider{value: "tok123"}
 	tr := &fakeTokenReceiver{}
 	tracer := sdktrace.NewTracerProvider().Tracer("test")
 

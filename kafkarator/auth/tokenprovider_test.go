@@ -11,7 +11,7 @@ import (
 )
 
 type mockCredential struct {
-	token string
+	value string
 	err   error
 	calls int
 }
@@ -22,13 +22,13 @@ func (m *mockCredential) GetToken(ctx context.Context, opts policy.TokenRequestO
 		return azcore.AccessToken{}, m.err
 	}
 	return azcore.AccessToken{
-		Token:     m.token,
+		Token:     m.value,
 		ExpiresOn: time.Now().Add(time.Hour),
 	}, nil
 }
 
 func TestTokenProvider_GetAccessToken_Success(t *testing.T) {
-	mockCred := &mockCredential{token: "abc123"}
+	mockCred := &mockCredential{value: "abc123"}
 
 	p := &TokenProvider{
 		cred:  mockCred,
@@ -40,7 +40,7 @@ func TestTokenProvider_GetAccessToken_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if token != "abc123" {
+	if token.TokenValue != "abc123" {
 		t.Fatalf("expected token abc123, got %s", token)
 	}
 

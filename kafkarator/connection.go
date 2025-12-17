@@ -107,7 +107,7 @@ func (c *Connection) Writer(topic string) (*Writer, error) {
 	}
 
 	if c.config.AuthMode == "sasl" {
-		if err := c.startOAuth(ctxBackground(), p); err != nil {
+		if err := c.startOAuth(context.Background(), p); err != nil {
 			p.Close()
 			return nil, err
 		}
@@ -141,7 +141,7 @@ func (c *Connection) Reader(topic, group string) (*Reader, error) {
 	}
 
 	if c.config.AuthMode == "sasl" {
-		if err := c.startOAuth(ctxBackground(), consumer); err != nil {
+		if err := c.startOAuth(context.Background(), consumer); err != nil {
 			_ = consumer.Close()
 			return nil, fmt.Errorf("start oauth: %w", err)
 		}
@@ -234,8 +234,4 @@ func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) erro
 	}
 
 	return nil
-}
-
-func ctxBackground() context.Context {
-	return context.Background()
 }

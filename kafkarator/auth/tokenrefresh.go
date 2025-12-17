@@ -76,17 +76,12 @@ func refreshOAuthToken(
 	ctx, span := tracer.Start(ctx, "kafka.refresh_oauth_token")
 	defer span.End()
 
-	tokenStr, err := tp.GetAccessToken(ctx)
+	token, err := tp.GetAccessToken(ctx)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		_ = tr.SetOAuthBearerTokenFailure(err.Error())
 		return kafka.OAuthBearerToken{}, fmt.Errorf("failed to get oauth token: %w", err)
-	}
-
-	token := kafka.OAuthBearerToken{
-		TokenValue: tokenStr,
-		Expiration: time.Now().Add(1 * time.Hour),
 	}
 
 	if err := tr.SetOAuthBearerToken(token); err != nil {
