@@ -32,7 +32,6 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 		"security.protocol": "sasl_ssl",
 		"sasl.mechanisms":   "OAUTHBEARER",
 		"ssl.ca.location":   resolvedCA,
-		"debug":             "security,broker,protocol,admin",
 	}
 
 	return conf, nil
