@@ -76,7 +76,13 @@ func (c *Connection) Test(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create admin: %w", err)
 	}
-	defer admin.Close()
+
+	if c.config.AuthMode == "sasl" {
+		if err := c.startOAuth(ctx, admin); err != nil {
+			admin.Close()
+			return fmt.Errorf("create token provider: %w", err)
+		}
+	}
 
 	_, err = admin.GetMetadata(nil, true, 5_000)
 	if err != nil {
@@ -101,7 +107,10 @@ func (c *Connection) Writer(topic string) (*Writer, error) {
 	}
 
 	if c.config.AuthMode == "sasl" {
-		go c.startOAuth(ctxBackground(), p)
+		if err := c.startOAuth(ctxBackground(), p); err != nil {
+			p.Close()
+			return nil, err
+		}
 	}
 
 	counter, _ := c.tel.Meter().Int64Counter(meterProducedMessages)
@@ -132,7 +141,10 @@ func (c *Connection) Reader(topic, group string) (*Reader, error) {
 	}
 
 	if c.config.AuthMode == "sasl" {
-		go c.startOAuth(ctxBackground(), consumer)
+		if err := c.startOAuth(ctxBackground(), consumer); err != nil {
+			_ = consumer.Close()
+			return nil, fmt.Errorf("start oauth: %w", err)
+		}
 	}
 
 	lagGauge, err := c.tel.Meter().Int64Gauge(gaugeLag)
@@ -207,19 +219,21 @@ func (c *Connection) ChannelReader(
 	return outgoing, nil
 }
 
-func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) {
+func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) error {
 	tp, err := auth.NewDefaultTokenProvider(c.config.SASL.Scope)
 	if err != nil {
 		c.tel.Logger().ErrorContext(ctx, "failed to create token provider", "error", err)
-		return
+		return fmt.Errorf("create token provider: %w", err)
 	}
 
 	tracer := c.tel.Tracer()
 
 	if err := auth.StartOAuthRefreshLoop(ctx, tp, tr, tracer); err != nil {
 		c.tel.Logger().ErrorContext(ctx, "failed to refresh token", "error", err)
-		return
+		return fmt.Errorf("start oauth refresh loop: %w", err)
 	}
+
+	return nil
 }
 
 func ctxBackground() context.Context {

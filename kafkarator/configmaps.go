@@ -35,8 +35,6 @@ func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
 		"debug":             "security,broker,protocol,admin",
 	}
 
-	fmt.Printf("config map: %+v", conf)
-
 	return conf, nil
 }
 
