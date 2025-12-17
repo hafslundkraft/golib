@@ -3,8 +3,8 @@ package auth
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -19,19 +19,19 @@ type mockCredential struct {
 }
 
 func fakeJWT(oid string, exp time.Time) string {
-	header := base64.RawURLEncoding.EncodeToString(
-		[]byte(`{"alg":"none"}`),
-	)
+	headerBytes, _ := json.Marshal(map[string]string{
+		"alg": "none",
+	})
 
-	payload := base64.RawURLEncoding.EncodeToString(
-		[]byte(fmt.Sprintf(
-			`{"exp":%d,"oid":"%s"}`,
-			exp.Unix(),
-			oid,
-		)),
-	)
+	payloadBytes, _ := json.Marshal(map[string]any{
+		"exp": exp.Unix(),
+		"oid": oid,
+	})
 
-	// alg=none → empty signature is valid for parsing
+	header := base64.RawURLEncoding.EncodeToString(headerBytes)
+	payload := base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+	// alg=none → empty signature is valid
 	return header + "." + payload + "."
 }
 
