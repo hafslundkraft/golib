@@ -2,7 +2,9 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +16,23 @@ type mockCredential struct {
 	value string
 	err   error
 	calls int
+}
+
+func fakeJWT(oid string, exp time.Time) string {
+	header := base64.RawURLEncoding.EncodeToString(
+		[]byte(`{"alg":"none"}`),
+	)
+
+	payload := base64.RawURLEncoding.EncodeToString(
+		[]byte(fmt.Sprintf(
+			`{"exp":%d,"oid":"%s"}`,
+			exp.Unix(),
+			oid,
+		)),
+	)
+
+	// alg=none → empty signature is valid for parsing
+	return header + "." + payload + "."
 }
 
 func (m *mockCredential) GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error) {
@@ -28,7 +47,12 @@ func (m *mockCredential) GetToken(ctx context.Context, opts policy.TokenRequestO
 }
 
 func TestTokenProvider_GetAccessToken_Success(t *testing.T) {
-	mockCred := &mockCredential{value: "abc123"}
+	jwt := fakeJWT(
+		"11111111-2222-3333-4444-555555555555",
+		time.Now().Add(time.Hour),
+	)
+
+	mockCred := &mockCredential{value: jwt}
 
 	p := &TokenProvider{
 		cred:  mockCred,
@@ -40,7 +64,7 @@ func TestTokenProvider_GetAccessToken_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if token.TokenValue != "abc123" {
+	if token.TokenValue != jwt {
 		t.Fatalf("expected token abc123, got %s", token)
 	}
 
