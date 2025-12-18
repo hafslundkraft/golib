@@ -3,6 +3,7 @@ package kafkarator
 import (
 	"context"
 
+	"github.com/hamba/avro/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -30,6 +31,18 @@ type Message struct {
 
 	// Headers are keys value header pairs associated with the message.
 	Headers map[string][]byte
+}
+
+// Options lets user decide schema convention for the topic
+type Options struct {
+	UseLatestVersion    bool
+	SubjectNameProvider func(string) (string, error)
+}
+
+type cachedSchema struct {
+	schemaID     int
+	schema       avro.Schema
+	schemaLoaded bool
 }
 
 // ExtractTraceContext extracts the OpenTelemetry trace context from the message headers

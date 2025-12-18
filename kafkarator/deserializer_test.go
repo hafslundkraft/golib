@@ -12,8 +12,6 @@ import (
 
 func TestAvroDeserializer_Success(t *testing.T) {
 	ctx := context.Background()
-
-	// Test schema
 	schemaStr := `{
         "type": "record",
         "name": "TestMsg",
@@ -37,7 +35,16 @@ func TestAvroDeserializer_Success(t *testing.T) {
 	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
 	defer shutdown(ctx)
 
-	d := newAvroDeserializer(mock, tel)
+	d := newAvroDeserializer(
+		mock,
+		Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+		},
+		tel,
+	)
 
 	out, err := d.Deserialize(ctx, "test-topic", wire)
 	if err != nil {
@@ -61,7 +68,16 @@ func TestAvroDeserializer_InvalidMagicByte(t *testing.T) {
 	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
 	defer shutdown(ctx)
 
-	d := newAvroDeserializer(mock, tel)
+	d := newAvroDeserializer(
+		mock,
+		Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+		},
+		tel,
+	)
 
 	out, err := d.Deserialize(ctx, "test-topic", []byte{9, 9, 9})
 	if err != nil {
@@ -81,7 +97,16 @@ func TestAvroDeserializer_UnknownSchemaID(t *testing.T) {
 	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
 	defer shutdown(ctx)
 
-	d := newAvroDeserializer(mock, tel)
+	d := newAvroDeserializer(
+		mock,
+		Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+		},
+		tel,
+	)
 
 	wire := []byte{0, 0, 0, 0, 7} // no payload but valid header
 
@@ -110,7 +135,16 @@ func TestAvroDeserializer_BadPayload(t *testing.T) {
 	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
 	defer shutdown(ctx)
 
-	d := newAvroDeserializer(mock, tel)
+	d := newAvroDeserializer(
+		mock,
+		Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+		},
+		tel,
+	)
 
 	// invalid (non-avro) payload
 	wire := []byte{0, 0, 0, 0, 1, 0xFF, 0xFF, 0xFF}
@@ -140,7 +174,16 @@ func TestAvroDeserializer_SchemaCache(t *testing.T) {
 	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
 	defer shutdown(ctx)
 
-	d := newAvroDeserializer(mock, tel)
+	d := newAvroDeserializer(
+		mock,
+		Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+		},
+		tel,
+	)
 
 	// Encode avro payload twice
 	schema, _ := avro.Parse(schemaStr)

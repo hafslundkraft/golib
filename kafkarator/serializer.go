@@ -15,119 +15,148 @@ import (
 type ValueSerializer interface {
 	// Serialize takes a value of any type and returns the final bytes to send to Kafka
 	// For Avro: magic byte + schema ID (big-endian) + avro payload.
-	Serialize(ctx context.Context, value any) ([]byte, error)
+	Serialize(ctx context.Context, topic string, value any) ([]byte, error)
 }
 
 // AvroSerializer serializes values using Avro encoding and the
 // Confluent Schema Registry wire format.
 type AvroSerializer struct {
-	srClient      sr.Client
-	schemaSubject string
-	tel           *telemetry.Provider
+	srClient sr.Client
+	options  Options
+	tel      *telemetry.Provider
 
-	mu           sync.Mutex
-	schema       avro.Schema
-	schemaID     int
-	schemaLoaded bool
+	mu          sync.Mutex
+	schemaCache map[string]cachedSchema
 }
 
-func newAvroSerializer(srClient sr.Client, topic string, tel *telemetry.Provider) *AvroSerializer {
+func newAvroSerializer(srClient sr.Client, options Options, tel *telemetry.Provider) *AvroSerializer {
 	if tel == nil {
 		panic("telemetry provider is nil")
 	}
 	if srClient == nil {
 		panic("srClient provider is nil")
 	}
+
+	if options.SubjectNameProvider == nil {
+		panic("SubjectNameProvider is nil")
+	}
+
 	return &AvroSerializer{
-		srClient:      srClient,
-		schemaSubject: topic + "-value",
-		tel:           tel,
+		srClient:    srClient,
+		options:     options,
+		tel:         tel,
+		schemaCache: make(map[string]cachedSchema),
 	}
 }
 
-func (s *AvroSerializer) ensureSchemaLoaded(ctx context.Context) error {
-	if s.schemaLoaded {
-		return nil
+// Serialize creates the Confluent-wire-format payload
+func (s *AvroSerializer) Serialize(
+	ctx context.Context,
+	topic string,
+	value any,
+) ([]byte, error) {
+	ctx, span := s.tel.Tracer().Start(ctx, "kafkarator.AvroSerializer.Serialize")
+	defer span.End()
+
+	if value == nil {
+		return nil, fmt.Errorf("cannot serialize nil value")
+	}
+
+	subject, err := s.options.SubjectNameProvider(topic)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.SetAttributes(attribute.String("schema.subject", subject))
+
+	cached, err := s.getOrLoadSchema(ctx, subject)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	avroBytes, err := avro.Marshal(cached.schema, value)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("avro marshal failed: %w", err)
+	}
+
+	// Confluent wire format:
+	// magic byte (0) + schema ID (4 bytes big-endian) + payload
+	final := make([]byte, 0, len(avroBytes)+5)
+	final = append(final,
+		0,
+		byte(cached.schemaID>>24),
+		byte(cached.schemaID>>16),
+		byte(cached.schemaID>>8),
+		byte(cached.schemaID),
+	)
+	final = append(final, avroBytes...)
+
+	span.SetAttributes(
+		attribute.Int("schema.id", cached.schemaID),
+		attribute.Int("avro.payload_size", len(avroBytes)),
+		attribute.Int("final.wire_size", len(final)),
+	)
+
+	return final, nil
+}
+
+func (s *AvroSerializer) getOrLoadSchema(
+	ctx context.Context,
+	subject string,
+) (cachedSchema, error) {
+	s.mu.Lock()
+	cached, ok := s.schemaCache[subject]
+	s.mu.Unlock()
+
+	if ok && cached.schemaLoaded {
+		return cached, nil
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	spanCtx, span := s.tel.Tracer().Start(ctx, "AvroSerializer.ensureSchemaLoaded")
+	if cached, ok := s.schemaCache[subject]; ok && cached.schemaLoaded {
+		return cached, nil
+	}
+
+	_, span := s.tel.Tracer().Start(ctx, "kafkarator.AvroSerializer.loadSchema")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("schema.subject", s.schemaSubject))
+	span.SetAttributes(attribute.String("schema.subject", subject))
 
-	meta, err := s.srClient.GetLatestSchemaMetadata(s.schemaSubject)
+	if !s.options.UseLatestVersion {
+		return cachedSchema{}, fmt.Errorf(
+			"UseLatestVersion=false is not supported without explicit schema",
+		)
+	}
+
+	meta, err := s.srClient.GetLatestSchemaMetadata(subject)
 	if err != nil {
-		s.tel.Logger().ErrorContext(spanCtx, "schema registry lookup failed",
-			"subject", s.schemaSubject, "error", err)
 		span.RecordError(err)
-		return fmt.Errorf("load schema from registry: %w", err)
+		return cachedSchema{}, fmt.Errorf("get latest schema metadata: %w", err)
 	}
 
 	if meta.Schema == "" {
-		emptyErr := fmt.Errorf("empty schema returned for subject %s", s.schemaSubject)
-		s.tel.Logger().ErrorContext(spanCtx, "empty schema returned",
-			"subject", s.schemaSubject)
-		span.RecordError(emptyErr)
-		return fmt.Errorf("returned empty: %s", s.schemaSubject)
+		return cachedSchema{}, fmt.Errorf("empty schema for subject %s", subject)
 	}
 
-	// Parse schema using hamba/avro lib
-	parsed, err := avro.Parse(meta.Schema)
+	schema, err := avro.Parse(meta.Schema)
 	if err != nil {
-		s.tel.Logger().ErrorContext(spanCtx, "avro schema parse failed",
-			"subject", s.schemaSubject, "error", err)
 		span.RecordError(err)
-		return fmt.Errorf("parse avro schema: %w", err)
+		return cachedSchema{}, fmt.Errorf("parse avro schema: %w", err)
 	}
 
-	s.schema = parsed
-	s.schemaID = meta.ID
-	s.schemaLoaded = true
-	span.SetAttributes(attribute.Int("schema.id", s.schemaID))
-
-	return nil
-}
-
-// Serialize creates the Confluent-wire-format payload
-func (s *AvroSerializer) Serialize(ctx context.Context, msg any) ([]byte, error) {
-	spanCtx, span := s.tel.Tracer().Start(ctx, "AvroSerializer.Serialize")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("schema.subject", s.schemaSubject),
-	)
-	if err := s.ensureSchemaLoaded(ctx); err != nil {
-		span.RecordError(err)
-		return nil, err
+	cached = cachedSchema{
+		schema:       schema,
+		schemaID:     meta.ID,
+		schemaLoaded: true,
 	}
 
-	avroBytes, err := avro.Marshal(s.schema, msg)
-	if err != nil {
-		s.tel.Logger().ErrorContext(spanCtx, "avro marshal failed",
-			"subject", s.schemaSubject, "error", err)
-		span.RecordError(err)
-		return nil, fmt.Errorf("avro encoding failed: %w", err)
-	}
+	s.schemaCache[subject] = cached
+	span.SetAttributes(attribute.Int("schema.id", meta.ID))
 
-	final := make([]byte, 0, len(avroBytes)+5)
-
-	// schema ID is 4 bytes big-endian
-	final = append(final,
-		0, // magic byte
-		byte(s.schemaID>>24),
-		byte(s.schemaID>>16),
-		byte(s.schemaID>>8),
-		byte(s.schemaID),
-	)
-
-	final = append(final, avroBytes...)
-	span.SetAttributes(
-		attribute.Int("schema.id", s.schemaID),
-		attribute.Int("avro.payload_size", len(avroBytes)),
-		attribute.Int("final.wire_size", len(final)),
-	)
-	return final, nil
+	return cached, nil
 }

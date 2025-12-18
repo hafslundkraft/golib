@@ -20,29 +20,34 @@ type ValueDeserializer interface {
 // AvroDeserializer deserializes values with Avro encoding and the
 // Confluent Schema Registry wire format to bytes
 type AvroDeserializer struct {
-	srClient sr.Client
-	tel      *telemetry.Provider
+	srClient            sr.Client
+	tel                 *telemetry.Provider
+	subjectNameProvider func(string) (string, error)
 
 	mu      sync.Mutex
 	schemas map[string]cachedSchema
 }
 
-type cachedSchema struct {
-	id     int
-	schema avro.Schema
-}
+func newAvroDeserializer(
+	srClient sr.Client,
+	options Options,
+	tel *telemetry.Provider,
+) *AvroDeserializer {
+	if options.SubjectNameProvider == nil {
+		panic("SubjectNameProvider is nil")
+	}
 
-func newAvroDeserializer(srClient sr.Client, tel *telemetry.Provider) *AvroDeserializer {
 	return &AvroDeserializer{
-		srClient: srClient,
-		tel:      tel,
-		schemas:  map[string]cachedSchema{},
+		srClient:            srClient,
+		tel:                 tel,
+		subjectNameProvider: options.SubjectNameProvider,
+		schemas:             map[string]cachedSchema{},
 	}
 }
 
 // Deserialize deserializes the bytes to a domain value according to its schema
 func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value []byte) (any, error) {
-	ctx, span := d.tel.Tracer().Start(ctx, "AvroDeserializer.Deserialize")
+	ctx, span := d.tel.Tracer().Start(ctx, "kafkarator.AvroDeserializer.Deserialize")
 	defer span.End()
 
 	// Not Avro Confluent framing
@@ -51,7 +56,11 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 	}
 
 	schemaID := int(value[1])<<24 | int(value[2])<<16 | int(value[3])<<8 | int(value[4])
-	subject := topic + "-value"
+	subject, err := d.subjectNameProvider(topic)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	span.SetAttributes(
 		attribute.String("schema.subject", subject),
@@ -83,11 +92,11 @@ func (d *AvroDeserializer) loadSchema(ctx context.Context, subject string, schem
 	s, ok := d.schemas[subject]
 	d.mu.Unlock()
 
-	if ok && s.id == schemaID {
+	if ok && s.schemaID == schemaID {
 		return s.schema, nil
 	}
 
-	ctx, span := d.tel.Tracer().Start(ctx, "AvroDeserializer.loadSchema")
+	ctx, span := d.tel.Tracer().Start(ctx, "kafkarator.AvroDeserializer.loadSchema")
 	defer span.End()
 
 	d.tel.Logger().InfoContext(ctx, "fetching schema from registry",
@@ -106,7 +115,7 @@ func (d *AvroDeserializer) loadSchema(ctx context.Context, subject string, schem
 	}
 
 	d.mu.Lock()
-	d.schemas[subject] = cachedSchema{id: schemaID, schema: parsed}
+	d.schemas[subject] = cachedSchema{schemaID: schemaID, schema: parsed}
 	d.mu.Unlock()
 
 	return parsed, nil

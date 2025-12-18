@@ -9,7 +9,7 @@ import (
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 	"github.com/hafslundkraft/golib/telemetry"
 
-	"github.com/hafslundkraft/golib/kafkarator/auth"
+	"github.com/hafslundkraft/golib/kafkarator/internal/auth"
 )
 
 const (
@@ -93,12 +93,12 @@ func (c *Connection) Test(ctx context.Context) error {
 }
 
 // Serializer returns a serializer for serializing messages from bytes to avro
-func (c *Connection) Serializer(topic string) ValueSerializer {
-	return newAvroSerializer(c.srClient, topic, c.tel)
+func (c *Connection) Serializer(options Options) ValueSerializer {
+	return newAvroSerializer(c.srClient, options, c.tel)
 }
 
 // Writer returns a writer for writing messages to Kafka.
-func (c *Connection) Writer(topic string) (*Writer, error) {
+func (c *Connection) Writer() (*Writer, error) {
 	conf := cloneConfigMap(c.configMap)
 
 	p, err := kafka.NewProducer(&conf)
@@ -115,12 +115,12 @@ func (c *Connection) Writer(topic string) (*Writer, error) {
 
 	counter, _ := c.tel.Meter().Int64Counter(meterProducedMessages)
 
-	return newWriter(p, topic, counter, c.tel), nil
+	return newWriter(p, counter, c.tel), nil
 }
 
 // Deserializer returns a deserializer for deserializing messages from avro to bytes
-func (c *Connection) Deserializer(topic string) ValueDeserializer {
-	return newAvroDeserializer(c.srClient, c.tel)
+func (c *Connection) Deserializer(options Options) ValueDeserializer {
+	return newAvroDeserializer(c.srClient, options, c.tel)
 }
 
 // Reader returns a reader that is used to fetch messages from Kafka.

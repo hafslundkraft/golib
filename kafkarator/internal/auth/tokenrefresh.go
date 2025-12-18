@@ -35,7 +35,7 @@ func StartOAuthRefreshLoop(
 	// Initial token refresh
 	token, err := refreshOAuthToken(ctx, tp, tr, tracer)
 	if err != nil {
-		return err
+		return fmt.Errorf("refresh oauth token: %w", err)
 	}
 
 	refreshDelay := refreshInterval(token)

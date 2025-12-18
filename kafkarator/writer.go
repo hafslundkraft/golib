@@ -14,13 +14,11 @@ import (
 
 func newWriter(
 	p *kafka.Producer,
-	topic string,
 	pmc metric.Int64Counter,
 	tel *telemetry.Provider,
 ) *Writer {
 	w := &Writer{
 		producer:                p,
-		topic:                   topic,
 		tel:                     tel,
 		producedMessagesCounter: pmc,
 		closed:                  false,
@@ -36,7 +34,6 @@ func newWriter(
 type Writer struct {
 	producedMessagesCounter metric.Int64Counter
 	producer                *kafka.Producer
-	topic                   string
 	tel                     *telemetry.Provider
 	closed                  bool
 }
@@ -58,12 +55,12 @@ func (w *Writer) Close(ctx context.Context) error {
 // Write writes the given message with headers to the topic. An important side effect is
 // that if there is an OpenTelemetry tracing span associated with the context, it is extracted
 // and included in the header that is sent to Kafka.
-func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[string][]byte) error {
+func (w *Writer) Write(ctx context.Context, message *Message) error {
 	if w.closed {
-		return fmt.Errorf("writer is closed")
+		return fmt.Errorf("writer closed")
 	}
 
-	traceHeaders := injectTraceContext(ctx, headers)
+	traceHeaders := injectTraceContext(ctx, message.Headers)
 
 	kafkaHeaders := make([]kafka.Header, 0, len(traceHeaders))
 	for k, v := range traceHeaders {
@@ -72,11 +69,11 @@ func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[strin
 
 	msg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{
-			Topic:     &w.topic,
+			Topic:     &message.Topic,
 			Partition: kafka.PartitionAny,
 		},
-		Value:   value,
-		Key:     key,
+		Value:   message.Value,
+		Key:     message.Key,
 		Headers: kafkaHeaders,
 	}
 
@@ -84,8 +81,8 @@ func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[strin
 	deliveryChan := make(chan kafka.Event, 1)
 	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
-		w.tel.Logger().ErrorContext(ctx, fmt.Sprintf("failed to produce message: %v", err))
-		return fmt.Errorf("failed to produce message: %w", err)
+		w.tel.Logger().ErrorContext(ctx, fmt.Sprintf("producing message: %v", err))
+		return fmt.Errorf("produce kafka message: %w", err)
 	}
 
 	ev := <-deliveryChan
@@ -94,9 +91,9 @@ func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[strin
 
 	if m.TopicPartition.Error != nil {
 		w.tel.Logger().ErrorContext(ctx,
-			"delivery failed", "topic", w.topic, "error", m.TopicPartition.Error,
+			"delivery failed", "topic", message.Topic, "error", m.TopicPartition.Error,
 		)
-		return fmt.Errorf("delivery failed: %w", m.TopicPartition.Error)
+		return fmt.Errorf("deliver kafka message: %w", err)
 	}
 
 	w.producedMessagesCounter.Add(ctx, 1)

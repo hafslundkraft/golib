@@ -1,14 +1,14 @@
 # Kafkarator
 
-A Go library for connecting to and interacting with Kafka services, with support for both TLS-secured and non-TLS connections.
+A Go library for connecting to and interacting with Kafka services, with support for both TLS-secured and SASL (OAuth) connections.
 
-The reason for you to use this package, instead of just using a library such as `github.com/segmentio/kafka-go` (
+The reason for you to use this package, instead of just using a library such as `github.com/confluentinc/confluent-kafka-go/v2` (
 which is used internally here), is that this package integrates with the module `github.com/hafslundkraft/golib/telemetry`,
 providing automatic OpenTelemetry trace propagation as well as standardized metrics.
 
-The main abstraction is the *Connection* which is created with *New*. 
+The main abstraction is the *Connection* which is created with *New*, as well as simple serialization and deserialization for Avro schemas.
 
-Since the library uses github.com/confluentinc/confluent-kafka-go/v2 which uses the librdkafka which is a C library, CGO_ENABLED must be set to 1.
+Since the library uses github.com/confluentinc/confluent-kafka-go/v2 which uses the librdkafka (a C library), CGO_ENABLED must be set to 1 when building.
 
 ## Usage at a glance
 Ceremony exists in this package as with most packages: it must be configured, errors must be handled, etc. All such details
@@ -20,27 +20,61 @@ In order to use the serializer, a schema for the topic must be available in the 
 
 ```go
 ctx := context.Background()
-writer, _ := conn.Writer("my_topic")
-serializer, _ := conn.Serializer("my_topic")
+
+writer, _ := conn.Writer()
+options := kafkarator.Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+}
+serializer, _ := conn.Serializer(options) 
 defer writer.Close(ctx)
 
 key := []byte("key")
-message := []byte("whatever you want marshaled as a byte slice. marshaling is your job!")
 headers := map[string][]byte{
-    "my-key": []byte("my-value"),
+	"my-key": []byte("my-value"),
 }
 
+value := map[string]any{
+	"id": "hello",
+}
 
-encoded, _ := serializer.Serialize(ctx, message)
-_ = writer.Write(ctx, key, encoded, headers)
+topic := "my-topic"
+
+// topic is provided at serialization time
+encoded, err := serializer.Serialize(ctx, topic, value)
+if err != nil {
+	// handle error
+}
+
+message := kafkarator.Message{
+    Topic: topic,
+    Key: key,
+    Headers: headers,
+    Value: encoded,
+}
+
+err = writer.Write(ctx, message)
+if err != nil {
+	// handle error
+}
+
 ```
 
 ### Reading messages with channel
+In order to use the deserializer, a schema for the topic must be available in the schema registry.
 Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when
 the reader commits the high watermark is sacrificed; each message is committed automatically.
 ```go
 ctx := context.Background()
-deserializer := conn.Deserializer("my-topic")
+options := kafkarator.Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+}
+deserializer := conn.Deserializer(options)
 messageChan, _ := conn.ChannelReader(ctx, "my_topic", "my-consumer-group")
 
 go func() {
@@ -62,7 +96,13 @@ Read messages in batches, commit offsets only when you want. This is suitable fo
 ```go
 ctx := context.Background()
 reader, err := conn.Reader("my-topic", "my-consumer-group")
-deserializer := conn.Deserializer("my-topic")
+options := kafkarator.Options{
+			UseLatestVersion: true,
+			SubjectNameProvider: func(topic string) (string, error) {
+				return topic + "-value", nil
+			},
+}
+deserializer := conn.Deserializer(options)
 defer reader.Close(ctx)
 
 messages, committer, _ := reader.Read(ctx, 1000, 1*time.Second)
@@ -118,6 +158,7 @@ These environment variables are necessary as well for SASL mode
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AZURE_KAFKA_SCOPE` | Azure scope to use for fetching tokens to authenticate with to Aiven | `api://aaaa-bbbb-cccc-dddd` |
+| `KAFKA_CA_CERT` | Either path to the Certificate Authority file or the certificate itself | `/path/to/ca-cert.pem` |
 
 
 #### Optional Environment Variables
@@ -132,13 +173,13 @@ These environment variables are necessary as well for SASL mode
 If any of the above variables are not set, they will default to:
 
 Test environment:
-- KAFKA_BROKERS = kafka-test-ture-test.com
+- KAFKA_BROKER = kafka-test-ture-test.com
 - KAFKA_SCHEMA_REGISTRY_URL = kafka-test-ture-test.com:18360
 - KAFKA_USER: object ID from Azure as username for the application
 - KAFKA_PASSWORD: password associated with the user in Aiven
 
 Prod environment:
-- KAFKA_BROKERS = kafka-prod-ture-prod.com
+- KAFKA_BROKER = kafka-prod-ture-prod.com
 - KAFKA_SCHEMA_REGISTRY_URL = kafka-prod-ture-prod.com:11132
 - KAFKA_USER: object ID from Azure as username for the application
 - KAFKA_PASSWORD: password associated with the user in Aiven
@@ -154,7 +195,7 @@ config := kafkarator.Config{
     CertFile: "/path/to/client-cert.pem",
     KeyFile:  "/path/to/client-key.pem",
     CACert:   "/path/to/ca-cert.pem",
-    UseSchemaRegistry: "false",
+    UseSchemaRegistry: false,
 }
 
 conn, err := kafkarator.New(config)
