@@ -8,6 +8,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 	"github.com/hafslundkraft/golib/telemetry"
+	"golang.org/x/oauth2"
 
 	"github.com/hafslundkraft/golib/kafkarator/internal/auth"
 )
@@ -36,10 +37,30 @@ type Connection struct {
 	configMap *kafka.ConfigMap
 	tel       *telemetry.Provider
 	srClient  sr.Client
+
+	tokenProvider auth.AccessTokenProvider // this is optional
+}
+
+// Option ... to pass to the New() connection
+type Option func(*options)
+
+type options struct {
+	tokenSource oauth2.TokenSource
+}
+
+// WithTokenSource provides the optional TokenSource to use instead of default token provider
+func WithTokenSource(ts oauth2.TokenSource) Option {
+	return func(o *options) {
+		o.tokenSource = ts
+	}
 }
 
 // New creates and returns a new connection.
-func New(config *Config, tel *telemetry.Provider) (*Connection, error) {
+func New(
+	config *Config,
+	tel *telemetry.Provider,
+	opts ...Option,
+) (*Connection, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
@@ -47,9 +68,33 @@ func New(config *Config, tel *telemetry.Provider) (*Connection, error) {
 		return nil, fmt.Errorf("telemetry provider is nil")
 	}
 
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	configMap, err := buildKafkaConfigMap(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed building Kafka config map: %w", err)
+	}
+
+	var tp auth.AccessTokenProvider
+
+	if config.AuthMode == "sasl" {
+		switch {
+		case o.tokenSource != nil:
+			tp = auth.NewOAuth2TokenSourceAdapter(o.tokenSource)
+
+		default:
+			if config.SASL.Scope == "" {
+				return nil, fmt.Errorf("KAFKA_SASL_SCOPE env variable not set")
+			}
+
+			tp, err = auth.NewDefaultTokenProvider(config.SASL.Scope)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create token provider: %w", err)
+			}
+		}
 	}
 
 	var srClient sr.Client
@@ -61,10 +106,11 @@ func New(config *Config, tel *telemetry.Provider) (*Connection, error) {
 	}
 
 	return &Connection{
-		config:    *config,
-		tel:       tel,
-		configMap: configMap,
-		srClient:  srClient,
+		config:        *config,
+		tel:           tel,
+		configMap:     configMap,
+		srClient:      srClient,
+		tokenProvider: tp,
 	}, nil
 }
 
@@ -98,7 +144,7 @@ func (c *Connection) Serializer(options Options) ValueSerializer {
 }
 
 // Writer returns a writer for writing messages to Kafka.
-func (c *Connection) Writer() (*Writer, error) {
+func (c *Connection) Writer(topic string) (*Writer, error) {
 	conf := cloneConfigMap(c.configMap)
 
 	p, err := kafka.NewProducer(&conf)
@@ -115,7 +161,7 @@ func (c *Connection) Writer() (*Writer, error) {
 
 	counter, _ := c.tel.Meter().Int64Counter(meterProducedMessages)
 
-	return newWriter(p, counter, c.tel), nil
+	return newWriter(p, counter, topic, c.tel), nil
 }
 
 // Deserializer returns a deserializer for deserializing messages from avro to bytes
@@ -220,15 +266,12 @@ func (c *Connection) ChannelReader(
 }
 
 func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) error {
-	tp, err := auth.NewDefaultTokenProvider(c.config.SASL.Scope)
-	if err != nil {
-		c.tel.Logger().ErrorContext(ctx, "failed to create token provider", "error", err)
-		return fmt.Errorf("create token provider: %w", err)
+	tracer := c.tel.Tracer()
+	if c.tokenProvider == nil {
+		return fmt.Errorf("no token provider configured")
 	}
 
-	tracer := c.tel.Tracer()
-
-	if err := auth.StartOAuthRefreshLoop(ctx, tp, tr, tracer); err != nil {
+	if err := auth.StartOAuthRefreshLoop(ctx, c.tokenProvider, tr, tracer); err != nil {
 		c.tel.Logger().ErrorContext(ctx, "failed to refresh token", "error", err)
 		return fmt.Errorf("start oauth refresh loop: %w", err)
 	}

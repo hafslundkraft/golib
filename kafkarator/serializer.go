@@ -38,7 +38,7 @@ func newAvroSerializer(srClient sr.Client, options Options, tel *telemetry.Provi
 	}
 
 	if options.SubjectNameProvider == nil {
-		panic("SubjectNameProvider is nil")
+		options.SubjectNameProvider = defaultSubjectNameProvider
 	}
 
 	return &AvroSerializer{
@@ -126,12 +126,6 @@ func (s *AvroSerializer) getOrLoadSchema(
 	defer span.End()
 
 	span.SetAttributes(attribute.String("schema.subject", subject))
-
-	if !s.options.UseLatestVersion {
-		return cachedSchema{}, fmt.Errorf(
-			"UseLatestVersion=false is not supported without explicit schema",
-		)
-	}
 
 	meta, err := s.srClient.GetLatestSchemaMetadata(subject)
 	if err != nil {

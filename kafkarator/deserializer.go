@@ -33,8 +33,15 @@ func newAvroDeserializer(
 	options Options,
 	tel *telemetry.Provider,
 ) *AvroDeserializer {
+	if srClient == nil {
+		panic("srClient not provided")
+	}
+	if tel == nil {
+		panic("telemetry provider was not given")
+	}
+
 	if options.SubjectNameProvider == nil {
-		panic("SubjectNameProvider is nil")
+		options.SubjectNameProvider = defaultSubjectNameProvider
 	}
 
 	return &AvroDeserializer{

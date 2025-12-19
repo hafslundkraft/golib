@@ -138,11 +138,3 @@ func (rc *Reader) Read(
 
 	return msgs, commiter, nil
 }
-
-func convertHeaders(hdrs []kafka.Header) map[string][]byte {
-	m := make(map[string][]byte, len(hdrs))
-	for _, h := range hdrs {
-		m[h.Key] = h.Value
-	}
-	return m
-}

@@ -29,7 +29,6 @@ func TestSerialize_Success(t *testing.T) {
 	serializer := newAvroSerializer(
 		mock,
 		Options{
-			UseLatestVersion: true,
 			SubjectNameProvider: func(topic string) (string, error) {
 				return topic + "-value", nil
 			},
@@ -83,7 +82,6 @@ func TestSerialize_MarshalError(t *testing.T) {
 	serializer := newAvroSerializer(
 		mock,
 		Options{
-			UseLatestVersion: true,
 			SubjectNameProvider: func(topic string) (string, error) {
 				return topic + "-value", nil
 			},

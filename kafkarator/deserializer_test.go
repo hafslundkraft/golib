@@ -38,10 +38,7 @@ func TestAvroDeserializer_Success(t *testing.T) {
 	d := newAvroDeserializer(
 		mock,
 		Options{
-			UseLatestVersion: true,
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
+			SubjectNameProvider: defaultSubjectNameProvider,
 		},
 		tel,
 	)
@@ -71,7 +68,6 @@ func TestAvroDeserializer_InvalidMagicByte(t *testing.T) {
 	d := newAvroDeserializer(
 		mock,
 		Options{
-			UseLatestVersion: true,
 			SubjectNameProvider: func(topic string) (string, error) {
 				return topic + "-value", nil
 			},
@@ -100,7 +96,6 @@ func TestAvroDeserializer_UnknownSchemaID(t *testing.T) {
 	d := newAvroDeserializer(
 		mock,
 		Options{
-			UseLatestVersion: true,
 			SubjectNameProvider: func(topic string) (string, error) {
 				return topic + "-value", nil
 			},
@@ -138,7 +133,6 @@ func TestAvroDeserializer_BadPayload(t *testing.T) {
 	d := newAvroDeserializer(
 		mock,
 		Options{
-			UseLatestVersion: true,
 			SubjectNameProvider: func(topic string) (string, error) {
 				return topic + "-value", nil
 			},
@@ -176,12 +170,7 @@ func TestAvroDeserializer_SchemaCache(t *testing.T) {
 
 	d := newAvroDeserializer(
 		mock,
-		Options{
-			UseLatestVersion: true,
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
-		},
+		Options{},
 		tel,
 	)
 

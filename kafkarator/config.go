@@ -156,14 +156,11 @@ func ConfigFromEnvVars() (*Config, error) {
 	return &cfg, nil
 }
 
+// getSASLConfig returns config for SASL
+// If a custom token provider is given, then the scope does not need to be populated, therefore also no empty check
 func getSASLConfig() (*SASLConfig, error) {
-	scope := os.Getenv(envAzureScope)
-	if scope == "" {
-		return &SASLConfig{}, fmt.Errorf("env variable %s is not set for SASL", envAzureScope)
-	}
-
 	return &SASLConfig{
-		Scope:       scope,
+		Scope:       os.Getenv(envAzureScope), // This does only need to be set if using default token provider
 		ExpectedOID: os.Getenv("KAFKA_SASL_EXPECTED_OID"),
 	}, nil
 }

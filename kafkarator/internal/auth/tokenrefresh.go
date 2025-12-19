@@ -73,7 +73,7 @@ func refreshOAuthToken(
 	tr TokenReceiver,
 	tracer trace.Tracer,
 ) (kafka.OAuthBearerToken, error) {
-	ctx, span := tracer.Start(ctx, "kafka.refresh_oauth_token")
+	ctx, span := tracer.Start(ctx, "kafkarator.refresh_oauth_token")
 	defer span.End()
 
 	token, err := tp.GetAccessToken(ctx)

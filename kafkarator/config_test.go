@@ -61,28 +61,6 @@ func TestGetTLSConfig_MissingCert(t *testing.T) {
 	})
 }
 
-func TestGetSASLConfig_Success(t *testing.T) {
-	withEnv(t, map[string]string{
-		envAzureScope: "api://scope",
-	}, func() {
-		cfg, err := getSASLConfig()
-
-		require.NoError(t, err)
-		assert.Equal(t, "api://scope", cfg.Scope)
-	})
-}
-
-func TestGetSASLConfig_MissingScope(t *testing.T) {
-	withEnv(t, map[string]string{
-		envAzureScope: "",
-	}, func() {
-		_, err := getSASLConfig()
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), envAzureScope)
-	})
-}
-
 func TestGetSRConfig_Success(t *testing.T) {
 	withEnv(t, map[string]string{
 		envKafkaUser:         "user",

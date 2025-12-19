@@ -3,24 +3,23 @@ package kafkarator
 import (
 	"context"
 	"fmt"
-	"maps"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/hafslundkraft/golib/telemetry"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/propagation"
 )
 
 func newWriter(
 	p *kafka.Producer,
 	pmc metric.Int64Counter,
+	topic string,
 	tel *telemetry.Provider,
 ) *Writer {
 	w := &Writer{
 		producer:                p,
 		tel:                     tel,
 		producedMessagesCounter: pmc,
+		topic:                   topic,
 		closed:                  false,
 	}
 
@@ -34,6 +33,7 @@ func newWriter(
 type Writer struct {
 	producedMessagesCounter metric.Int64Counter
 	producer                *kafka.Producer
+	topic                   string
 	tel                     *telemetry.Provider
 	closed                  bool
 }
@@ -69,7 +69,7 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 
 	msg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{
-			Topic:     &message.Topic,
+			Topic:     &w.topic,
 			Partition: kafka.PartitionAny,
 		},
 		Value:   message.Value,
@@ -98,24 +98,6 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 
 	w.producedMessagesCounter.Add(ctx, 1)
 	return nil
-}
-
-// injectTraceContext extracts the trace context from the current span and injects it into the headers
-func injectTraceContext(ctx context.Context, headers map[string][]byte) map[string][]byte {
-	// Create a new map to avoid modifying the original
-	propagatedHeaders := make(map[string][]byte, len(headers))
-	maps.Copy(propagatedHeaders, headers)
-
-	// Use a MapCarrier to inject trace context
-	carrier := propagation.MapCarrier{}
-	otel.GetTextMapPropagator().Inject(ctx, carrier)
-
-	// Add trace context headers to the Kafka headers
-	for k, v := range carrier {
-		propagatedHeaders[k] = []byte(v)
-	}
-
-	return propagatedHeaders
 }
 
 // handleDeliveryReports logs delivery failures for observability.

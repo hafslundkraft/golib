@@ -10,18 +10,24 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-func buildKafkaConfigMap(c *Config) (*kafka.ConfigMap, error) {
+// func buildKafkaConfigMap(c *Config) (*kafka.ConfigMap, kafka.OAuthBearerTokenRefreshCb, error) {
+// 	if c.AuthMode == "sasl" {
+// 		return saslConfigMap(c)
+// 	}
+// 	return tlsConfigMap(c)
+// }
+
+func buildKafkaConfigMap(
+	c *Config,
+) (*kafka.ConfigMap, error) {
 	if c.AuthMode == "sasl" {
 		return saslConfigMap(c)
 	}
+
 	return tlsConfigMap(c)
 }
 
 func saslConfigMap(c *Config) (*kafka.ConfigMap, error) {
-	if c.SASL.Scope == "" {
-		return nil, fmt.Errorf("failed to create Azure token provider")
-	}
-
 	resolvedCA, err := resolveCertPath(c.CACert, "kafka-ca-cert-")
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve CA cert: %w", err)

@@ -35,7 +35,6 @@ type Message struct {
 
 // Options lets user decide schema convention for the topic
 type Options struct {
-	UseLatestVersion    bool
 	SubjectNameProvider func(string) (string, error)
 }
 

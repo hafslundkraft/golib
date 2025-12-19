@@ -9,8 +9,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/golang-jwt/jwt/v5"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // AccessTokenProvider provides OAuth access tokens for Kafka SASL/OAUTHBEARER authentication.
@@ -69,26 +67,4 @@ func (p *TokenProvider) GetAccessToken(ctx context.Context) (kafka.OAuthBearerTo
 		Principal:  oid,
 		Extensions: map[string]string{},
 	}, nil
-}
-
-// TelemetryWrappedTokenProvider wraps an AccessTokenProvider with OpenTelemetry tracing
-// and returns a function compatible with Kafka OAuth token refresh callbacks.
-func TelemetryWrappedTokenProvider(
-	tp AccessTokenProvider,
-	tracer trace.Tracer,
-) func(context.Context) (kafka.OAuthBearerToken, error) {
-	return func(ctx context.Context) (kafka.OAuthBearerToken, error) {
-		ctx, span := tracer.Start(ctx, "kafka.refresh_oauth_token")
-		defer span.End()
-
-		token, err := tp.GetAccessToken(ctx)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return kafka.OAuthBearerToken{}, fmt.Errorf("failed to get oauth token: %w", err)
-		}
-
-		span.SetStatus(codes.Ok, "OAuth token refreshed successfully")
-		return token, nil
-	}
 }

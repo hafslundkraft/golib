@@ -16,16 +16,15 @@ are documented further down. Here, we want to give you an impression of what the
 set up. For extra clarity, we've omitted all error handling from these sample, we assume that you know how to do that!
 
 ### Writing messages
-In order to use the serializer, a schema for the topic must be available in the schema registry.
+In order to use the serializer, a schema for the topic must be available in the schema registry. If no SubjectNameProvider is given, then the default convention of topic name and "-value" will be used.
 
 ```go
 ctx := context.Background()
 
-writer, _ := conn.Writer()
+writer, _ := conn.Writer("my-topic")
 options := kafkarator.Options{
-			UseLatestVersion: true,
 			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
+				return topic + "-schema", nil
 			},
 }
 serializer, _ := conn.Serializer(options) 
@@ -35,21 +34,16 @@ key := []byte("key")
 headers := map[string][]byte{
 	"my-key": []byte("my-value"),
 }
-
 value := map[string]any{
 	"id": "hello",
 }
 
-topic := "my-topic"
-
-// topic is provided at serialization time
-encoded, err := serializer.Serialize(ctx, topic, value)
+encoded, err := serializer.Serialize(ctx, "my-topic", value)
 if err != nil {
 	// handle error
 }
 
 message := kafkarator.Message{
-    Topic: topic,
     Key: key,
     Headers: headers,
     Value: encoded,
@@ -69,9 +63,8 @@ the reader commits the high watermark is sacrificed; each message is committed a
 ```go
 ctx := context.Background()
 options := kafkarator.Options{
-			UseLatestVersion: true,
 			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
+				return topic, nil
 			},
 }
 deserializer := conn.Deserializer(options)
@@ -84,7 +77,7 @@ go func() {
             // channel closed
         return
 	}
-	decoded, _ := deserializer.Deserialize(ctx, msg)
+	decoded, _ := deserializer.Deserialize(ctx, "my-topic", msg)
     handleMessage(decoded)
 }
 }()
