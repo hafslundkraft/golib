@@ -6,18 +6,21 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/hafslundkraft/golib/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
 const magicByte = 0
 
+// CommitFunc commits offsets for messages previously read.
+// It is safe to call multiple times; committing is idempotent.
+type CommitFunc func(ctx context.Context) error
+
 func newReader(
 	c *kafka.Consumer,
 	rmc metric.Int64Counter,
 	lagGauge metric.Int64Gauge,
-	tel *telemetry.Provider,
+	tel TelemetryProvider,
 	topic string,
 ) (*Reader, error) {
 	r := &Reader{
@@ -40,7 +43,7 @@ type Reader struct {
 	consumer            *kafka.Consumer
 	readMessagesCounter metric.Int64Counter
 	lagGauge            metric.Int64Gauge
-	tel                 *telemetry.Provider
+	tel                 TelemetryProvider
 	closed              bool
 	topic               string
 }
@@ -70,9 +73,11 @@ func (rc *Reader) Read(
 	ctx context.Context,
 	maxMessages int,
 	maxWait time.Duration,
-) ([]Message, func(ctx context.Context) error, error) {
+) ([]Message, CommitFunc, error) {
 	ctx, span := rc.tel.Tracer().Start(ctx, "kafkarator.Reader.Read")
 	defer span.End()
+
+	span.SetAttributes(attribute.String("reader.topic", rc.topic))
 
 	deadline := time.Now().Add(maxWait)
 	msgs := make([]Message, 0, maxMessages)
@@ -80,7 +85,7 @@ func (rc *Reader) Read(
 	// Track last seen offsets per partition
 	latestOffsets := map[int32]kafka.Offset{}
 
-	commiter := func(ctx context.Context) error {
+	commit := CommitFunc(func(ctx context.Context) error {
 		for partition, off := range latestOffsets {
 			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
 				{
@@ -94,7 +99,7 @@ func (rc *Reader) Read(
 			}
 		}
 		return nil
-	}
+	})
 
 	for len(msgs) < maxMessages {
 		remaining := time.Until(deadline)
@@ -124,10 +129,10 @@ func (rc *Reader) Read(
 
 		case kafka.Error:
 			if e.IsTimeout() {
-				return msgs, commiter, nil
+				return msgs, commit, nil
 			}
 			span.RecordError(e)
-			return msgs, commiter, fmt.Errorf("poll error: %w", e)
+			return msgs, commit, fmt.Errorf("poll error: %w", e)
 
 		default:
 			// ignore rebalance events etc.
@@ -136,5 +141,5 @@ func (rc *Reader) Read(
 
 	span.SetAttributes(attribute.Int("message_count", len(msgs)))
 
-	return msgs, commiter, nil
+	return msgs, commit, nil
 }

@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
-	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/hamba/avro/v2"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -20,9 +19,8 @@ type ValueDeserializer interface {
 // AvroDeserializer deserializes values with Avro encoding and the
 // Confluent Schema Registry wire format to bytes
 type AvroDeserializer struct {
-	srClient            sr.Client
-	tel                 *telemetry.Provider
-	subjectNameProvider func(string) (string, error)
+	srClient sr.Client
+	tel      TelemetryProvider
 
 	mu      sync.Mutex
 	schemas map[string]cachedSchema
@@ -30,8 +28,7 @@ type AvroDeserializer struct {
 
 func newAvroDeserializer(
 	srClient sr.Client,
-	options Options,
-	tel *telemetry.Provider,
+	tel TelemetryProvider,
 ) *AvroDeserializer {
 	if srClient == nil {
 		panic("srClient not provided")
@@ -40,15 +37,10 @@ func newAvroDeserializer(
 		panic("telemetry provider was not given")
 	}
 
-	if options.SubjectNameProvider == nil {
-		options.SubjectNameProvider = defaultSubjectNameProvider
-	}
-
 	return &AvroDeserializer{
-		srClient:            srClient,
-		tel:                 tel,
-		subjectNameProvider: options.SubjectNameProvider,
-		schemas:             map[string]cachedSchema{},
+		srClient: srClient,
+		tel:      tel,
+		schemas:  map[string]cachedSchema{},
 	}
 }
 
@@ -63,7 +55,7 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 	}
 
 	schemaID := int(value[1])<<24 | int(value[2])<<16 | int(value[3])<<8 | int(value[4])
-	subject, err := d.subjectNameProvider(topic)
+	subject, err := defaultSubjectNameProvider(topic)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -84,7 +76,6 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 	payload := value[5:]
 
 	if err := avro.Unmarshal(schema, payload, &out); err != nil {
-		d.tel.Logger().ErrorContext(ctx, "avro decode failed", "error", err)
 		span.RecordError(err)
 		return nil, fmt.Errorf("avro decode failed: %w", err)
 	}
@@ -103,11 +94,8 @@ func (d *AvroDeserializer) loadSchema(ctx context.Context, subject string, schem
 		return s.schema, nil
 	}
 
-	ctx, span := d.tel.Tracer().Start(ctx, "kafkarator.AvroDeserializer.loadSchema")
+	_, span := d.tel.Tracer().Start(ctx, "kafkarator.AvroDeserializer.loadSchema")
 	defer span.End()
-
-	d.tel.Logger().InfoContext(ctx, "fetching schema from registry",
-		"subject", subject, "schemaID", schemaID)
 
 	info, err := d.srClient.GetBySubjectAndID(subject, schemaID)
 	if err != nil {

@@ -5,25 +5,23 @@ import (
 	"fmt"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/hafslundkraft/golib/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
 func newWriter(
 	p *kafka.Producer,
-	pmc metric.Int64Counter,
 	topic string,
-	tel *telemetry.Provider,
+	pmc metric.Int64Counter,
+	tel TelemetryProvider,
 ) *Writer {
 	w := &Writer{
 		producer:                p,
-		tel:                     tel,
-		producedMessagesCounter: pmc,
 		topic:                   topic,
+		producedMessagesCounter: pmc,
+		tel:                     tel,
 		closed:                  false,
 	}
-
-	go w.handleDeliveryReports()
 
 	return w
 }
@@ -34,7 +32,7 @@ type Writer struct {
 	producedMessagesCounter metric.Int64Counter
 	producer                *kafka.Producer
 	topic                   string
-	tel                     *telemetry.Provider
+	tel                     TelemetryProvider
 	closed                  bool
 }
 
@@ -55,12 +53,18 @@ func (w *Writer) Close(ctx context.Context) error {
 // Write writes the given message with headers to the topic. An important side effect is
 // that if there is an OpenTelemetry tracing span associated with the context, it is extracted
 // and included in the header that is sent to Kafka.
-func (w *Writer) Write(ctx context.Context, message *Message) error {
+func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[string][]byte) error {
+	ctx, span := w.tel.Tracer().Start(ctx, "kafkarator.Writer.Write")
+	defer span.End()
+
 	if w.closed {
-		return fmt.Errorf("writer closed")
+		span.RecordError(fmt.Errorf("writer is closed"))
+		return fmt.Errorf("writer is closed")
 	}
 
-	traceHeaders := injectTraceContext(ctx, message.Headers)
+	span.SetAttributes(attribute.String("writer.topic", w.topic))
+
+	traceHeaders := injectTraceContext(ctx, headers)
 
 	kafkaHeaders := make([]kafka.Header, 0, len(traceHeaders))
 	for k, v := range traceHeaders {
@@ -72,8 +76,8 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 			Topic:     &w.topic,
 			Partition: kafka.PartitionAny,
 		},
-		Value:   message.Value,
-		Key:     message.Key,
+		Value:   value,
+		Key:     key,
 		Headers: kafkaHeaders,
 	}
 
@@ -81,8 +85,8 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 	deliveryChan := make(chan kafka.Event, 1)
 	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
-		w.tel.Logger().ErrorContext(ctx, fmt.Sprintf("producing message: %v", err))
-		return fmt.Errorf("produce kafka message: %w", err)
+		span.RecordError(err)
+		return fmt.Errorf("produce message: %w", err)
 	}
 
 	ev := <-deliveryChan
@@ -90,34 +94,10 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 	m := ev.(*kafka.Message)
 
 	if m.TopicPartition.Error != nil {
-		w.tel.Logger().ErrorContext(ctx,
-			"delivery failed", "topic", message.Topic, "error", m.TopicPartition.Error,
-		)
-		return fmt.Errorf("deliver kafka message: %w", err)
+		span.RecordError(err)
+		return fmt.Errorf("topic partiion error for delivery: %w", err)
 	}
 
 	w.producedMessagesCounter.Add(ctx, 1)
 	return nil
-}
-
-// handleDeliveryReports logs delivery failures for observability.
-//
-//nolint:sloglint // context not available in kafka delivery callback
-func (w *Writer) handleDeliveryReports() {
-	for e := range w.producer.Events() {
-		switch ev := e.(type) {
-		case *kafka.Message:
-			if ev.TopicPartition.Error != nil {
-				w.tel.Logger().Error(
-					"delivery failed",
-					"topic", *ev.TopicPartition.Topic,
-					"partition", ev.TopicPartition.Partition,
-					"offset", ev.TopicPartition.Offset,
-					"error", ev.TopicPartition.Error,
-				)
-			}
-		default:
-			// Ignore other producer events
-		}
-	}
 }

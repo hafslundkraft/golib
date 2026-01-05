@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
-	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/hamba/avro/v2"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -22,14 +21,13 @@ type ValueSerializer interface {
 // Confluent Schema Registry wire format.
 type AvroSerializer struct {
 	srClient sr.Client
-	options  Options
-	tel      *telemetry.Provider
+	tel      TelemetryProvider
 
 	mu          sync.Mutex
 	schemaCache map[string]cachedSchema
 }
 
-func newAvroSerializer(srClient sr.Client, options Options, tel *telemetry.Provider) *AvroSerializer {
+func newAvroSerializer(srClient sr.Client, tel TelemetryProvider) *AvroSerializer {
 	if tel == nil {
 		panic("telemetry provider is nil")
 	}
@@ -37,13 +35,8 @@ func newAvroSerializer(srClient sr.Client, options Options, tel *telemetry.Provi
 		panic("srClient provider is nil")
 	}
 
-	if options.SubjectNameProvider == nil {
-		options.SubjectNameProvider = defaultSubjectNameProvider
-	}
-
 	return &AvroSerializer{
 		srClient:    srClient,
-		options:     options,
 		tel:         tel,
 		schemaCache: make(map[string]cachedSchema),
 	}
@@ -62,7 +55,7 @@ func (s *AvroSerializer) Serialize(
 		return nil, fmt.Errorf("cannot serialize nil value")
 	}
 
-	subject, err := s.options.SubjectNameProvider(topic)
+	subject, err := defaultSubjectNameProvider(topic)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err

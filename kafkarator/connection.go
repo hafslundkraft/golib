@@ -7,7 +7,8 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
-	"github.com/hafslundkraft/golib/telemetry"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/oauth2"
 
 	"github.com/hafslundkraft/golib/kafkarator/internal/auth"
@@ -35,10 +36,22 @@ const (
 type Connection struct {
 	config    Config
 	configMap *kafka.ConfigMap
-	tel       *telemetry.Provider
+	tel       TelemetryProvider
 	srClient  sr.Client
 
 	tokenProvider auth.AccessTokenProvider // this is optional
+}
+
+// TelemetryProvider interface providing logger, metrics and tracing
+type TelemetryProvider interface {
+	Logger() Logger
+	Meter() metric.Meter
+	Tracer() trace.Tracer
+}
+
+// Logger interface for telemetry logging
+type Logger interface {
+	ErrorContext(ctx context.Context, msg string, args ...any)
 }
 
 // Option ... to pass to the New() connection
@@ -58,7 +71,7 @@ func WithTokenSource(ts oauth2.TokenSource) Option {
 // New creates and returns a new connection.
 func New(
 	config *Config,
-	tel *telemetry.Provider,
+	tel TelemetryProvider,
 	opts ...Option,
 ) (*Connection, error) {
 	if config == nil {
@@ -139,8 +152,8 @@ func (c *Connection) Test(ctx context.Context) error {
 }
 
 // Serializer returns a serializer for serializing messages from bytes to avro
-func (c *Connection) Serializer(options Options) ValueSerializer {
-	return newAvroSerializer(c.srClient, options, c.tel)
+func (c *Connection) Serializer() ValueSerializer {
+	return newAvroSerializer(c.srClient, c.tel)
 }
 
 // Writer returns a writer for writing messages to Kafka.
@@ -161,12 +174,12 @@ func (c *Connection) Writer(topic string) (*Writer, error) {
 
 	counter, _ := c.tel.Meter().Int64Counter(meterProducedMessages)
 
-	return newWriter(p, counter, topic, c.tel), nil
+	return newWriter(p, topic, counter, c.tel), nil
 }
 
 // Deserializer returns a deserializer for deserializing messages from avro to bytes
-func (c *Connection) Deserializer(options Options) ValueDeserializer {
-	return newAvroDeserializer(c.srClient, options, c.tel)
+func (c *Connection) Deserializer() ValueDeserializer {
+	return newAvroDeserializer(c.srClient, c.tel)
 }
 
 // Reader returns a reader that is used to fetch messages from Kafka.
@@ -272,7 +285,6 @@ func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) erro
 	}
 
 	if err := auth.StartOAuthRefreshLoop(ctx, c.tokenProvider, tr, tracer); err != nil {
-		c.tel.Logger().ErrorContext(ctx, "failed to refresh token", "error", err)
 		return fmt.Errorf("start oauth refresh loop: %w", err)
 	}
 

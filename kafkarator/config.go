@@ -127,7 +127,7 @@ func ConfigFromEnvVars() (*Config, error) {
 
 	useSchemaRegistry := os.Getenv(envUseSchemaRegistry)
 
-	if useSchemaRegistry != "" && useSchemaRegistry == "true" {
+	if useSchemaRegistry == "true" {
 		cfg.UseSchemaRegistry = true
 		srConfig, err := getSRConfig()
 		if err != nil {

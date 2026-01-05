@@ -10,13 +10,6 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-// func buildKafkaConfigMap(c *Config) (*kafka.ConfigMap, kafka.OAuthBearerTokenRefreshCb, error) {
-// 	if c.AuthMode == "sasl" {
-// 		return saslConfigMap(c)
-// 	}
-// 	return tlsConfigMap(c)
-// }
-
 func buildKafkaConfigMap(
 	c *Config,
 ) (*kafka.ConfigMap, error) {

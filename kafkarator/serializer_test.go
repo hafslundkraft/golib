@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
-	"github.com/hafslundkraft/golib/telemetry"
 )
 
 func TestSerialize_Success(t *testing.T) {
@@ -23,16 +22,10 @@ func TestSerialize_Success(t *testing.T) {
 		ID:         7,
 	}
 
-	tel, shutdown := telemetry.New(context.Background(), "test", telemetry.WithLocal(true))
-	defer shutdown(context.Background())
+	tel := newMockTelemetry()
 
 	serializer := newAvroSerializer(
 		mock,
-		Options{
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
-		},
 		tel,
 	)
 
@@ -76,16 +69,10 @@ func TestSerialize_MarshalError(t *testing.T) {
 		ID:         42,
 	}
 
-	tel, shutdown := telemetry.New(context.Background(), "test", telemetry.WithLocal(true))
-	defer shutdown(context.Background())
+	tel := newMockTelemetry()
 
 	serializer := newAvroSerializer(
 		mock,
-		Options{
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
-		},
 		tel,
 	)
 

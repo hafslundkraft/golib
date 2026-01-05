@@ -33,11 +33,6 @@ type Message struct {
 	Headers map[string][]byte
 }
 
-// Options lets user decide schema convention for the topic
-type Options struct {
-	SubjectNameProvider func(string) (string, error)
-}
-
 type cachedSchema struct {
 	schemaID     int
 	schema       avro.Schema

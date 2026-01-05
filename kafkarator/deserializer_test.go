@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
-	"github.com/hafslundkraft/golib/telemetry"
 	"github.com/hamba/avro/v2"
 )
 
@@ -32,14 +31,10 @@ func TestAvroDeserializer_Success(t *testing.T) {
 		7: {Schema: schemaStr},
 	}
 
-	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
-	defer shutdown(ctx)
+	tel := newMockTelemetry()
 
 	d := newAvroDeserializer(
 		mock,
-		Options{
-			SubjectNameProvider: defaultSubjectNameProvider,
-		},
 		tel,
 	)
 
@@ -62,16 +57,10 @@ func TestAvroDeserializer_InvalidMagicByte(t *testing.T) {
 	ctx := context.Background()
 	mock := newMockSRClient()
 
-	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
-	defer shutdown(ctx)
+	tel := newMockTelemetry()
 
 	d := newAvroDeserializer(
 		mock,
-		Options{
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
-		},
 		tel,
 	)
 
@@ -90,16 +79,10 @@ func TestAvroDeserializer_UnknownSchemaID(t *testing.T) {
 	mock := newMockSRClient()
 	mock.errLatest = errors.New("schema not found")
 
-	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
-	defer shutdown(ctx)
+	tel := newMockTelemetry()
 
 	d := newAvroDeserializer(
 		mock,
-		Options{
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
-		},
 		tel,
 	)
 
@@ -127,16 +110,10 @@ func TestAvroDeserializer_BadPayload(t *testing.T) {
 		7: {Schema: schemaStr},
 	}
 
-	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
-	defer shutdown(ctx)
+	tel := newMockTelemetry()
 
 	d := newAvroDeserializer(
 		mock,
-		Options{
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
-		},
 		tel,
 	)
 
@@ -165,12 +142,10 @@ func TestAvroDeserializer_SchemaCache(t *testing.T) {
 		7: {Schema: schemaStr},
 	}
 
-	tel, shutdown := telemetry.New(ctx, "test", telemetry.WithLocal(true))
-	defer shutdown(ctx)
+	tel := newMockTelemetry()
 
 	d := newAvroDeserializer(
 		mock,
-		Options{},
 		tel,
 	)
 
