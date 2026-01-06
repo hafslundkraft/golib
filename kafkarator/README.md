@@ -22,12 +22,7 @@ In order to use the serializer, a schema for the topic must be available in the 
 ctx := context.Background()
 
 writer, _ := conn.Writer("my-topic")
-options := kafkarator.Options{
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-schema", nil
-			},
-}
-serializer, _ := conn.Serializer(options) 
+serializer, _ := conn.Serializer() 
 defer writer.Close(ctx)
 
 key := []byte("key")
@@ -62,12 +57,7 @@ Receive messages, one at a time, as quickly as possible. Suitable for low-volume
 the reader commits the high watermark is sacrificed; each message is committed automatically.
 ```go
 ctx := context.Background()
-options := kafkarator.Options{
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic, nil
-			},
-}
-deserializer := conn.Deserializer(options)
+deserializer := conn.Deserializer()
 messageChan, _ := conn.ChannelReader(ctx, "my_topic", "my-consumer-group")
 
 go func() {
@@ -89,13 +79,7 @@ Read messages in batches, commit offsets only when you want. This is suitable fo
 ```go
 ctx := context.Background()
 reader, err := conn.Reader("my-topic", "my-consumer-group")
-options := kafkarator.Options{
-			UseLatestVersion: true,
-			SubjectNameProvider: func(topic string) (string, error) {
-				return topic + "-value", nil
-			},
-}
-deserializer := conn.Deserializer(options)
+deserializer := conn.Deserializer()
 defer reader.Close(ctx)
 
 messages, committer, _ := reader.Read(ctx, 1000, 1*time.Second)
@@ -111,6 +95,24 @@ go get github.com/hafslundkraft/golib/kafkarator
 
 ## Configuration
 
+kafkarator is instrumented with OpenTelemetry for logging, metrics and tracing. Telemetry is provided through a small interface:
+
+```go
+type TelemetryProvider interface {
+	Logger() Logger
+	Meter() metric.Meter
+	Tracer() trace.Tracer
+}
+
+type Logger interface {
+	ErrorContext(ctx context.Context, msg string, args ...any)
+}
+
+```
+kafkarator does not initialize OpenTelemetry itself, this is the responsibility of the application using kafkarator.
+
+If using the golib/telemetry, then you can pass the provider directly as shown in the examples below.
+
 ### Using Environment Variables
 
 The library can be configured using environment variables through the `ConfigFromEnvVars()` function:
@@ -121,12 +123,35 @@ if err != nil {
     log.Fatal(err)
 }
 
-conn, err := kafkarator.New(config)
+tel, _ := telemetry.New(
+    ctx, "my-service"
+    )
+
+conn, err := kafkarator.New(config, telemetryProvider)
 if err != nil {
     log.Fatal(err)
 }
 ```
+By default, kafkarator uses Azure DefaultAzureCredential to obtain OAuth access tokens.
+When using default Azure provider, you must set the OAuth scope as an env variable: 
 
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `AZURE_KAFKA_SCOPE` | Azure scope to use for fetching tokens to authenticate with to Aiven | `api://aaaa-bbbb-cccc-dddd` |
+
+
+You can proivde your own optional TokenSource to use instead. kafkarator allows oauth2.TokenSource as additional token sources.
+```go
+ts := oauth2.StaticTokenSource(&oauth2.Token{
+    AccessToken: "my-token", 
+    Expiry: time.Now().Add(1 * time.Hour)
+})
+
+conn, err := kafkarator.New(config, telemetry, kafkarator.WithTokenSource(ts))
+if err != nil {
+    log.Fatal(err)
+}
+```
 #### Required Environment Variables
 
 | Variable | Description | Example |
@@ -146,7 +171,7 @@ These environment variables are necessary as well for TLS mode
 
 ##### SASL mode
 
-These environment variables are necessary as well for SASL mode
+These environment variables are necessary as well for SASL mode. AZURE_KAFKA_SCOPE does not need to be set if using custom token source.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -191,7 +216,7 @@ config := kafkarator.Config{
     UseSchemaRegistry: false,
 }
 
-conn, err := kafkarator.New(config)
+conn, err := kafkarator.New(config, telemetry)
 if err != nil {
     log.Fatal(err)
 }
