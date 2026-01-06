@@ -3,7 +3,7 @@ package kafkarator
 import (
 	"context"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/hamba/avro/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -27,8 +27,16 @@ type Message struct {
 	// Value is the actual payload of the message. This is what you want to unmarshal!
 	Value []byte
 
+	Decoded any
+
 	// Headers are keys value header pairs associated with the message.
 	Headers map[string][]byte
+}
+
+type cachedSchema struct {
+	schemaID     int
+	schema       avro.Schema
+	schemaLoaded bool
 }
 
 // ExtractTraceContext extracts the OpenTelemetry trace context from the message headers
@@ -51,31 +59,4 @@ func (m *Message) ExtractTraceContext(ctx context.Context) context.Context {
 
 	// Extract trace context from headers and create new context
 	return otel.GetTextMapPropagator().Extract(ctx, carrier)
-}
-
-func kafkaMessage(b []byte, headers map[string][]byte) kafka.Message {
-	headerList := make([]kafka.Header, 0, len(headers))
-	for k, v := range headers {
-		headerList = append(headerList, kafka.Header{Key: k, Value: v})
-	}
-
-	return kafka.Message{
-		Value:   b,
-		Headers: headerList,
-	}
-}
-
-func message(m *kafka.Message) Message {
-	headers := make(map[string][]byte, len(m.Headers))
-	for _, header := range m.Headers {
-		headers[header.Key] = header.Value
-	}
-	return Message{
-		Topic:     m.Topic,
-		Partition: m.Partition,
-		Offset:    m.Offset,
-		Key:       m.Key,
-		Value:     m.Value,
-		Headers:   headers,
-	}
 }

@@ -4,78 +4,100 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hafslundkraft/golib/telemetry"
-	"github.com/segmentio/kafka-go"
-	"go.opentelemetry.io/otel"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/propagation"
 )
 
-func newWriter(w *kafka.Writer, pmc metric.Int64Counter, tel *telemetry.Provider) *Writer {
-	return &Writer{
-		writer:                  w,
-		tel:                     tel,
+func newWriter(
+	p *kafka.Producer,
+	topic string,
+	pmc metric.Int64Counter,
+	tel TelemetryProvider,
+) *Writer {
+	w := &Writer{
+		producer:                p,
+		topic:                   topic,
 		producedMessagesCounter: pmc,
+		tel:                     tel,
 		closed:                  false,
 	}
+
+	return w
 }
 
 // Writer provides an interface for writing messages to the Kafka topic, as well
 // as closing it when the client is done writing.
 type Writer struct {
 	producedMessagesCounter metric.Int64Counter
-	writer                  *kafka.Writer
-	tel                     *telemetry.Provider
+	producer                *kafka.Producer
+	topic                   string
+	tel                     TelemetryProvider
 	closed                  bool
 }
 
 // Close closes the underlying infrastructure, and renders this interface unusable for writing messages.
-func (wc *Writer) Close(ctx context.Context) error {
-	if wc.closed {
+func (w *Writer) Close(ctx context.Context) error {
+	if w.closed {
 		return nil // It's ok to close multiple times.
 	}
 
-	if err := wc.writer.Close(); err != nil {
-		wc.tel.Logger().ErrorContext(ctx, fmt.Sprintf("failed to close writer %v", err))
-		return fmt.Errorf("failed to close writer: %w", err)
-	}
-	wc.closed = true
+	w.producer.Flush(5000)
+	w.producer.Close()
+
+	w.closed = true
+
 	return nil
 }
 
 // Write writes the given message with headers to the topic. An important side effect is
 // that if there is an OpenTelemetry tracing span associated with the context, it is extracted
 // and included in the header that is sent to Kafka.
-func (wc *Writer) Write(ctx context.Context, msg []byte, headers map[string][]byte) error {
-	if wc.closed {
+func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[string][]byte) error {
+	ctx, span := w.tel.Tracer().Start(ctx, "kafkarator.Writer.Write")
+	defer span.End()
+
+	if w.closed {
+		span.RecordError(fmt.Errorf("writer is closed"))
 		return fmt.Errorf("writer is closed")
 	}
 
+	span.SetAttributes(attribute.String("writer.topic", w.topic))
+
 	traceHeaders := injectTraceContext(ctx, headers)
-	if err := wc.writer.WriteMessages(ctx, kafkaMessage(msg, traceHeaders)); err != nil {
-		wc.tel.Logger().ErrorContext(ctx, fmt.Sprintf("while writing messages to Kafka %v", err))
-		return fmt.Errorf("failed to write messages to Kafka %w", err)
+
+	kafkaHeaders := make([]kafka.Header, 0, len(traceHeaders))
+	for k, v := range traceHeaders {
+		kafkaHeaders = append(kafkaHeaders, kafka.Header{Key: k, Value: v})
 	}
-	wc.producedMessagesCounter.Add(ctx, 1)
+
+	msg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{
+			Topic:     &w.topic,
+			Partition: kafka.PartitionAny,
+		},
+		Value:   value,
+		Key:     key,
+		Headers: kafkaHeaders,
+	}
+
+	// Produce messages synchronously
+	deliveryChan := make(chan kafka.Event, 1)
+	err := w.producer.Produce(msg, deliveryChan)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("produce message: %w", err)
+	}
+
+	ev := <-deliveryChan
+
+	m := ev.(*kafka.Message)
+
+	if m.TopicPartition.Error != nil {
+		span.RecordError(err)
+		return fmt.Errorf("topic partiion error for delivery: %w", err)
+	}
+
+	w.producedMessagesCounter.Add(ctx, 1)
 	return nil
-}
-
-// injectTraceContext extracts the trace context from the current span and injects it into the headers
-func injectTraceContext(ctx context.Context, headers map[string][]byte) map[string][]byte {
-	// Create a new map to avoid modifying the original
-	propagatedHeaders := make(map[string][]byte, len(headers))
-	for k, v := range headers {
-		propagatedHeaders[k] = v
-	}
-
-	// Use a MapCarrier to inject trace context
-	carrier := propagation.MapCarrier{}
-	otel.GetTextMapPropagator().Inject(ctx, carrier)
-
-	// Add trace context headers to the Kafka headers
-	for k, v := range carrier {
-		propagatedHeaders[k] = []byte(v)
-	}
-
-	return propagatedHeaders
 }

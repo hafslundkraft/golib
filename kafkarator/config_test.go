@@ -4,136 +4,104 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestConfigFromEnvVars_Success(t *testing.T) {
-	// Set up environment variables
-	t.Setenv(envBrokers, "broker1:9092,broker2:9092,broker3:9092")
-	t.Setenv(envCertFile, "/path/to/cert.pem")
-	t.Setenv(envKeyFile, "/path/to/key.pem")
-	t.Setenv(envCAFile, "/path/to/ca.pem")
+func withEnv(t *testing.T, env map[string]string, fn func()) {
+	t.Helper()
 
-	config, err := ConfigFromEnvVars()
+	orig := map[string]string{}
+	for k := range env {
+		orig[k] = os.Getenv(k)
+	}
 
-	require.NoError(t, err)
-	require.Equal(t, []string{"broker1:9092", "broker2:9092", "broker3:9092"}, config.Brokers)
-	require.Equal(t, "/path/to/cert.pem", config.CertFile)
-	require.Equal(t, "/path/to/key.pem", config.KeyFile)
-	require.Equal(t, "/path/to/ca.pem", config.CAFile)
+	for k, v := range env {
+		if v == "" {
+			_ = os.Unsetenv(k)
+		} else {
+			_ = os.Setenv(k, v)
+		}
+	}
+
+	defer func() {
+		for k, v := range orig {
+			if v == "" {
+				_ = os.Unsetenv(k)
+			} else {
+				_ = os.Setenv(k, v)
+			}
+		}
+	}()
+	fn()
 }
 
-func TestConfigFromEnvVars_SingleBroker(t *testing.T) {
-	// Set up environment variables with single broker
-	t.Setenv(envBrokers, "localhost:9092")
-	t.Setenv(envCertFile, "/cert.pem")
-	t.Setenv(envKeyFile, "/key.pem")
-	t.Setenv(envCAFile, "/ca.pem")
+func TestGetTLSConfig_Success(t *testing.T) {
+	withEnv(t, map[string]string{
+		envCertFile: "cert.pem",
+		envKeyFile:  "key.pem",
+	}, func() {
+		cfg, err := getTLSConfig()
 
-	config, err := ConfigFromEnvVars()
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"localhost:9092"}, config.Brokers)
+		require.NoError(t, err)
+		assert.Equal(t, "cert.pem", cfg.CertFile)
+		assert.Equal(t, "key.pem", cfg.KeyFile)
+	})
 }
 
-func TestConfigFromEnvVars_BrokersWithWhitespace(t *testing.T) {
-	// Test that whitespace around broker names is trimmed
-	t.Setenv(envBrokers, " broker1:9092 , broker2:9092 ,  broker3:9092  ")
-	t.Setenv(envCertFile, "/path/to/cert.pem")
-	t.Setenv(envKeyFile, "/path/to/key.pem")
-	t.Setenv(envCAFile, "/path/to/ca.pem")
+func TestGetTLSConfig_MissingCert(t *testing.T) {
+	withEnv(t, map[string]string{
+		envKeyFile: "key.pem",
+		envCACert:  "ca.pem",
+	}, func() {
+		_, err := getTLSConfig()
 
-	config, err := ConfigFromEnvVars()
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"broker1:9092", "broker2:9092", "broker3:9092"}, config.Brokers)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), envCertFile)
+	})
 }
 
-func TestConfigFromEnvVars_MissingBrokers(t *testing.T) {
-	// Ensure brokers is not set
-	os.Unsetenv(envBrokers)
-	t.Setenv(envCertFile, "/path/to/cert.pem")
-	t.Setenv(envKeyFile, "/path/to/key.pem")
-	t.Setenv(envCAFile, "/path/to/ca.pem")
+func TestGetSRConfig_Success(t *testing.T) {
+	withEnv(t, map[string]string{
+		envKafkaUser:         "user",
+		envSchemaRegistryURL: "url.com",
+		envKafkaPassword:     "secret",
+	}, func() {
+		cfg, err := getSRConfig()
 
-	config, err := ConfigFromEnvVars()
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), envBrokers)
-	require.Empty(t, config.Brokers)
+		require.NoError(t, err)
+		assert.Equal(t, "secret", cfg.SchemaRegistryPassword)
+		assert.NotEmpty(t, cfg.SchemaRegistryURL)
+	})
 }
 
-func TestConfigFromEnvVars_MissingCertFile(t *testing.T) {
-	t.Setenv(envBrokers, "broker1:9092")
-	os.Unsetenv(envCertFile)
-	t.Setenv(envKeyFile, "/path/to/key.pem")
-	t.Setenv(envCAFile, "/path/to/ca.pem")
+func TestGetSRConfig_MissingPassword(t *testing.T) {
+	withEnv(t, map[string]string{
+		envKafkaUser:         "user",
+		envSchemaRegistryURL: "url.com",
+		envKafkaPassword:     "",
+	}, func() {
+		_, err := getSRConfig()
 
-	_, err := ConfigFromEnvVars()
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), envCertFile)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), envKafkaPassword)
+	})
 }
 
-func TestConfigFromEnvVars_MissingKeyFile(t *testing.T) {
-	t.Setenv(envBrokers, "broker1:9092")
-	t.Setenv(envCertFile, "/path/to/cert.pem")
-	os.Unsetenv(envKeyFile)
-	t.Setenv(envCAFile, "/path/to/ca.pem")
+func TestConfigFromEnvVars_TLS(t *testing.T) {
+	withEnv(t, map[string]string{
+		envEnv:      "test",
+		envAuthType: "tls",
+		envCertFile: "cert.pem",
+		envKeyFile:  "key.pem",
+		envCACert:   "ca.pem",
+		envBroker:   "broker:9090",
+	}, func() {
+		cfg, err := ConfigFromEnvVars()
 
-	_, err := ConfigFromEnvVars()
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), envKeyFile)
-}
-
-func TestConfigFromEnvVars_MissingCAFile(t *testing.T) {
-	t.Setenv(envBrokers, "broker1:9092")
-	t.Setenv(envCertFile, "/path/to/cert.pem")
-	t.Setenv(envKeyFile, "/path/to/key.pem")
-	os.Unsetenv(envCAFile)
-
-	_, err := ConfigFromEnvVars()
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), envCAFile)
-}
-
-func TestConfigFromEnvVars_AllMissing(t *testing.T) {
-	// Ensure all env vars are not set
-	os.Unsetenv(envBrokers)
-	os.Unsetenv(envCertFile)
-	os.Unsetenv(envKeyFile)
-	os.Unsetenv(envCAFile)
-
-	config, err := ConfigFromEnvVars()
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), envBrokers)
-	require.Empty(t, config.Brokers)
-}
-
-func TestConfigFromEnvVars_EmptyBrokers(t *testing.T) {
-	// Test empty string vs unset
-	t.Setenv(envBrokers, "")
-	t.Setenv(envCertFile, "/path/to/cert.pem")
-	t.Setenv(envKeyFile, "/path/to/key.pem")
-	t.Setenv(envCAFile, "/path/to/ca.pem")
-
-	_, err := ConfigFromEnvVars()
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), envBrokers)
-}
-
-func TestConfigFromEnvVars_EmptyPaths(t *testing.T) {
-	t.Setenv(envBrokers, "broker1:9092")
-	t.Setenv(envCertFile, "")
-	t.Setenv(envKeyFile, "/path/to/key.pem")
-	t.Setenv(envCAFile, "/path/to/ca.pem")
-
-	_, err := ConfigFromEnvVars()
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), envCertFile)
+		require.NoError(t, err)
+		assert.Equal(t, "test", cfg.Env)
+		assert.Equal(t, "tls", cfg.AuthMode)
+		assert.NotEmpty(t, cfg.Broker)
+	})
 }
