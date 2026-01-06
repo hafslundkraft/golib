@@ -42,3 +42,5 @@ func (m *mockTelemetry) Logger() Logger {
 type mockLogger struct{}
 
 func (mockLogger) ErrorContext(context.Context, string, ...any) {}
+func (mockLogger) InfoContext(context.Context, string, ...any)  {}
+func (mockLogger) DebugContext(context.Context, string, ...any) {}

@@ -52,6 +52,8 @@ type TelemetryProvider interface {
 // Logger interface for telemetry logging
 type Logger interface {
 	ErrorContext(ctx context.Context, msg string, args ...any)
+	InfoContext(ctx context.Context, msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
 }
 
 // Option ... to pass to the New() connection
