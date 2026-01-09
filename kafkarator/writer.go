@@ -53,9 +53,13 @@ func (w *Writer) Close(ctx context.Context) error {
 // Write writes the given message with headers to the topic. An important side effect is
 // that if there is an OpenTelemetry tracing span associated with the context, it is extracted
 // and included in the header that is sent to Kafka.
-func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[string][]byte) error {
+func (w *Writer) Write(ctx context.Context, message *Message) error {
 	ctx, span := w.tel.Tracer().Start(ctx, "kafkarator.Writer.Write")
 	defer span.End()
+
+	if message == nil {
+		return fmt.Errorf("message cannot be nil")
+	}
 
 	if w.closed {
 		span.RecordError(fmt.Errorf("writer is closed"))
@@ -64,7 +68,7 @@ func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[strin
 
 	span.SetAttributes(attribute.String("writer.topic", w.topic))
 
-	traceHeaders := injectTraceContext(ctx, headers)
+	traceHeaders := injectTraceContext(ctx, message.Headers)
 
 	kafkaHeaders := make([]kafka.Header, 0, len(traceHeaders))
 	for k, v := range traceHeaders {
@@ -76,8 +80,8 @@ func (w *Writer) Write(ctx context.Context, key, value []byte, headers map[strin
 			Topic:     &w.topic,
 			Partition: kafka.PartitionAny,
 		},
-		Value:   value,
-		Key:     key,
+		Value:   message.Value,
+		Key:     message.Key,
 		Headers: kafkaHeaders,
 	}
 
