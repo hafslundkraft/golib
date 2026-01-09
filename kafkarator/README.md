@@ -44,7 +44,7 @@ message := kafkarator.Message{
     Value: encoded,
 }
 
-err = writer.Write(ctx, message)
+err = writer.Write(ctx, &message)
 if err != nil {
 	// handle error
 }
