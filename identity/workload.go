@@ -43,16 +43,27 @@ func NewWorkloadCredential() (WorkloadCredential, error) {
 }
 
 // TokenSource constructs an oauth2.TokenSource that will return a cached or new HAPPI token.
-func (w *WorkloadCredential) TokenSource(ctx context.Context, scopes ...string) oauth2.TokenSource {
-	return oauth2.ReuseTokenSource(nil, &TokenSource{
-		cfg: clientcredentials.Config{
-			TokenURL: w.TokenURL,
-			Scopes:   scopes,
-			EndpointParams: url.Values{
-				"client_assertion_type": []string{"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
-			},
-			AuthStyle: oauth2.AuthStyleInParams,
+func (w *WorkloadCredential) TokenSource(ctx context.Context, options ...func(*TokenOptions)) oauth2.TokenSource {
+	var opts TokenOptions
+	for _, opt := range options {
+		opt(&opts)
+	}
+
+	cfg := clientcredentials.Config{
+		Scopes:   opts.scopes,
+		TokenURL: w.TokenURL,
+		EndpointParams: url.Values{
+			"client_assertion_type": []string{"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
 		},
+		AuthStyle: oauth2.AuthStyleInParams,
+	}
+
+	if opts.resource != "" {
+		cfg.EndpointParams.Set("resource", opts.resource)
+	}
+
+	return oauth2.ReuseTokenSource(nil, &TokenSource{
+		cfg:       cfg,
 		ctx:       ctx,
 		mtx:       &sync.RWMutex{},
 		tokenFile: w.TokenFile,
