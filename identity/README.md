@@ -30,8 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	scope := "foo"
-	ts := cred.TokenSource(ctx, scope)
+	ts := cred.TokenSource(ctx, identity.WithScopes("foo", "bar"))
 	_ = ts.Token()
 }
 ```
