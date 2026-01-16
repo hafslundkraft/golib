@@ -197,8 +197,13 @@ func defaultReaderOptions() readerOptions {
 	}
 }
 
-// WithAutoOffsetReset overrides Kafka auto.offset.reset
-func WithAutoOffsetReset(value string) ReaderOption {
+// WithAutoOffsetReset overrides Kafka auto.offset.reset.
+// Default is `earliest` if not provided.
+//
+// Possible values:
+//   - `earliest`: start from the earliest available offset when no committed offset exists
+//   - `latest`: start from the latest offset when no committed offset exists
+//   - `none`: error if no committed offset exists for the consumer group
 	return func(o *readerOptions) {
 		o.autoOffsetReset = value
 	}
