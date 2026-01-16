@@ -204,6 +204,7 @@ func defaultReaderOptions() readerOptions {
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
 //   - `none`: error if no committed offset exists for the consumer group
+func WithAutoOffsetReset(value string) ReaderOption {
 	return func(o *readerOptions) {
 		o.autoOffsetReset = value
 	}
