@@ -159,7 +159,7 @@ func (c *Connection) Serializer() ValueSerializer {
 }
 
 // Writer returns a writer for writing messages to Kafka.
-func (c *Connection) Writer(topic string) (*Writer, error) {
+func (c *Connection) Writer() (*Writer, error) {
 	conf := cloneConfigMap(c.configMap)
 
 	p, err := kafka.NewProducer(&conf)
@@ -176,7 +176,7 @@ func (c *Connection) Writer(topic string) (*Writer, error) {
 
 	counter, _ := c.tel.Meter().Int64Counter(meterProducedMessages)
 
-	return newWriter(p, topic, counter, c.tel), nil
+	return newWriter(p, counter, c.tel), nil
 }
 
 // Deserializer returns a deserializer for deserializing messages from avro to bytes
