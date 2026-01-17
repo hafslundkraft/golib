@@ -14,10 +14,42 @@ func WithLocal(isLocal bool) OptionFunc {
 }
 
 // WithLocalWriter allows you to specify a custom io.Writer for local terminal
-// output. It also enables local mode.
+// output. It also enables local mode. NB! This option sets the writer for all
+// three types of telemetry (logging, tracing, meters), so if it is called
+// after any of WithLogWriter, WithTraceWriter, or WithMeterWriter, this
+// writer will take precedence.
 func WithLocalWriter(w io.Writer) OptionFunc {
 	return func(c *config) {
-		c.localW = w
+		c.localLoggerW = w
+		c.localMeterW = w
+		c.localTracerW = w
+		c.local = true
+	}
+}
+
+// WithLogWriter allows you to specify a custom io.Writer for local terminal
+// output for logs. It also enables local mode.
+func WithLogWriter(w io.Writer) OptionFunc {
+	return func(c *config) {
+		c.localLoggerW = w
+		c.local = true
+	}
+}
+
+// WithTraceWriter allows you to specify a custom io.Writer for local terminal
+// output for traces. It also enables local mode.
+func WithTraceWriter(w io.Writer) OptionFunc {
+	return func(c *config) {
+		c.localTracerW = w
+		c.local = true
+	}
+}
+
+// WithMeterWriter allows you to specify a custom io.Writer for local terminal
+// output for meters. It also enables local mode.
+func WithMeterWriter(w io.Writer) OptionFunc {
+	return func(c *config) {
+		c.localMeterW = w
 		c.local = true
 	}
 }
@@ -38,10 +70,11 @@ func WithAttributes(attrs map[string]string) OptionFunc {
 	}
 }
 
-// WithTestIDGenerator enables deterministic trace and span ID generation for testing.
+// WithDeterministicTestIDGenerator enables deterministic trace and span ID generation for testing.
 // This should only be used in tests.
-func WithTestIDGenerator() OptionFunc {
+// NB! The given seed should be a positive value other than 0.
+func WithDeterministicTestIDGenerator(seed int64) OptionFunc {
 	return func(c *config) {
-		c.testIDGen = true
+		c.idGenSeed = seed
 	}
 }

@@ -3,9 +3,12 @@ package telemetry
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
+	"github.com/bradleyjkemp/cupaloy"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -45,12 +48,13 @@ func TestProvider(t *testing.T) {
 func TestProvider_withLocalWriter(t *testing.T) {
 	//nolint:thelper // synctest.Test takes a test function, not a helper
 	synctest.Test(t, func(t *testing.T) {
+		time.Local = time.UTC // in order to ensure consistent time formatting locally and on GitHub actions
 		ctx := t.Context()
 		var buf bytes.Buffer
 		tel, shutdown := New(ctx, "test",
 			WithLocalWriter(&buf),
 			WithLocalColors(false),
-			WithTestIDGenerator(),
+			WithDeterministicTestIDGenerator(42),
 			WithAttributes(map[string]string{
 				"app": "test",
 			}),
@@ -73,25 +77,53 @@ func TestProvider_withLocalWriter(t *testing.T) {
 
 		require.NoError(t, shutdown(ctx))
 
-		expectedContents := []string{
-			// Log line
-			`sev=DEBUG msg="testing testing" app="test" some-field="some-value"`,
+		snapshotter := cupaloy.New(cupaloy.SnapshotSubdirectory("testdata"))
+		snapshotter.SnapshotT(t, buf.String())
+	})
+}
 
-			// Trace
-			`[trace] id=8bef2b2824b41029c148c2769d143fcf name="test"`,
-			"start=2000-01-01T",
-			"status=Error",
+func TestProvider_withLocalWriter_splitWriters(t *testing.T) {
+	//nolint:thelper // synctest.Test takes a test function, not a helper
+	synctest.Test(t, func(t *testing.T) {
+		time.Local = time.UTC // in order to ensure consistent time formatting locally and on GitHub actions
+		ctx := t.Context()
+		var logBuf, meterBuf, traceBuf bytes.Buffer
+		tel, shutdown := New(ctx, "test",
+			WithLogWriter(&logBuf),
+			WithMeterWriter(&meterBuf),
+			WithTraceWriter(&traceBuf),
+			WithLocalColors(false),
+			WithDeterministicTestIDGenerator(42),
+			WithAttributes(map[string]string{
+				"app": "test",
+			}),
+		)
+		require.NotNil(t, shutdown)
+		require.NotNil(t, tel)
 
-			// Metric
-			"[metric] 2000-01-01T",
-			"name=test-counter value=42",
-		}
+		spanCtx, span := tel.tracer.Start(ctx, "test")
+		require.NotNil(t, span)
+		require.NotNil(t, spanCtx)
+		span.SetStatus(codes.Error, "err")
 
-		loggedContent := buf.Bytes()
-		for _, e := range expectedContents {
-			if !bytes.Contains(loggedContent, []byte(e)) {
-				t.Errorf("Expected log to contain %q, but it did not. Full log:\n%s", e, loggedContent)
-			}
-		}
+		tel.Logger().DebugContext(ctx, "testing testing", "some-field", "some-value")
+
+		counter, err := tel.Meter().Int64Counter("test-counter")
+		require.NoError(t, err)
+		counter.Add(ctx, 42)
+
+		span.End()
+
+		require.NoError(t, shutdown(ctx))
+
+		snapshotter := cupaloy.New(cupaloy.SnapshotSubdirectory("testdata"))
+		sb := strings.Builder{}
+		sb.WriteString("=== LOGS ===\n")
+		sb.WriteString(logBuf.String())
+		sb.WriteString("\n=== METERS ===\n")
+		sb.WriteString(meterBuf.String())
+		sb.WriteString("\n=== TRACES ===\n")
+		sb.WriteString(traceBuf.String())
+		snapshotter.SnapshotT(t, sb.String())
 	})
 }

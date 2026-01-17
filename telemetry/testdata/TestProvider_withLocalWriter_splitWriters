@@ -1,0 +1,9 @@
+=== LOGS ===
+2000-01-01T00:00:00Z sev=DEBUG msg="testing testing" app="test" some-field="some-value"
+
+=== METERS ===
+[metric] 2000-01-01T00:00:00Z name=test-counter value=42 attributes: 
+
+=== TRACES ===
+[trace] id=afbf64b1967f8c538872b44b9fbb971b name="test" start=2000-01-01T00:00:00Z dur=0s status=Error
+
