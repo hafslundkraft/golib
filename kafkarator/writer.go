@@ -11,13 +11,11 @@ import (
 
 func newWriter(
 	p *kafka.Producer,
-	topic string,
 	pmc metric.Int64Counter,
 	tel TelemetryProvider,
 ) *Writer {
 	w := &Writer{
 		producer:                p,
-		topic:                   topic,
 		producedMessagesCounter: pmc,
 		tel:                     tel,
 		closed:                  false,
@@ -31,7 +29,6 @@ func newWriter(
 type Writer struct {
 	producedMessagesCounter metric.Int64Counter
 	producer                *kafka.Producer
-	topic                   string
 	tel                     TelemetryProvider
 	closed                  bool
 }
@@ -61,12 +58,16 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 		return fmt.Errorf("message cannot be nil")
 	}
 
+	if message.Topic == "" {
+		return fmt.Errorf("message topic cannot be empty")
+	}
+
 	if w.closed {
 		span.RecordError(fmt.Errorf("writer is closed"))
 		return fmt.Errorf("writer is closed")
 	}
 
-	span.SetAttributes(attribute.String("writer.topic", w.topic))
+	span.SetAttributes(attribute.String("writer.topic", message.Topic))
 
 	traceHeaders := injectTraceContext(ctx, message.Headers)
 
@@ -77,7 +78,7 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 
 	msg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{
-			Topic:     &w.topic,
+			Topic:     &message.Topic,
 			Partition: kafka.PartitionAny,
 		},
 		Value:   message.Value,

@@ -159,7 +159,7 @@ func (c *Connection) Serializer() ValueSerializer {
 }
 
 // Writer returns a writer for writing messages to Kafka.
-func (c *Connection) Writer(topic string) (*Writer, error) {
+func (c *Connection) Writer() (*Writer, error) {
 	conf := cloneConfigMap(c.configMap)
 
 	p, err := kafka.NewProducer(&conf)
@@ -176,7 +176,7 @@ func (c *Connection) Writer(topic string) (*Writer, error) {
 
 	counter, _ := c.tel.Meter().Int64Counter(meterProducedMessages)
 
-	return newWriter(p, topic, counter, c.tel), nil
+	return newWriter(p, counter, c.tel), nil
 }
 
 // Deserializer returns a deserializer for deserializing messages from avro to bytes
@@ -184,12 +184,44 @@ func (c *Connection) Deserializer() ValueDeserializer {
 	return newAvroDeserializer(c.srClient, c.tel)
 }
 
+// ReaderOption for options to pass to the Reader() function
+type ReaderOption func(*readerOptions)
+
+type readerOptions struct {
+	autoOffsetReset string
+}
+
+func defaultReaderOptions() readerOptions {
+	return readerOptions{
+		autoOffsetReset: "earliest",
+	}
+}
+
+// WithAutoOffsetReset overrides Kafka auto.offset.reset.
+// Default is `earliest` if not provided.
+//
+// Possible values:
+//   - `earliest`: start from the earliest available offset when no committed offset exists
+//   - `latest`: start from the latest offset when no committed offset exists
+//   - `none`: error if no committed offset exists for the consumer group
+func WithAutoOffsetReset(value string) ReaderOption {
+	return func(o *readerOptions) {
+		o.autoOffsetReset = value
+	}
+}
+
 // Reader returns a reader that is used to fetch messages from Kafka.
-func (c *Connection) Reader(topic, group string) (*Reader, error) {
+func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader, error) {
+	ro := defaultReaderOptions()
+
+	for _, opt := range opts {
+		opt(&ro)
+	}
+
 	conf := cloneConfigMap(c.configMap)
 
 	conf["group.id"] = group
-	conf["auto.offset.reset"] = "earliest"
+	conf["auto.offset.reset"] = ro.autoOffsetReset
 
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
