@@ -21,7 +21,7 @@ In order to use the serializer, a schema for the topic must be available in the 
 ```go
 ctx := context.Background()
 
-writer, _ := conn.Writer("my-topic")
+writer, _ := conn.Writer()
 serializer, _ := conn.Serializer() 
 defer writer.Close(ctx)
 
@@ -33,12 +33,14 @@ value := map[string]any{
 	"id": "hello",
 }
 
-encoded, err := serializer.Serialize(ctx, "my-topic", value)
+topic := "my-topic"
+encoded, err := serializer.Serialize(ctx, topic, value)
 if err != nil {
 	// handle error
 }
 
 message := kafkarator.Message{
+	Topic: topic,
     Key: key,
     Headers: headers,
     Value: encoded,
