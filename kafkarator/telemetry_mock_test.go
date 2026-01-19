@@ -1,7 +1,8 @@
 package kafkarator
 
 import (
-	"context"
+	"io"
+	"log/slog"
 
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
@@ -14,14 +15,14 @@ import (
 type mockTelemetry struct {
 	tracer trace.Tracer
 	meter  metric.Meter
-	logger Logger
+	logger *slog.Logger
 }
 
 func newMockTelemetry() TelemetryProvider {
 	return &mockTelemetry{
 		tracer: tracenoop.NewTracerProvider().Tracer("test"),
 		meter:  noop.NewMeterProvider().Meter("test"),
-		logger: mockLogger{},
+		logger: newTestLogger(io.Discard),
 	}
 }
 
@@ -33,14 +34,12 @@ func (m *mockTelemetry) Meter() metric.Meter {
 	return m.meter
 }
 
-func (m *mockTelemetry) Logger() Logger {
+func (m *mockTelemetry) Logger() *slog.Logger {
 	return m.logger
 }
 
-// ---- Logger mock ----
-
-type mockLogger struct{}
-
-func (mockLogger) ErrorContext(context.Context, string, ...any) {}
-func (mockLogger) InfoContext(context.Context, string, ...any)  {}
-func (mockLogger) DebugContext(context.Context, string, ...any) {}
+func newTestLogger(w io.Writer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+}
