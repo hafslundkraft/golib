@@ -3,6 +3,7 @@ package kafkarator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -44,16 +45,9 @@ type Connection struct {
 
 // TelemetryProvider interface providing logger, metrics and tracing
 type TelemetryProvider interface {
-	Logger() Logger
+	Logger() *slog.Logger
 	Meter() metric.Meter
 	Tracer() trace.Tracer
-}
-
-// Logger interface for telemetry logging
-type Logger interface {
-	ErrorContext(ctx context.Context, msg string, args ...any)
-	InfoContext(ctx context.Context, msg string, args ...any)
-	DebugContext(ctx context.Context, msg string, args ...any)
 }
 
 // Option ... to pass to the New() connection
