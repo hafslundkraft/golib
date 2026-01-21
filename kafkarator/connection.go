@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/oauth2"
@@ -38,7 +37,7 @@ type Connection struct {
 	config    Config
 	configMap *kafka.ConfigMap
 	tel       TelemetryProvider
-	srClient  sr.Client
+	srClient  SchemaRegistryClient
 
 	tokenProvider auth.AccessTokenProvider // this is optional
 }
@@ -55,12 +54,22 @@ type Option func(*options)
 
 type options struct {
 	tokenSource oauth2.TokenSource
+	srClient    SchemaRegistryClient
 }
 
 // WithTokenSource provides the optional TokenSource to use instead of default token provider
 func WithTokenSource(ts oauth2.TokenSource) Option {
 	return func(o *options) {
 		o.tokenSource = ts
+	}
+}
+
+// WithSchemaRegistryClient sets the schema registry client to use internally. If
+// not set, a client will be set up automatically, so the main use case for this
+// option is for unit tests.
+func WithSchemaRegistryClient(client SchemaRegistryClient) Option {
+	return func(o *options) {
+		o.srClient = client
 	}
 }
 
@@ -106,8 +115,8 @@ func New(
 		}
 	}
 
-	var srClient sr.Client
-	if config.UseSchemaRegistry {
+	srClient := o.srClient
+	if srClient == nil && config.UseSchemaRegistry {
 		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig)
 		if err != nil {
 			return nil, fmt.Errorf("schema registry client: %w", err)
