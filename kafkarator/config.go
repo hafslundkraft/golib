@@ -70,6 +70,7 @@ type SchemaRegistryConfig struct {
 
 // Config contains all necessary configuration needed to connect to Kafka.
 type Config struct {
+	// Env is the environment (dev, test, prod)
 	Env string
 
 	// Broker is the Kafka broker
@@ -78,7 +79,7 @@ type Config struct {
 	// Which authentication mode to use towards Kafka service
 	AuthMode string
 
-	// UseSchemaRegistry enables or unenables creation of schema registry client
+	// UseSchemaRegistry enables or disables creation of schema registry client
 	UseSchemaRegistry bool
 
 	// CA certificate for the service
@@ -89,6 +90,10 @@ type Config struct {
 
 	// SASL configuration
 	TLS TLSConfig
+
+	// NoAuth indicates that no authentication (SASL or TSL) shall be setup. This
+	// is typically only useful in tests.
+	NoAuth bool
 
 	// Schema registry configuration
 	SchemaRegistryConfig SchemaRegistryConfig

@@ -13,6 +13,12 @@ import (
 func buildKafkaConfigMap(
 	c *Config,
 ) (*kafka.ConfigMap, error) {
+	if c.NoAuth {
+		conf := &kafka.ConfigMap{
+			"bootstrap.servers": c.Broker,
+		}
+		return conf, nil
+	}
 	if c.AuthMode == "sasl" {
 		return saslConfigMap(c)
 	}
