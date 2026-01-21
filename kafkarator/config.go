@@ -3,6 +3,7 @@ package kafkarator
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 const (
@@ -68,6 +69,26 @@ type SchemaRegistryConfig struct {
 	SchemaRegistryPassword string
 }
 
+// AuthMode indicates which type of authentication (if any) should
+// be used against Kafka.
+type AuthMode int
+
+const (
+	// AuthNotSet indicates that the authentication mode has not been set. This
+	// is probably an error.
+	AuthNotSet AuthMode = iota
+
+	// AuthNone indicates that no authentication should be performed. This is
+	// mostly in use in tests.
+	AuthNone
+
+	// AuthSASL indicates that SASL auth shall be used.
+	AuthSASL
+
+	// AuthTLS indicates that TLS auth shall be used.
+	AuthTLS
+)
+
 // Config contains all necessary configuration needed to connect to Kafka.
 type Config struct {
 	// Env is the environment (dev, test, prod)
@@ -77,7 +98,7 @@ type Config struct {
 	Broker string
 
 	// Which authentication mode to use towards Kafka service
-	AuthMode string
+	AuthMode AuthMode
 
 	// UseSchemaRegistry enables or disables creation of schema registry client
 	UseSchemaRegistry bool
@@ -90,10 +111,6 @@ type Config struct {
 
 	// SASL configuration
 	TLS TLSConfig
-
-	// NoAuth indicates that no authentication (SASL or TSL) shall be setup. This
-	// is typically only useful in tests.
-	NoAuth bool
 
 	// Schema registry configuration
 	SchemaRegistryConfig SchemaRegistryConfig
@@ -109,12 +126,20 @@ func ConfigFromEnvVars() (*Config, error) {
 	}
 	cfg.Env = env
 
-	authType := os.Getenv(envAuthType)
-
-	if authType == "" {
-		return &Config{}, fmt.Errorf("env is not set (%s)", envAuthType)
+	authType := strings.ToLower(os.Getenv(envAuthType))
+	var authMode AuthMode
+	switch authType {
+	case "noauth":
+		authMode = AuthNone
+	case "sasl":
+		authMode = AuthSASL
+	case "tls":
+		authMode = AuthTLS
+	default:
+		return &Config{}, fmt.Errorf("illegal value %s for env (%s)", authType, envAuthType)
 	}
-	cfg.AuthMode = authType
+
+	cfg.AuthMode = authMode
 
 	broker := os.Getenv(envBroker)
 	if broker == "" {

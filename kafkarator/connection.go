@@ -98,7 +98,7 @@ func New(
 
 	var tp auth.AccessTokenProvider
 
-	if config.AuthMode == "sasl" {
+	if config.AuthMode == AuthSASL {
 		switch {
 		case o.tokenSource != nil:
 			tp = auth.NewOAuth2TokenSourceAdapter(o.tokenSource)
@@ -141,7 +141,7 @@ func (c *Connection) Test(ctx context.Context) error {
 		return fmt.Errorf("create admin: %w", err)
 	}
 
-	if c.config.AuthMode == "sasl" {
+	if c.config.AuthMode == AuthSASL {
 		if err := c.startOAuth(ctx, admin); err != nil {
 			admin.Close()
 			return fmt.Errorf("create token provider: %w", err)
@@ -170,7 +170,7 @@ func (c *Connection) Writer() (*Writer, error) {
 		return nil, fmt.Errorf("create producer: %w", err)
 	}
 
-	if c.config.AuthMode == "sasl" {
+	if c.config.AuthMode == AuthSASL {
 		if err := c.startOAuth(context.Background(), p); err != nil {
 			p.Close()
 			return nil, err
@@ -236,7 +236,7 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 		return nil, fmt.Errorf("subscribe: %w", err)
 	}
 
-	if c.config.AuthMode == "sasl" {
+	if c.config.AuthMode == AuthSASL {
 		if err := c.startOAuth(context.Background(), consumer); err != nil {
 			_ = consumer.Close()
 			return nil, fmt.Errorf("start oauth: %w", err)

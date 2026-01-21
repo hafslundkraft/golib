@@ -101,7 +101,7 @@ func TestConfigFromEnvVars_TLS(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "test", cfg.Env)
-		assert.Equal(t, "tls", cfg.AuthMode)
+		assert.Equal(t, AuthTLS, cfg.AuthMode)
 		assert.NotEmpty(t, cfg.Broker)
 	})
 }
