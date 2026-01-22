@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 	"github.com/hamba/avro/v2"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -19,7 +18,7 @@ type ValueDeserializer interface {
 // AvroDeserializer deserializes values with Avro encoding and the
 // Confluent Schema Registry wire format to bytes
 type AvroDeserializer struct {
-	srClient sr.Client
+	srClient SchemaRegistryClient
 	tel      TelemetryProvider
 
 	mu      sync.Mutex
@@ -27,7 +26,7 @@ type AvroDeserializer struct {
 }
 
 func newAvroDeserializer(
-	srClient sr.Client,
+	srClient SchemaRegistryClient,
 	tel TelemetryProvider,
 ) *AvroDeserializer {
 	if srClient == nil {

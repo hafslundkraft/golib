@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 	"github.com/hamba/avro/v2"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -20,14 +19,14 @@ type ValueSerializer interface {
 // AvroSerializer serializes values using Avro encoding and the
 // Confluent Schema Registry wire format.
 type AvroSerializer struct {
-	srClient sr.Client
+	srClient SchemaRegistryClient
 	tel      TelemetryProvider
 
 	mu          sync.Mutex
 	schemaCache map[string]cachedSchema
 }
 
-func newAvroSerializer(srClient sr.Client, tel TelemetryProvider) *AvroSerializer {
+func newAvroSerializer(srClient SchemaRegistryClient, tel TelemetryProvider) *AvroSerializer {
 	if tel == nil {
 		panic("telemetry provider is nil")
 	}

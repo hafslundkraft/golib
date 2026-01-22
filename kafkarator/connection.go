@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/oauth2"
@@ -38,7 +37,7 @@ type Connection struct {
 	config    Config
 	configMap *kafka.ConfigMap
 	tel       TelemetryProvider
-	srClient  sr.Client
+	srClient  SchemaRegistryClient
 
 	tokenProvider auth.AccessTokenProvider // this is optional
 }
@@ -55,12 +54,22 @@ type Option func(*options)
 
 type options struct {
 	tokenSource oauth2.TokenSource
+	srClient    SchemaRegistryClient
 }
 
 // WithTokenSource provides the optional TokenSource to use instead of default token provider
 func WithTokenSource(ts oauth2.TokenSource) Option {
 	return func(o *options) {
 		o.tokenSource = ts
+	}
+}
+
+// WithSchemaRegistryClient sets the schema registry client to use internally. If
+// not set, a client will be set up automatically, so the main use case for this
+// option is for unit tests.
+func WithSchemaRegistryClient(client SchemaRegistryClient) Option {
+	return func(o *options) {
+		o.srClient = client
 	}
 }
 
@@ -89,7 +98,7 @@ func New(
 
 	var tp auth.AccessTokenProvider
 
-	if config.AuthMode == "sasl" {
+	if config.AuthMode == AuthSASL {
 		switch {
 		case o.tokenSource != nil:
 			tp = auth.NewOAuth2TokenSourceAdapter(o.tokenSource)
@@ -106,8 +115,8 @@ func New(
 		}
 	}
 
-	var srClient sr.Client
-	if config.UseSchemaRegistry {
+	srClient := o.srClient
+	if srClient == nil && config.UseSchemaRegistry {
 		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig)
 		if err != nil {
 			return nil, fmt.Errorf("schema registry client: %w", err)
@@ -132,7 +141,7 @@ func (c *Connection) Test(ctx context.Context) error {
 		return fmt.Errorf("create admin: %w", err)
 	}
 
-	if c.config.AuthMode == "sasl" {
+	if c.config.AuthMode == AuthSASL {
 		if err := c.startOAuth(ctx, admin); err != nil {
 			admin.Close()
 			return fmt.Errorf("create token provider: %w", err)
@@ -161,7 +170,7 @@ func (c *Connection) Writer() (*Writer, error) {
 		return nil, fmt.Errorf("create producer: %w", err)
 	}
 
-	if c.config.AuthMode == "sasl" {
+	if c.config.AuthMode == AuthSASL {
 		if err := c.startOAuth(context.Background(), p); err != nil {
 			p.Close()
 			return nil, err
@@ -227,7 +236,7 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 		return nil, fmt.Errorf("subscribe: %w", err)
 	}
 
-	if c.config.AuthMode == "sasl" {
+	if c.config.AuthMode == AuthSASL {
 		if err := c.startOAuth(context.Background(), consumer); err != nil {
 			_ = consumer.Close()
 			return nil, fmt.Errorf("start oauth: %w", err)

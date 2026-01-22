@@ -2,6 +2,7 @@ package kafkarator
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,7 +14,17 @@ import (
 func buildKafkaConfigMap(
 	c *Config,
 ) (*kafka.ConfigMap, error) {
-	if c.AuthMode == "sasl" {
+	if c.AuthMode == AuthNotSet {
+		return nil, errors.New("auth not set")
+	}
+
+	if c.AuthMode == AuthNone {
+		conf := &kafka.ConfigMap{
+			"bootstrap.servers": c.Broker,
+		}
+		return conf, nil
+	}
+	if c.AuthMode == AuthSASL {
 		return saslConfigMap(c)
 	}
 
