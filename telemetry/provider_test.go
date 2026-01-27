@@ -95,3 +95,37 @@ func TestProvider_withLocalWriter(t *testing.T) {
 		}
 	})
 }
+
+func TestProvider_withSimpleLogProcessor(t *testing.T) {
+	//nolint:thelper // synctest.Test takes a test function, not a helper
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		var buf bytes.Buffer
+		tel, shutdown := New(ctx, "test",
+			WithLocalWriter(&buf),
+			WithLocalColors(false),
+			WithSimpleLogProcessor(true),
+			WithTestIDGenerator(),
+			WithAttributes(map[string]string{
+				"app": "test",
+			}),
+		)
+		require.NotNil(t, shutdown)
+		require.NotNil(t, tel)
+
+		tel.Logger().InfoContext(ctx, "test log message", "key", "value")
+
+		require.NoError(t, shutdown(ctx))
+
+		expectedContents := []string{
+			`sev=INFO msg="test log message" app="test" key="value"`,
+		}
+
+		loggedContent := buf.Bytes()
+		for _, e := range expectedContents {
+			if !bytes.Contains(loggedContent, []byte(e)) {
+				t.Errorf("Expected log to contain %q, but it did not. Full log:\n%s", e, loggedContent)
+			}
+		}
+	})
+}

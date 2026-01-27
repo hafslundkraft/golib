@@ -45,3 +45,11 @@ func WithTestIDGenerator() OptionFunc {
 		c.testIDGen = true
 	}
 }
+
+// WithSimpleLogProcessor enables a simple log processor that exports logs immediately without batching.
+// This is useful for low-volume logging scenarios such as job runs.
+func WithSimpleLogProcessor(useSimpleProcessor bool) OptionFunc {
+	return func(c *config) {
+		c.simpleLogProcessor = useSimpleProcessor
+	}
+}

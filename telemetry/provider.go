@@ -41,11 +41,12 @@ type Provider struct {
 }
 
 type config struct {
-	localW      io.Writer
-	local       bool
-	localColors bool
-	attributes  map[string]string
-	testIDGen   bool
+	localW             io.Writer
+	local              bool
+	localColors        bool
+	simpleLogProcessor bool
+	attributes         map[string]string
+	testIDGen          bool
 }
 
 func (c config) localWriter() io.Writer {
@@ -209,20 +210,25 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 	opts := make([]logsdk.LoggerProviderOption, 0, 2)
 	if cfg.local {
-		opts = append(
-			opts,
-			logsdk.WithProcessor(
-				logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()}),
-			),
-		)
+		var processor logsdk.Processor
+		if cfg.simpleLogProcessor {
+			processor = logsdk.NewSimpleProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()})
+		} else {
+			processor = logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()})
+		}
+		opts = append(opts, logsdk.WithProcessor(processor))
 	} else {
 		otlpLogExporter, err := otlploghttp.New(ctx)
 		if err != nil {
 			panic(err)
 		}
-		opts = append(opts,
-			logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)),
-		)
+		var processor logsdk.Processor
+		if cfg.simpleLogProcessor {
+			processor = logsdk.NewSimpleProcessor(otlpLogExporter)
+		} else {
+			processor = logsdk.NewBatchProcessor(otlpLogExporter)
+		}
+		opts = append(opts, logsdk.WithProcessor(processor))
 	}
 
 	return logsdk.NewLoggerProvider(opts...)
