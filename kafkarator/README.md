@@ -268,11 +268,44 @@ The library uses the W3C Trace Context standard headers:
 
 These headers are automatically managed by OpenTelemetry and don't require manual intervention.
 
-## Trace Metrics
-The following metric counters and gauges are automatically maintained:
-* **messages_produced_total** (counter): The total number of messages that have been written to the Kafka topic.
-* **kafka_lag_partition** (gauge): Measures the number of messages remaining on the partition that service hasn't read 
-    yet. The partition is question is added as a attribute on the gauge.
+## Observability
+
+kafkarator follows [OpenTelemetry Semantic Conventions for Messaging](https://opentelemetry.io/docs/specs/semconv/messaging/kafka/) to provide standardized observability.
+
+### Metrics
+
+The library automatically records the following metrics:
+
+| Metric | Type | Description | Attributes |
+|--------|------|-------------|------------|
+| `messaging.client.sent.messages` | Counter | Number of messages sent to Kafka | `messaging.system=kafka`, `messaging.operation.name=send`, `messaging.destination.name` (topic), `messaging.destination.partition.id`, `error.type` (on failure) |
+| `messaging.client.consumed.messages` | Counter | Number of messages consumed from Kafka | `messaging.system=kafka`, `messaging.operation.name=poll`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.destination.partition.id` |
+| `messaging.client.poll.failures` | Counter | Number of poll failures | `messaging.system=kafka`, `messaging.operation.name=poll`, `messaging.operation.type=receive`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `error.type` |
+| `messaging.kafka.consumer.lag` | Gauge | Consumer lag per partition | `messaging.system=kafka`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.destination.partition.id` |
+
+### Traces
+
+The library creates spans for all Kafka operations:
+
+**Producer spans** (SpanKind: PRODUCER):
+- **Name**: `send <topic-name>`
+- **Attributes**: `messaging.system=kafka`, `messaging.operation.type=send`, `messaging.operation.name=send`, `messaging.destination.name` (topic), `messaging.destination.partition.id`, `messaging.kafka.offset`, `messaging.kafka.message.key` (if present)
+
+**Consumer spans** (SpanKind: CLIENT):
+- **Name**: `poll <topic-name>`
+- **Attributes**: `messaging.system=kafka`, `messaging.operation.type=receive`, `messaging.operation.name=poll`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.batch.message_count` (for multi-message batches), `messaging.destination.partition.id`, `messaging.kafka.offset`
+
+**Commit spans** (SpanKind: CLIENT):
+- **Name**: `commit <topic-name>`
+- **Attributes**: `messaging.system=kafka`, `messaging.operation.type=settle`, `messaging.operation.name=commit`, `messaging.destination.name` (topic), `messaging.consumer.group.name`
+
+### Error Handling
+
+Errors are recorded with low-cardinality error types suitable for metrics:
+- **Kafka errors**: `kafka_error_<code>` (e.g., `kafka_error_-191` for partition EOF)
+- **Other errors**: `_OTHER`
+
+**Note**: Timeouts are not treated as errors and result in OK span status.
 
 ## Testing
 
