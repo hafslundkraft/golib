@@ -51,9 +51,6 @@ func (w *Writer) Close(ctx context.Context) error {
 // that if there is an OpenTelemetry tracing span associated with the context, it is extracted
 // and included in the header that is sent to Kafka.
 func (w *Writer) Write(ctx context.Context, message *Message) error {
-	ctx, span := w.tel.Tracer().Start(ctx, "kafkarator.Writer.Write")
-	defer span.End()
-
 	if message == nil {
 		return fmt.Errorf("message cannot be nil")
 	}
@@ -62,12 +59,18 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 		return fmt.Errorf("message topic cannot be empty")
 	}
 
+	ctx, span := startProducerSpan(ctx, w.tel.Tracer(), message.Topic)
+	defer span.End()
+
 	if w.closed {
-		span.RecordError(fmt.Errorf("writer is closed"))
-		return fmt.Errorf("writer is closed")
+		err := fmt.Errorf("writer is closed")
+		setProducerError(span, err)
+		return err
 	}
 
-	span.SetAttributes(attribute.String("writer.topic", message.Topic))
+	if message.Key != nil {
+		span.SetAttributes(attribute.String(MessagingKafkaMessageKey, string(message.Key)))
+	}
 
 	traceHeaders := injectTraceContext(ctx, message.Headers)
 
@@ -90,19 +93,22 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 	deliveryChan := make(chan kafka.Event, 1)
 	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
-		span.RecordError(err)
+		setProducerError(span, err)
 		return fmt.Errorf("produce message: %w", err)
 	}
 
 	ev := <-deliveryChan
 
 	m := ev.(*kafka.Message)
+	partitionID := fmt.Sprintf("%d", m.TopicPartition.Partition)
 
 	if m.TopicPartition.Error != nil {
-		span.RecordError(err)
-		return fmt.Errorf("topic partiion error for delivery: %w", err)
+		setProducerError(span, m.TopicPartition.Error)
+		recordSentMessage(ctx, w.producedMessagesCounter, message.Topic, partitionID, m.TopicPartition.Error)
+		return fmt.Errorf("topic partition error for delivery: %w", m.TopicPartition.Error)
 	}
 
-	w.producedMessagesCounter.Add(ctx, 1)
+	setProducerSuccess(span, partitionID, int64(m.TopicPartition.Offset))
+	recordSentMessage(ctx, w.producedMessagesCounter, message.Topic, partitionID, nil)
 	return nil
 }

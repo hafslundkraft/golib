@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -19,16 +19,20 @@ type CommitFunc func(ctx context.Context) error
 func newReader(
 	c *kafka.Consumer,
 	rmc metric.Int64Counter,
+	pfc metric.Int64Counter,
 	lagGauge metric.Int64Gauge,
 	tel TelemetryProvider,
 	topic string,
+	consumerGroup string,
 ) (*Reader, error) {
 	r := &Reader{
 		consumer:            c,
 		readMessagesCounter: rmc,
+		pollFailuresCounter: pfc,
 		lagGauge:            lagGauge,
 		tel:                 tel,
 		topic:               topic,
+		consumerGroup:       consumerGroup,
 	}
 
 	return r, nil
@@ -42,10 +46,12 @@ func newReader(
 type Reader struct {
 	consumer            *kafka.Consumer
 	readMessagesCounter metric.Int64Counter
+	pollFailuresCounter metric.Int64Counter
 	lagGauge            metric.Int64Gauge
 	tel                 TelemetryProvider
 	closed              bool
 	topic               string
+	consumerGroup       string
 }
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
@@ -74,10 +80,8 @@ func (rc *Reader) Read(
 	maxMessages int,
 	maxWait time.Duration,
 ) ([]Message, CommitFunc, error) {
-	ctx, span := rc.tel.Tracer().Start(ctx, "kafkarator.Reader.Read")
+	ctx, span := startConsumerSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
 	defer span.End()
-
-	span.SetAttributes(attribute.String("reader.topic", rc.topic))
 
 	deadline := time.Now().Add(maxWait)
 	msgs := make([]Message, 0, maxMessages)
@@ -86,6 +90,9 @@ func (rc *Reader) Read(
 	latestOffsets := map[int32]kafka.Offset{}
 
 	commit := CommitFunc(func(ctx context.Context) error {
+		_, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
+		defer span.End()
+
 		for partition, off := range latestOffsets {
 			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
 				{
@@ -95,9 +102,13 @@ func (rc *Reader) Read(
 				},
 			})
 			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
 				return fmt.Errorf("commit failed: %w", err)
 			}
 		}
+
+		span.SetStatus(codes.Ok, "offsets committed")
 		return nil
 	})
 
@@ -125,13 +136,15 @@ func (rc *Reader) Read(
 			})
 
 			latestOffsets[e.TopicPartition.Partition] = e.TopicPartition.Offset
-			rc.readMessagesCounter.Add(ctx, 1)
+			partitionID := fmt.Sprintf("%d", e.TopicPartition.Partition)
+			recordConsumedMessage(ctx, rc.readMessagesCounter, rc.topic, rc.consumerGroup, partitionID, nil)
 
 		case kafka.Error:
+			setConsumerError(span, e, e.IsTimeout())
 			if e.IsTimeout() {
 				return msgs, commit, nil
 			}
-			span.RecordError(e)
+			recordPollFailure(ctx, rc.pollFailuresCounter, rc.topic, rc.consumerGroup, e)
 			return msgs, commit, fmt.Errorf("poll error: %w", e)
 
 		default:
@@ -139,7 +152,28 @@ func (rc *Reader) Read(
 		}
 	}
 
-	span.SetAttributes(attribute.Int("message_count", len(msgs)))
+	if len(msgs) > 0 {
+		// Check if all messages are from the same partition
+		firstPartition := msgs[0].Partition
+		samePartition := true
+		for _, msg := range msgs[1:] {
+			if msg.Partition != firstPartition {
+				samePartition = false
+				break
+			}
+		}
+
+		if samePartition {
+			// Single partition: include partition and offset details
+			partitionID := fmt.Sprintf("%d", firstPartition)
+			setConsumerSuccess(span, len(msgs), partitionID, msgs[0].Offset)
+		} else {
+			// Multiple partitions: only include batch count
+			setConsumerSuccess(span, len(msgs), "", 0)
+		}
+	} else {
+		setConsumerSuccess(span, 0, "", 0)
+	}
 
 	return msgs, commit, nil
 }

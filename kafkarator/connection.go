@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	meterProducedMessages = "messages_produced_total"
-	meterConsumedMessages = "kafka_messages_consumed"
-	gaugeLag              = "kafka_message_lag"
+	meterProducedMessages = "messaging.client.sent.messages"
+	meterConsumedMessages = "messaging.client.consumed.messages"
+	meterPollFailures     = "messaging.client.poll.failures"
+	gaugeLag              = "messaging.kafka.consumer.lag"
 )
 
 // Connection represents a Connection to a Kafka service. Connection (currently) only supports
@@ -255,7 +256,13 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 		return nil, fmt.Errorf("create meter counter %q: %w", meterConsumedMessages, err)
 	}
 
-	r, err := newReader(consumer, counter, lagGauge, c.tel, topic)
+	failureCounter, err := c.tel.Meter().Int64Counter(meterPollFailures)
+	if err != nil {
+		_ = consumer.Close()
+		return nil, fmt.Errorf("create meter counter %q: %w", meterPollFailures, err)
+	}
+
+	r, err := newReader(consumer, counter, failureCounter, lagGauge, c.tel, topic, group)
 	if err != nil {
 		return nil, err
 	}
