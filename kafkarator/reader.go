@@ -80,7 +80,7 @@ func (rc *Reader) Read(
 	maxMessages int,
 	maxWait time.Duration,
 ) ([]Message, CommitFunc, error) {
-	ctx, span := startConsumerSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
+	ctx, span := startPollSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
 	defer span.End()
 
 	deadline := time.Now().Add(maxWait)
@@ -90,7 +90,7 @@ func (rc *Reader) Read(
 	latestOffsets := map[int32]kafka.Offset{}
 
 	commit := CommitFunc(func(ctx context.Context) error {
-		_, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
+		ctx, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
 		defer span.End()
 
 		for partition, off := range latestOffsets {
@@ -140,7 +140,7 @@ func (rc *Reader) Read(
 			recordConsumedMessage(ctx, rc.readMessagesCounter, rc.topic, rc.consumerGroup, partitionID, nil)
 
 		case kafka.Error:
-			setConsumerError(span, e, e.IsTimeout())
+			setPollError(span, e, e.IsTimeout())
 			if e.IsTimeout() {
 				return msgs, commit, nil
 			}
@@ -166,13 +166,13 @@ func (rc *Reader) Read(
 		if samePartition {
 			// Single partition: include partition and offset details
 			partitionID := fmt.Sprintf("%d", firstPartition)
-			setConsumerSuccess(span, len(msgs), partitionID, msgs[0].Offset)
+			setPollSuccess(span, len(msgs), partitionID, msgs[0].Offset)
 		} else {
 			// Multiple partitions: only include batch count
-			setConsumerSuccess(span, len(msgs), "", 0)
+			setPollSuccess(span, len(msgs), "", 0)
 		}
 	} else {
-		setConsumerSuccess(span, 0, "", 0)
+		setPollSuccess(span, 0, "", 0)
 	}
 
 	return msgs, commit, nil

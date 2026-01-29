@@ -84,11 +84,11 @@ func startProducerSpan(ctx context.Context, tracer trace.Tracer, topic string) (
 	return ctx, span
 }
 
-// startConsumerSpan creates a span for a Kafka poll operation with all standard attributes.
+// startPollSpan creates a span for a Kafka poll operation with all standard attributes.
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startConsumerSpan(ctx context.Context, tracer trace.Tracer, topic, group string) (context.Context, trace.Span) {
+func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNamePoll, topic)
 	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindClient))
 
@@ -213,8 +213,8 @@ func setProducerError(span trace.Span, err error) {
 	span.SetAttributes(attribute.String(MessagingErrorType, getErrorType(err)))
 }
 
-// setConsumerSuccess sets span attributes and status for successful poll.
-func setConsumerSuccess(span trace.Span, messageCount int, partition string, offset int64) {
+// setPollSuccess sets span attributes and status for successful poll.
+func setPollSuccess(span trace.Span, messageCount int, partition string, offset int64) {
 	if messageCount > 0 {
 		attrs := []attribute.KeyValue{}
 
@@ -240,8 +240,8 @@ func setConsumerSuccess(span trace.Span, messageCount int, partition string, off
 	}
 }
 
-// setConsumerError sets span attributes and status for failed poll.
-func setConsumerError(span trace.Span, err error, isTimeout bool) {
+// setPollError sets span attributes and status for failed poll.
+func setPollError(span trace.Span, err error, isTimeout bool) {
 	if isTimeout {
 		span.SetStatus(codes.Ok, "poll timeout")
 	} else {
