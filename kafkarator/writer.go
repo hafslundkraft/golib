@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 )
 
 func newWriter(
@@ -69,7 +69,7 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 	}
 
 	if message.Key != nil {
-		span.SetAttributes(attribute.String(MessagingKafkaMessageKey, string(message.Key)))
+		span.SetAttributes(semconv.MessagingKafkaMessageKey(string(message.Key)))
 	}
 
 	traceHeaders := injectTraceContext(ctx, message.Headers)

@@ -7,48 +7,20 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
 // OpenTelemetry semantic conventions for Kafka messaging.
 // See: https://opentelemetry.io/docs/specs/semconv/messaging/kafka/
 const (
-	// Messaging system
-	MessagingSystem      = "messaging.system"
-	MessagingSystemKafka = "kafka"
-
-	// Messaging operation attributes
-	MessagingOperationType = "messaging.operation.type"
-	MessagingOperationName = "messaging.operation.name"
-
-	// Operation types
-	MessagingOperationTypeSend    = "send"
-	MessagingOperationTypeReceive = "receive"
-	MessagingOperationTypeProcess = "process"
-	MessagingOperationTypeSettle  = "settle"
-
-	// Operation names
+	// Operation names (custom, not in semconv)
 	MessagingOperationNameSend   = "send"
 	MessagingOperationNamePoll   = "poll"
 	MessagingOperationNameCommit = "commit"
 
-	// Error type
-	MessagingErrorType = "error.type"
-	DefaultErrorType   = "_OTHER"
-
-	// Messaging destination attributes
-	MessagingDestinationName        = "messaging.destination.name"
-	MessagingDestinationPartitionID = "messaging.destination.partition.id"
-
-	// Messaging consumer attributes
-	MessagingConsumerGroupName = "messaging.consumer.group.name"
-
-	// Messaging batch attributes
-	MessagingBatchMessageCount = "messaging.batch.message_count"
-
-	// Kafka-specific attributes
-	MessagingKafkaMessageKey = "messaging.kafka.message.key"
-	MessagingKafkaOffset     = "messaging.kafka.offset"
+	// Error type for unknown errors
+	DefaultErrorType = "_OTHER"
 )
 
 // getErrorType extracts a low-cardinality error type from an error.
@@ -76,10 +48,10 @@ func startProducerSpan(ctx context.Context, tracer trace.Tracer, topic string) (
 	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindProducer))
 
 	span.SetAttributes(
-		attribute.String(MessagingSystem, MessagingSystemKafka),
-		attribute.String(MessagingDestinationName, topic),
-		attribute.String(MessagingOperationName, MessagingOperationNameSend),
-		attribute.String(MessagingOperationType, MessagingOperationTypeSend))
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingOperationName(MessagingOperationNameSend),
+		semconv.MessagingOperationTypeSend)
 
 	return ctx, span
 }
@@ -93,11 +65,11 @@ func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string
 	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindClient))
 
 	span.SetAttributes(
-		attribute.String(MessagingSystem, MessagingSystemKafka),
-		attribute.String(MessagingDestinationName, topic),
-		attribute.String(MessagingConsumerGroupName, group),
-		attribute.String(MessagingOperationName, MessagingOperationNamePoll),
-		attribute.String(MessagingOperationType, MessagingOperationTypeReceive))
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingConsumerGroupName(group),
+		semconv.MessagingOperationName(MessagingOperationNamePoll),
+		semconv.MessagingOperationTypeReceive)
 
 	return ctx, span
 }
@@ -111,11 +83,11 @@ func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group stri
 	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindClient))
 
 	span.SetAttributes(
-		attribute.String(MessagingSystem, MessagingSystemKafka),
-		attribute.String(MessagingDestinationName, topic),
-		attribute.String(MessagingConsumerGroupName, group),
-		attribute.String(MessagingOperationName, MessagingOperationNameCommit),
-		attribute.String(MessagingOperationType, MessagingOperationTypeSettle),
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingConsumerGroupName(group),
+		semconv.MessagingOperationName(MessagingOperationNameCommit),
+		semconv.MessagingOperationTypeSettle,
 	)
 
 	return ctx, span
@@ -126,20 +98,20 @@ func recordSentMessage(ctx context.Context, counter metric.Int64Counter, topic, 
 	attrs := make([]attribute.KeyValue, 0, 5)
 
 	attrs = append(attrs,
-		attribute.String(MessagingSystem, MessagingSystemKafka),
-		attribute.String(MessagingOperationName, MessagingOperationNameSend),
+		semconv.MessagingSystemKafka,
+		semconv.MessagingOperationName(MessagingOperationNameSend),
 	)
 
 	if topic != "" {
-		attrs = append(attrs, attribute.String(MessagingDestinationName, topic))
+		attrs = append(attrs, semconv.MessagingDestinationName(topic))
 	}
 
 	if partition != "" {
-		attrs = append(attrs, attribute.String(MessagingDestinationPartitionID, partition))
+		attrs = append(attrs, semconv.MessagingDestinationPartitionID(partition))
 	}
 
 	if err != nil {
-		attrs = append(attrs, attribute.String(MessagingErrorType, getErrorType(err)))
+		attrs = append(attrs, attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
 	}
 
 	counter.Add(ctx, 1, metric.WithAttributes(attrs...))
@@ -155,24 +127,24 @@ func recordConsumedMessage(
 	attrs := make([]attribute.KeyValue, 0, 6)
 
 	attrs = append(attrs,
-		attribute.String(MessagingSystem, MessagingSystemKafka),
-		attribute.String(MessagingOperationName, MessagingOperationNamePoll),
+		semconv.MessagingSystemKafka,
+		semconv.MessagingOperationName(MessagingOperationNamePoll),
 	)
 
 	if topic != "" {
-		attrs = append(attrs, attribute.String(MessagingDestinationName, topic))
+		attrs = append(attrs, semconv.MessagingDestinationName(topic))
 	}
 
 	if group != "" {
-		attrs = append(attrs, attribute.String(MessagingConsumerGroupName, group))
+		attrs = append(attrs, semconv.MessagingConsumerGroupName(group))
 	}
 
 	if partition != "" {
-		attrs = append(attrs, attribute.String(MessagingDestinationPartitionID, partition))
+		attrs = append(attrs, semconv.MessagingDestinationPartitionID(partition))
 	}
 
 	if err != nil {
-		attrs = append(attrs, attribute.String(MessagingErrorType, getErrorType(err)))
+		attrs = append(attrs, attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
 	}
 
 	counter.Add(ctx, 1, metric.WithAttributes(attrs...))
@@ -183,15 +155,15 @@ func recordPollFailure(ctx context.Context, counter metric.Int64Counter, topic, 
 	attrs := make([]attribute.KeyValue, 0, 6)
 
 	attrs = append(attrs,
-		attribute.String(MessagingSystem, MessagingSystemKafka),
-		attribute.String(MessagingDestinationName, topic),
-		attribute.String(MessagingConsumerGroupName, group),
-		attribute.String(MessagingOperationName, MessagingOperationNamePoll),
-		attribute.String(MessagingOperationType, MessagingOperationTypeReceive),
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingConsumerGroupName(group),
+		semconv.MessagingOperationName(MessagingOperationNamePoll),
+		semconv.MessagingOperationTypeReceive,
 	)
 
 	if err != nil {
-		attrs = append(attrs, attribute.String(MessagingErrorType, getErrorType(err)))
+		attrs = append(attrs, attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
 	}
 
 	counter.Add(ctx, 1, metric.WithAttributes(attrs...))
@@ -200,8 +172,8 @@ func recordPollFailure(ctx context.Context, counter metric.Int64Counter, topic, 
 // setProducerSuccess sets span attributes and status for a successful send.
 func setProducerSuccess(span trace.Span, partition string, offset int64) {
 	span.SetAttributes(
-		attribute.String(MessagingDestinationPartitionID, partition),
-		attribute.Int64(MessagingKafkaOffset, offset),
+		semconv.MessagingDestinationPartitionID(partition),
+		semconv.MessagingKafkaOffset(int(offset)),
 	)
 	span.SetStatus(codes.Ok, "message sent successfully")
 }
@@ -210,7 +182,7 @@ func setProducerSuccess(span trace.Span, partition string, offset int64) {
 func setProducerError(span trace.Span, err error) {
 	span.RecordError(err)
 	span.SetStatus(codes.Error, err.Error())
-	span.SetAttributes(attribute.String(MessagingErrorType, getErrorType(err)))
+	span.SetAttributes(attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
 }
 
 // setPollSuccess sets span attributes and status for successful poll.
@@ -220,14 +192,14 @@ func setPollSuccess(span trace.Span, messageCount int, partition string, offset 
 
 		// Only set batch count for actual batches (2+ messages)
 		if messageCount > 1 {
-			attrs = append(attrs, attribute.Int(MessagingBatchMessageCount, messageCount))
+			attrs = append(attrs, semconv.MessagingBatchMessageCount(messageCount))
 		}
 
 		// Only set partition/offset if provided (single partition batch)
 		if partition != "" {
 			attrs = append(attrs,
-				attribute.String(MessagingDestinationPartitionID, partition),
-				attribute.Int64(MessagingKafkaOffset, offset),
+				semconv.MessagingDestinationPartitionID(partition),
+				semconv.MessagingKafkaOffset(int(offset)),
 			)
 		}
 
@@ -247,6 +219,6 @@ func setPollError(span trace.Span, err error, isTimeout bool) {
 	} else {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		span.SetAttributes(attribute.String(MessagingErrorType, getErrorType(err)))
+		span.SetAttributes(attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
 	}
 }
