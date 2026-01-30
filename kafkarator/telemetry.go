@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
+	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -94,60 +95,50 @@ func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group stri
 }
 
 // recordSentMessage records a metric for a sent message with standard attributes.
-func recordSentMessage(ctx context.Context, counter metric.Int64Counter, topic, partition string, err error) {
-	attrs := make([]attribute.KeyValue, 0, 5)
-
-	attrs = append(attrs,
-		semconv.MessagingSystemKafka,
-		semconv.MessagingOperationName(MessagingOperationNameSend),
-	)
+func recordSentMessage(ctx context.Context, counter messagingconv.ClientSentMessages, topic, partition string, err error) {
+	attrs := make([]attribute.KeyValue, 0, 3)
 
 	if topic != "" {
-		attrs = append(attrs, semconv.MessagingDestinationName(topic))
+		attrs = append(attrs, counter.AttrDestinationName(topic))
 	}
 
 	if partition != "" {
-		attrs = append(attrs, semconv.MessagingDestinationPartitionID(partition))
+		attrs = append(attrs, counter.AttrDestinationPartitionID(partition))
 	}
 
 	if err != nil {
-		attrs = append(attrs, attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
+		attrs = append(attrs, counter.AttrErrorType(messagingconv.ErrorTypeAttr(getErrorType(err))))
 	}
 
-	counter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	counter.Add(ctx, 1, MessagingOperationNameSend, messagingconv.SystemKafka, attrs...)
 }
 
 // recordConsumedMessage records a metric for a consumed message with standard attributes.
 func recordConsumedMessage(
 	ctx context.Context,
-	counter metric.Int64Counter,
+	counter messagingconv.ClientConsumedMessages,
 	topic, group, partition string,
 	err error,
 ) {
-	attrs := make([]attribute.KeyValue, 0, 6)
-
-	attrs = append(attrs,
-		semconv.MessagingSystemKafka,
-		semconv.MessagingOperationName(MessagingOperationNamePoll),
-	)
+	attrs := make([]attribute.KeyValue, 0, 4)
 
 	if topic != "" {
-		attrs = append(attrs, semconv.MessagingDestinationName(topic))
+		attrs = append(attrs, counter.AttrDestinationName(topic))
 	}
 
 	if group != "" {
-		attrs = append(attrs, semconv.MessagingConsumerGroupName(group))
+		attrs = append(attrs, counter.AttrConsumerGroupName(group))
 	}
 
 	if partition != "" {
-		attrs = append(attrs, semconv.MessagingDestinationPartitionID(partition))
+		attrs = append(attrs, counter.AttrDestinationPartitionID(partition))
 	}
 
 	if err != nil {
-		attrs = append(attrs, attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
+		attrs = append(attrs, counter.AttrErrorType(messagingconv.ErrorTypeAttr(getErrorType(err))))
 	}
 
-	counter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	counter.Add(ctx, 1, MessagingOperationNamePoll, messagingconv.SystemKafka, attrs...)
 }
 
 // recordPollFailure records a metric for a poll failure with standard attributes.

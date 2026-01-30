@@ -8,6 +8,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/oauth2"
 
@@ -15,10 +16,9 @@ import (
 )
 
 const (
-	meterProducedMessages = "messaging.client.sent.messages"
-	meterConsumedMessages = "messaging.client.consumed.messages"
-	meterPollFailures     = "messaging.client.poll.failures"
-	gaugeLag              = "messaging.kafka.consumer.lag"
+	// Custom metrics not in semconv
+	meterPollFailures = "messaging.client.poll.failures"
+	gaugeLag          = "messaging.kafka.consumer.lag"
 )
 
 // Connection represents a Connection to a Kafka service. Connection (currently) only supports
@@ -178,7 +178,11 @@ func (c *Connection) Writer() (*Writer, error) {
 		}
 	}
 
-	counter, _ := c.tel.Meter().Int64Counter(meterProducedMessages)
+	counter, err := messagingconv.NewClientSentMessages(c.tel.Meter())
+	if err != nil {
+		p.Close()
+		return nil, fmt.Errorf("create sent messages counter: %w", err)
+	}
 
 	return newWriter(p, counter, c.tel), nil
 }
@@ -250,10 +254,10 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 		return nil, fmt.Errorf("create lag gauge %q: %w", gaugeLag, err)
 	}
 
-	counter, err := c.tel.Meter().Int64Counter(meterConsumedMessages)
+	counter, err := messagingconv.NewClientConsumedMessages(c.tel.Meter())
 	if err != nil {
 		_ = consumer.Close()
-		return nil, fmt.Errorf("create meter counter %q: %w", meterConsumedMessages, err)
+		return nil, fmt.Errorf("create consumed messages counter: %w", err)
 	}
 
 	failureCounter, err := c.tel.Meter().Int64Counter(meterPollFailures)

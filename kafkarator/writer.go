@@ -5,13 +5,13 @@ import (
 	"fmt"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 )
 
 func newWriter(
 	p *kafka.Producer,
-	pmc metric.Int64Counter,
+	pmc messagingconv.ClientSentMessages,
 	tel TelemetryProvider,
 ) *Writer {
 	w := &Writer{
@@ -27,7 +27,7 @@ func newWriter(
 // Writer provides an interface for writing messages to the Kafka topic, as well
 // as closing it when the client is done writing.
 type Writer struct {
-	producedMessagesCounter metric.Int64Counter
+	producedMessagesCounter messagingconv.ClientSentMessages
 	producer                *kafka.Producer
 	tel                     TelemetryProvider
 	closed                  bool

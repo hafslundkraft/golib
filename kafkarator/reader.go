@@ -8,6 +8,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
 const magicByte = 0
@@ -18,7 +19,7 @@ type CommitFunc func(ctx context.Context) error
 
 func newReader(
 	c *kafka.Consumer,
-	rmc metric.Int64Counter,
+	rmc messagingconv.ClientConsumedMessages,
 	pfc metric.Int64Counter,
 	lagGauge metric.Int64Gauge,
 	tel TelemetryProvider,
@@ -45,7 +46,7 @@ func newReader(
 // client total control and responsibility.
 type Reader struct {
 	consumer            *kafka.Consumer
-	readMessagesCounter metric.Int64Counter
+	readMessagesCounter messagingconv.ClientConsumedMessages
 	pollFailuresCounter metric.Int64Counter
 	lagGauge            metric.Int64Gauge
 	tel                 TelemetryProvider
