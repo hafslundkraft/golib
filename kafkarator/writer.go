@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
+	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
 func newWriter(

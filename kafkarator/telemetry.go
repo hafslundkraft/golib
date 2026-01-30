@@ -95,7 +95,12 @@ func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group stri
 }
 
 // recordSentMessage records a metric for a sent message with standard attributes.
-func recordSentMessage(ctx context.Context, counter messagingconv.ClientSentMessages, topic, partition string, err error) {
+func recordSentMessage(
+	ctx context.Context,
+	counter messagingconv.ClientSentMessages,
+	topic, partition string,
+	err error,
+) {
 	attrs := make([]attribute.KeyValue, 0, 3)
 
 	if topic != "" {
