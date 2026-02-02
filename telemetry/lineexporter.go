@@ -107,19 +107,51 @@ func (l LineMetricExporter) Export(ctx context.Context, metrics *metricdata.Reso
 			switch data := m.Data.(type) {
 			case metricdata.Sum[int64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%d attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(
+						l.w,
+						"%s %s name=%s value=%d attributes: %s\n",
+						metricTag,
+						dp.Time.Format(time.RFC3339),
+						m.Name,
+						dp.Value,
+						attributeString(dp.Attributes),
+					)
 				}
 			case metricdata.Sum[float64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%f attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(
+						l.w,
+						"%s %s name=%s value=%f attributes: %s\n",
+						metricTag,
+						dp.Time.Format(time.RFC3339),
+						m.Name,
+						dp.Value,
+						attributeString(dp.Attributes),
+					)
 				}
 			case metricdata.Gauge[int64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%d attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(
+						l.w,
+						"%s %s name=%s value=%d attributes: %s\n",
+						metricTag,
+						dp.Time.Format(time.RFC3339),
+						m.Name,
+						dp.Value,
+						attributeString(dp.Attributes),
+					)
 				}
 			case metricdata.Gauge[float64]:
 				for _, dp := range data.DataPoints {
-					fmt.Fprintf(l.w, "%s %s name=%s value=%f attributes: %s\n", metricTag, dp.Time.Format(time.RFC3339), m.Name, dp.Value, attributeString(dp.Attributes))
+					fmt.Fprintf(
+						l.w,
+						"%s %s name=%s value=%f attributes: %s\n",
+						metricTag,
+						dp.Time.Format(time.RFC3339),
+						m.Name,
+						dp.Value,
+						attributeString(dp.Attributes),
+					)
 				}
 			default:
 				// Ignoring histograms, summaries, etc.
