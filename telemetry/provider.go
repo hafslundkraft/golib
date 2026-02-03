@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	logsdk "go.opentelemetry.io/otel/sdk/log"
@@ -38,6 +39,7 @@ type Provider struct {
 	logger         *slog.Logger
 	tracerProvider *tracesdk.TracerProvider
 	meterProvider  *metricsdk.MeterProvider
+	loggerProvider *logsdk.LoggerProvider
 }
 
 type config struct {
@@ -108,6 +110,7 @@ func New(
 
 		tracerProvider: tp,
 		meterProvider:  mp,
+		loggerProvider: lp,
 
 		tracer: tp.Tracer(happiTelemetryName),
 		meter:  mp.Meter(happiTelemetryName),
@@ -128,6 +131,21 @@ func (p *Provider) Meter() metric.Meter {
 // Tracer returns the tracer
 func (p *Provider) Tracer() trace.Tracer {
 	return p.tracer
+}
+
+// MeterProvider returns the meter provider
+func (p *Provider) MeterProvider() metric.MeterProvider {
+	return p.meterProvider
+}
+
+// TracerProvider returns the tracer provider
+func (p *Provider) TracerProvider() trace.TracerProvider {
+	return p.tracerProvider
+}
+
+// LoggerProvider returns the logger provider
+func (p *Provider) LoggerProvider() log.LoggerProvider {
+	return p.loggerProvider
 }
 
 // HTTPMiddleware constructs a plain http middleware that instruments incoming
