@@ -61,33 +61,40 @@ func main() {
 	conn := setupKafkaConnection(broker, tp)
 	logger.InfoContext(ctx, "Connection created")
 
-	// Produce messages
-	logger.InfoContext(ctx, "Producing messages...")
-	writer, err := conn.Writer()
-	if err != nil {
-		logger.ErrorContext(ctx, "Failed to create writer", "error", err)
+	// Write messages to Kafka
+	if err := writeMessages(ctx, conn, logger); err != nil {
+		logger.ErrorContext(ctx, "Failed to write messages", "error", err)
 		return
 	}
-	serializer := conn.Serializer()
-	defer writer.Close(ctx)
 
-	sendDemoMessages(ctx, writer, serializer, logger)
-
-	// Consume and process messages
-	logger.InfoContext(ctx, "Consuming messages...")
-	consumeAndProcessMessages(ctx, conn, logger)
+	// Read and process messages
+	if err := readAndProcessMessages(ctx, conn, logger); err != nil {
+		logger.ErrorContext(ctx, "Failed to read messages", "error", err)
+		return
+	}
 
 	logger.InfoContext(ctx, "Demo completed successfully!")
 	time.Sleep(2 * time.Second) // Allow telemetry to flush
 }
 
-// sendDemoMessages sends demo messages to Kafka with Avro serialization
-func sendDemoMessages(
+// writeMessages writes demo messages to Kafka with Avro serialization
+func writeMessages(
 	ctx context.Context,
-	writer *kafkarator.Writer,
-	serializer kafkarator.ValueSerializer,
+	conn *kafkarator.Connection,
 	logger *slog.Logger,
-) {
+) error {
+	logger.InfoContext(ctx, "Writing messages to Kafka...")
+
+	// Create writer and serializer
+	writer, err := conn.Writer()
+	if err != nil {
+		return fmt.Errorf("failed to create writer: %w", err)
+	}
+	defer writer.Close(ctx)
+
+	serializer := conn.Serializer()
+
+	// Write 5 demo messages
 	for i := 0; i < 5; i++ {
 		msg := map[string]any{
 			"text":      fmt.Sprintf("Hello, kafkarator! Message #%d", i),
@@ -112,18 +119,22 @@ func sendDemoMessages(
 		logger.InfoContext(ctx, "Produced message", "message-num", i)
 		time.Sleep(100 * time.Millisecond)
 	}
+
+	return nil
 }
 
-// consumeAndProcessMessages reads messages from Kafka and processes them using a handler
-func consumeAndProcessMessages(ctx context.Context, conn *kafkarator.Connection, logger *slog.Logger) {
+// readAndProcessMessages reads messages from Kafka and processes them using a handler
+func readAndProcessMessages(ctx context.Context, conn *kafkarator.Connection, logger *slog.Logger) error {
+	logger.InfoContext(ctx, "Reading messages from Kafka...")
+
 	// Create channel reader (simpler than batching Reader)
 	messageChan, err := conn.ChannelReader(ctx, topic, consumerGroup)
 	if err != nil {
-		logger.ErrorContext(ctx, "Failed to create channel reader", "error", err)
-		return
+		return fmt.Errorf("failed to create channel reader: %w", err)
 	}
 
-	handler := newMessageHandler(conn, logger)
+	deserializer := conn.Deserializer()
+	handler := newMessageHandler(logger)
 
 	// Process up to 5 messages with timeout
 	timeout := time.After(10 * time.Second)
@@ -131,32 +142,36 @@ func consumeAndProcessMessages(ctx context.Context, conn *kafkarator.Connection,
 		select {
 		case msg, ok := <-messageChan:
 			if !ok {
-				return // Channel closed
+				return nil // Channel closed
 			}
-			handler.handle(ctx, &msg)
+			handler.handle(ctx, &msg, deserializer)
 		case <-timeout:
 			logger.InfoContext(ctx, "Timeout waiting for messages", "processed", handler.count)
-			return
+			return nil
 		}
 	}
+
+	return nil
 }
 
-// messageHandler processes incoming messages (similar to Python's MessageHandler)
+// messageHandler processes incoming messages
 type messageHandler struct {
-	count        int
-	deserializer kafkarator.ValueDeserializer
-	logger       *slog.Logger
+	count  int
+	logger *slog.Logger
 }
 
-func newMessageHandler(conn *kafkarator.Connection, logger *slog.Logger) *messageHandler {
+func newMessageHandler(logger *slog.Logger) *messageHandler {
 	return &messageHandler{
-		deserializer: conn.Deserializer(),
-		logger:       logger,
+		logger: logger,
 	}
 }
 
-func (h *messageHandler) handle(ctx context.Context, msg *kafkarator.Message) {
-	decoded, err := h.deserializer.Deserialize(ctx, msg.Topic, msg.Value)
+func (h *messageHandler) handle(
+	ctx context.Context,
+	msg *kafkarator.Message,
+	deserializer kafkarator.ValueDeserializer,
+) {
+	decoded, err := deserializer.Deserialize(ctx, msg.Topic, msg.Value)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "Failed to deserialize message", "error", err, "topic", msg.Topic)
 		return
