@@ -2,25 +2,6 @@
 
 This directory contains runnable demonstrations of the golib features.
 
-## Identity Demo
-
-Demonstrates fetching OAuth tokens using K8s service account identity with RFC 7521 client assertion flow.
-
-### Running
-
-```bash
-cd identity_demo
-go run .
-```
-
-**Note:** This example requires running on the Happi Platform with a service account token at `/happi/idp-token`. For local testing, you can modify the code to use `identity.NewWorkloadCredentialWithPath()` with a custom token path.
-
-### What it demonstrates
-
-- Creating a workload credential from service account token
-- Configuring token source with OAuth scopes
-- Fetching OAuth tokens for authenticated requests
-
 ## Telemetry Local Demo
 
 Demonstrates local telemetry usage with logging, tracing, and metrics.
