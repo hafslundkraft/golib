@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"time"
 
 	"github.com/hafslundkraft/golib/telemetry"
@@ -23,7 +23,7 @@ func main() {
 	)
 	defer func() {
 		if err := shutdown(ctx); err != nil {
-			panic(fmt.Sprintf("Failed to shutdown telemetry: %v", err))
+			log.Printf("Failed to shutdown telemetry: %v\n", err)
 		}
 	}()
 
@@ -38,10 +38,11 @@ func main() {
 		metric.WithDescription("Demo counter for local telemetry output"),
 	)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create counter: %v", err))
+		logger.ErrorContext(ctx, "Failed to create counter", "error", err)
+		return
 	}
 
-	logger.WarnContext(ctx, "Starting telemetry demo...")
+	logger.InfoContext(ctx, "Starting telemetry demo")
 
 	// Start a span with proper configuration
 	ctx, span := tracer.Start(
@@ -58,7 +59,7 @@ func main() {
 	)
 
 	for i := 0; i < 3; i++ {
-		logger.InfoContext(ctx, fmt.Sprintf("Counter value: %d", i))
+		logger.InfoContext(ctx, "Counter incremented", "value", i)
 		demoCounter.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("operation", "demo"),
 			attribute.Int("iteration", i),
@@ -69,7 +70,7 @@ func main() {
 	// Set span status to indicate success
 	span.SetStatus(codes.Ok, "demo completed successfully")
 
-	logger.ErrorContext(ctx, "Stopping telemetry demo...")
+	logger.InfoContext(ctx, "Telemetry demo completed")
 
 	// Give the exporter time to flush
 	time.Sleep(2 * time.Second)

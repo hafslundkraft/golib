@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -64,7 +63,11 @@ func main() {
 
 	// Produce messages
 	logger.InfoContext(ctx, "Producing messages...")
-	writer, _ := conn.Writer()
+	writer, err := conn.Writer()
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to create writer", "error", err)
+		return
+	}
 	serializer := conn.Serializer()
 	defer writer.Close(ctx)
 
@@ -91,18 +94,22 @@ func sendDemoMessages(
 			"timestamp": time.Now().UnixMilli(),
 		}
 
-		payload, _ := serializer.Serialize(ctx, topic, msg)
+		payload, err := serializer.Serialize(ctx, topic, msg)
+		if err != nil {
+			logger.ErrorContext(ctx, "Failed to serialize message", "error", err, "message-num", i)
+			continue
+		}
 
 		if err := writer.Write(ctx, &kafkarator.Message{
 			Topic: topic,
 			Key:   []byte("demo"),
 			Value: payload,
 		}); err != nil {
-			logger.ErrorContext(ctx, "Failed to write message", "error", err)
+			logger.ErrorContext(ctx, "Failed to write message", "error", err, "message-num", i)
 			continue
 		}
 
-		logger.InfoContext(ctx, fmt.Sprintf("Produced message #%d", i))
+		logger.InfoContext(ctx, "Produced message", "message-num", i)
 		time.Sleep(100 * time.Millisecond)
 	}
 }
@@ -110,7 +117,11 @@ func sendDemoMessages(
 // consumeAndProcessMessages reads messages from Kafka and processes them using a handler
 func consumeAndProcessMessages(ctx context.Context, conn *kafkarator.Connection, logger *slog.Logger) {
 	// Create channel reader (simpler than batching Reader)
-	messageChan, _ := conn.ChannelReader(ctx, topic, consumerGroup)
+	messageChan, err := conn.ChannelReader(ctx, topic, consumerGroup)
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to create channel reader", "error", err)
+		return
+	}
 
 	handler := newMessageHandler(conn, logger)
 
@@ -124,7 +135,7 @@ func consumeAndProcessMessages(ctx context.Context, conn *kafkarator.Connection,
 			}
 			handler.handle(ctx, &msg)
 		case <-timeout:
-			log.Printf("Timeout waiting for messages (processed %d)", handler.count)
+			logger.InfoContext(ctx, "Timeout waiting for messages", "processed", handler.count)
 			return
 		}
 	}
@@ -146,26 +157,34 @@ func newMessageHandler(conn *kafkarator.Connection, logger *slog.Logger) *messag
 
 func (h *messageHandler) handle(ctx context.Context, msg *kafkarator.Message) {
 	decoded, err := h.deserializer.Deserialize(ctx, msg.Topic, msg.Value)
-	if err != nil || decoded == nil {
+	if err != nil {
+		h.logger.ErrorContext(ctx, "Failed to deserialize message", "error", err, "topic", msg.Topic)
+		return
+	}
+	if decoded == nil {
+		h.logger.WarnContext(ctx, "Received nil decoded message", "topic", msg.Topic)
 		return
 	}
 
 	decodedMap, ok := decoded.(map[string]any)
 	if !ok {
+		h.logger.WarnContext(ctx, "Decoded message is not a map",
+			"topic", msg.Topic,
+			"type", fmt.Sprintf("%T", decoded),
+		)
 		return
 	}
 
 	h.count++
-	h.logger.InfoContext(ctx, fmt.Sprintf(
-		"handled #%d: topic=%s partition=%d offset=%d key=%s text=%v timestamp=%v",
-		h.count,
-		msg.Topic,
-		msg.Partition,
-		msg.Offset,
-		string(msg.Key),
-		decodedMap["text"],
-		decodedMap["timestamp"],
-	))
+	h.logger.InfoContext(ctx, "Message handled",
+		"count", h.count,
+		"topic", msg.Topic,
+		"partition", msg.Partition,
+		"offset", msg.Offset,
+		"key", string(msg.Key),
+		"text", decodedMap["text"],
+		"timestamp", decodedMap["timestamp"],
+	)
 }
 
 // Helpers
@@ -250,5 +269,5 @@ func (m *mockSchemaRegistry) GetBySubjectAndID(subject string, id int) (sr.Schem
 			return info, nil
 		}
 	}
-	return sr.SchemaInfo{}, errors.New("schema not found")
+	return sr.SchemaInfo{}, fmt.Errorf("schema not found for subject %s and id %d", subject, id)
 }
