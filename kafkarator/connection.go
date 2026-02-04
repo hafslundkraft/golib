@@ -276,16 +276,18 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 
 // Processor returns a processor that automatically handles trace propagation and span management
 // for message processing. It wraps a Reader and provides a higher-level abstraction where:
+//   - Messages are read in groups (up to maxMessages per ProcessNext call)
 //   - Trace context is automatically extracted from message headers
 //   - Processing spans are created for each message
-//   - Offsets are committed after successful processing
+//   - Handler is called once per message individually
+//   - Offsets are committed once after all messages are successfully processed
 //
-// The handler function is called for each message with a context that includes the propagated trace.
-// readTimeout defaults to 1 second if set to 0.
+// The handler function is called for each message individually with a context that includes
+// the propagated trace. If any message fails, processing stops and offsets are NOT committed.
+// readTimeout defaults to 10 second if set to 0.
 //
-// This is ideal for services that want automatic distributed tracing without manual span management.
-// For more control over reading and committing, use Reader() instead.
-
+// This is ideal for services that want automatic distributed tracing and offset management
+// without manual span handling. For more control over reading and committing, use Reader() instead.
 func (c *Connection) Processor(
 	topic string,
 	group string,
@@ -293,7 +295,7 @@ func (c *Connection) Processor(
 	readTimeout time.Duration,
 ) (*Processor, error) {
 	if readTimeout == 0 {
-		readTimeout = 1 * time.Second
+		readTimeout = 10 * time.Second
 	}
 
 	reader, err := c.Reader(topic, group)
