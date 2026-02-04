@@ -274,6 +274,35 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 	return r, nil
 }
 
+// Processor returns a processor that automatically handles trace propagation and span management
+// for message processing. It wraps a Reader and provides a higher-level abstraction where:
+//   - Trace context is automatically extracted from message headers
+//   - Processing spans are created for each message
+//   - Offsets are committed after successful processing
+//
+// The handler function is called for each message with a context that includes the propagated trace.
+// readTimeout defaults to 1 second if set to 0.
+//
+// This is ideal for services that want automatic distributed tracing without manual span management.
+// For more control over reading and committing, use Reader() instead.
+
+func (c *Connection) Processor(
+	topic string,
+	group string,
+	handler ProcessFunc,
+	readTimeout time.Duration,
+) (*Processor, error) {
+	if readTimeout == 0 {
+		readTimeout = 1 * time.Second
+	}
+
+	reader, err := c.Reader(topic, group)
+	if err != nil {
+		return nil, fmt.Errorf("creating reader: %w", err)
+	}
+	return newProcessor(reader, c.tel, handler, readTimeout), nil
+}
+
 // ChannelReader returns a channel that emits messages from the given Kafka topic.
 //
 // If an internal error is raised, the error will be logged, and the channel will be closed.
