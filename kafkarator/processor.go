@@ -71,9 +71,9 @@ func (p *Processor) ProcessNext(ctx context.Context, maxMessages int, readTimeou
 
 	processedCount := 0
 	for i := range msgs {
-		// Check if context has been cancelled before processing next message
+		// Check if context has been canceled before processing next message
 		if err := ctx.Err(); err != nil {
-			return processedCount, fmt.Errorf("context cancelled: %w", err)
+			return processedCount, fmt.Errorf("context canceled: %w", err)
 		}
 		// Extract trace context from message headers to continue the distributed trace
 		msgCtx := msgs[i].ExtractTraceContext(ctx)
