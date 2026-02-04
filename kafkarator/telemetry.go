@@ -41,11 +41,11 @@ func getErrorType(err error) string {
 	return DefaultErrorType
 }
 
-// startProducerSpan creates a span for a Kafka send operation with all standard attributes.
+// startProduceSpan creates a span for a Kafka send operation with all standard attributes.
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startProducerSpan(ctx context.Context, tracer trace.Tracer, topic string) (context.Context, trace.Span) {
+func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameSend, topic)
 	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindProducer))
 
