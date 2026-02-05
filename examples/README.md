@@ -36,5 +36,5 @@ go run .
 - Starting a local Kafka container for testing
 - Creating a Kafkarator connection with schema registry
 - Producing messages with Avro serialization
-- Consuming and processing messages
-- Integrated telemetry for Kafka operations
+- Processing messages with the Processor (automatic tracing and offset management)
+- Integrated telemetry and distributed tracing for Kafka operations
