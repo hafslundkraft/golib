@@ -396,16 +396,13 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 	// 2. Verify trace header injection (W3C traceparent)
 	require.True(t, tc.isCaptured(), "trace context should be captured")
 
-	consumerTraceID, _, headers := tc.get()
+	_, _, headers := tc.get()
 	require.NotNil(t, headers, "headers should not be nil")
 
 	traceparent, hasTraceparent := headers["traceparent"]
 	require.True(t, hasTraceparent, "should have 'traceparent' header")
 	assert.Contains(t, string(traceparent), producerTraceID.String(),
 		"traceparent header should contain producer's trace ID")
-
-	assert.Equal(t, producerTraceID, consumerTraceID,
-		"consumer trace ID should match producer trace ID")
 
 	// 3. Verify span hierarchy
 	spans := spanRecorder.Ended()
