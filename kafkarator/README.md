@@ -57,13 +57,12 @@ if err != nil {
 
 There are three ways to read messages from Kafka, each suited for different use cases:
 
-| Method | What It Does | When to Use | Telemetry/Tracing | Offset Commits | `maxMessages` |
-|--------|--------------|-------------|-------------------|-----------------|---------------|
-| **ChannelReader** | Simple Go channel streaming | Quick prototypes, simple apps | Manual | Automatic per message | 1 |
-| **Reader** | Read in batches with full control | High-traffic apps, need control | Manual | Manual via `Committer` | n |
-| **Processor** | Reader + automatic tracing built-in | Need to trace message flow | Automatic span creation | Automatic after batch | n |
+| Method | What It Does | When to Use | Offset Commits | `maxMessages` |
+|--------|--------------|-------------|-----------------|---------------|
+| **ChannelReader** | Simple Go channel streaming | Quick prototypes, simple apps | Automatic per message | 1 |
+| **Reader** | Read in batches with full control | High-traffic apps, need control | Manual via `Committer` | n |
+| **Processor** | `Reader` with automatic tracing built-in | Need to trace message flow | Automatic after batch | n |
 
-**Quick guide**: New to Kafka? Start with **ChannelReader**. Need to trace messages through your system? Use **Processor**. Need maximum control for high traffic? Use **Reader**.
 
 #### ChannelReader
 In order to use the deserializer, a schema for the topic must be available in the schema registry. Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when the reader commits the high watermark is sacrificed; each message is committed automatically.
@@ -89,7 +88,7 @@ go func() {
 
 #### Reader
 In order to use the deserializer, a schema for the topic must be available in the schema registry.
-Read messages in batches, commit offsets only when you want. Good for high-volume scenarios where you need full control over error handling and commits.
+Read messages in batches, commit offsets only when you want. Good for high-volume scenarios where you need full control over error handling and commits. 
 
 
 ```go
@@ -109,13 +108,8 @@ _ = committer(ctx)
 
 
 #### Processor
+In order to use the deserializer, a schema for the topic must be available in the schema registry.
 The Processor wraps the Reader and automatically tracks messages as they flow through your system using OpenTelemetry. It reads trace information from message headers (like `traceparent`), creates spans for each message, and only saves your progress when all messages in a batch succeed.
-
-**Key features**:
-- Automatic OpenTelemetry spans for each message showing processing time and status
-- See the complete journey of a message from producer → Kafka → your consumer
-- Only saves progress when the whole batch succeeds (if one message fails, nothing is saved)
-- No manual span or commit management needed
 
 ```go
 ctx := context.Background()
