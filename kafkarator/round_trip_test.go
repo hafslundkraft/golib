@@ -316,9 +316,8 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	require.NoError(t, commit(ctx))
 }
 
-// TestWriterProcessorWithTracing verifies the Processor API functionality and
-// end-to-end trace propagation including header injection, span hierarchy,
-// and OTel semantic convention compliance.
+// TestWriterProcessorRoundtripWithTracing verifies the Processor API functionality and
+// end-to-end trace propagation including header injection and span hierarchy.
 func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
