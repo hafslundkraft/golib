@@ -284,25 +284,27 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 //
 // The handler function is called for each message individually with a context that includes
 // the propagated trace. If any message fails, processing stops and offsets are NOT committed.
-// readTimeout defaults to 10 second if set to 0.
 //
 // This is ideal for services that want automatic distributed tracing and offset management
 // without manual span handling. For more control over reading and committing, use Reader() instead.
+//
+// Use ProcessorOption to configure optional parameters like readTimeout.
 func (c *Connection) Processor(
 	topic string,
-	group string,
+	consumerGroup string,
 	handler ProcessFunc,
-	readTimeout time.Duration,
+	opts ...ProcessorOption,
 ) (*Processor, error) {
-	if readTimeout == 0 {
-		readTimeout = 10 * time.Second
+	cfg := defaultProcessorConfig()
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
-	reader, err := c.Reader(topic, group)
+	reader, err := c.Reader(topic, consumerGroup)
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
-	return newProcessor(reader, c.tel, handler, readTimeout), nil
+	return newProcessor(reader, c.tel, handler, cfg.readTimeout), nil
 }
 
 // ChannelReader returns a channel that emits messages from the given Kafka topic.

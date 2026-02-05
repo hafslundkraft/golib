@@ -355,7 +355,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 		return nil
 	}
 
-	processor, err := conn.Processor(topic, group, handler, testTimeout)
+	processor, err := conn.Processor(topic, group, handler, WithReadTimeout(testTimeout))
 	require.NoError(t, err)
 	defer processor.Close(ctx)
 

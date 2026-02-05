@@ -25,6 +25,27 @@ type Processor struct {
 // stop processing and will not commit offsets.
 type ProcessFunc func(ctx context.Context, msg *Message) error
 
+// ProcessorOption configures a Processor instance.
+type ProcessorOption func(*processorConfig)
+
+type processorConfig struct {
+	readTimeout time.Duration
+}
+
+func defaultProcessorConfig() processorConfig {
+	return processorConfig{
+		readTimeout: 10 * time.Second,
+	}
+}
+
+// WithReadTimeout sets the read timeout for the processor.
+// Default is 10 seconds.
+func WithReadTimeout(timeout time.Duration) ProcessorOption {
+	return func(cfg *processorConfig) {
+		cfg.readTimeout = timeout
+	}
+}
+
 func newProcessor(
 	reader *Reader,
 	tel TelemetryProvider,
