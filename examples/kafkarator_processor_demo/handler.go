@@ -34,7 +34,7 @@ func (h *messageHandler) handle(
 	}
 	if decoded == nil {
 		h.logger.WarnContext(ctx, "Received nil decoded message", "topic", msg.Topic)
-		return fmt.Errorf("decoded message is nil")
+		return fmt.Errorf("decoded message is nil for topic %s", msg.Topic)
 	}
 
 	decodedMap, ok := decoded.(map[string]any)

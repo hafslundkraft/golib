@@ -55,8 +55,12 @@ if err != nil {
 
 ### Reading messages with channel
 In order to use the deserializer, a schema for the topic must be available in the schema registry.
-Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when
-the reader commits the high watermark is sacrificed; each message is committed automatically.
+Receive messages one at a time through a Go channel. Good for simple use cases. Each message is saved automatically as soon as it's received.
+
+**Use ChannelReader when**: You want simple message streaming and don't need to track where messages go.
+
+**Use Processor instead when**: You want to see how messages flow through your system and need safer message processing.
+
 ```go
 ctx := context.Background()
 deserializer := conn.Deserializer()
@@ -74,6 +78,38 @@ go func() {
 }
 }()
 ```
+
+### Processing messages with automatic tracking
+The Processor wraps the Reader and automatically tracks messages as they flow through your system. It reads trace information from message headers, creates tracking records for each message, and only saves your progress when all messages in a batch succeed.
+
+**Advantages over ChannelReader**:
+- Automatically tracks messages so you can see their path through your system
+- Process multiple messages at once for better performance
+- Safer: only saves progress after all messages succeed (no partial saves)
+- Better error handling: if one message fails, it stops and doesn't save anything
+
+```go
+ctx := context.Background()
+deserializer := conn.Deserializer()
+
+// Define handler to process each message
+handler := func(ctx context.Context, msg *kafkarator.Message) error {
+    decoded, err := deserializer.Deserialize(ctx, msg.Topic, msg.Value)
+    if err != nil {
+        return err
+    }
+    return handleMessage(ctx, decoded)
+}
+
+// Create processor with automatic tracing
+processor, err := conn.Processor("my-topic", "my-consumer-group", handler)
+defer processor.Close(ctx)
+
+// Process up to 10 messages at a time
+processed, err := processor.ProcessNext(ctx, 10, 1*time.Second)
+```
+
+For a complete example with testcontainers and Avro serialization, see [examples/kafkarator_processor_demo](../examples/kafkarator_processor_demo).
 
 ### Reading messages with reader
 In order to use the deserializer, a schema for the topic must be available in the schema registry.

@@ -103,7 +103,7 @@ func (p *Processor) ProcessNext(ctx context.Context, maxMessages int, readTimeou
 			p.tel.Tracer(),
 			p.reader.topic,
 			p.reader.consumerGroup,
-			int32(msgs[i].Partition), //nolint:gosec // Kafka partition numbers are small
+			int32(msgs[i].Partition), //nolint:gosec // Partition is a Kafka partition ID, which is non-negative and defined by Kafka as a 32-bit integer; this cast is safe.
 			msgs[i].Offset,
 		)
 
