@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/hamba/avro/v2"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // ValueDeserializer deserializes bytes into domain values
@@ -45,9 +44,6 @@ func newAvroDeserializer(
 
 // Deserialize deserializes the bytes to a domain value according to its schema
 func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value []byte) (any, error) {
-	ctx, span := d.tel.Tracer().Start(ctx, "kafkarator.AvroDeserializer.Deserialize")
-	defer span.End()
-
 	// Not Avro Confluent framing
 	if len(value) < 5 || value[0] != magicByte {
 		return nil, nil
@@ -56,18 +52,11 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 	schemaID := int(value[1])<<24 | int(value[2])<<16 | int(value[3])<<8 | int(value[4])
 	subject, err := defaultSubjectNameProvider(topic)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 
-	span.SetAttributes(
-		attribute.String("schema.subject", subject),
-		attribute.Int("schema.id", schemaID),
-	)
-
 	schema, err := d.loadSchema(ctx, subject, schemaID)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 
@@ -75,11 +64,8 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 	payload := value[5:]
 
 	if err := avro.Unmarshal(schema, payload, &out); err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("avro decode failed: %w", err)
 	}
-
-	span.SetAttributes(attribute.Int("payload_size", len(payload)))
 
 	return out, nil
 }
