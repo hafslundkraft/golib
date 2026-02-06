@@ -8,6 +8,10 @@ A collection of Hafslund Go libraries.
 - **[kafkarator](./kafkarator)** - Reading/writing messages from Kafka topics, integrated with *telemetry*
 - **[telemetry](./telemetry)** - OpenTelemetry integration providing logging, metrics, and tracing capabilities
 
+## Examples
+
+See the **[examples/](./examples)** directory for runnable demonstrations of the kafkarator and telemetry features.
+
 ## Development
 
 This repository uses a Makefile to run common tasks across all modules:
