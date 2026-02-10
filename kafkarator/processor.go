@@ -45,16 +45,19 @@ func defaultProcessorConfig() processorConfig {
 // Default is 10 seconds.
 func WithProcessorReadTimeout(timeout time.Duration) ProcessorOption {
 	return func(cfg *processorConfig) {
+		if timeout < 0 {
+			timeout = 0
+		}
 		cfg.readTimeout = timeout
 	}
 }
 
 // WithProcessorMaxMessages sets the default maximum number of messages to process per batch.
-// Default is 1.
+// Default is 10.
 func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
 	return func(cfg *processorConfig) {
 		if maxMessages < 1 {
-			maxMessages = 1
+			maxMessages = 10
 		}
 		cfg.maxMessages = maxMessages
 	}
