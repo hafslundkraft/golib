@@ -169,7 +169,8 @@ func readAndProcessMessages(ctx context.Context, conn *kafkarator.Connection, lo
 		topic,
 		consumerGroup,
 		handler.handle, // Pass the handler function
-		kafkarator.WithReadTimeout(1*time.Second),
+		kafkarator.WithProcessorReadTimeout(10*time.Second),
+		kafkarator.WithProcessorMaxMessages(10),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create processor: %w", err)
@@ -179,8 +180,8 @@ func readAndProcessMessages(ctx context.Context, conn *kafkarator.Connection, lo
 	// Step 3: Process messages in a loop until we've processed enough
 	deadline := time.Now().Add(readTimeout)
 	for handler.count < messageCount && time.Now().Before(deadline) {
-		// ProcessNext reads up to 10 messages at a time and processes them
-		processed, err := processor.ProcessNext(ctx, 10, 1*time.Second)
+		// ProcessNext reads messages and processes them based on processor configuration
+		processed, err := processor.ProcessNext(ctx)
 		if err != nil {
 			return fmt.Errorf("process messages: %w", err)
 		}

@@ -125,10 +125,17 @@ handler := func(ctx context.Context, msg *kafkarator.Message) error {
 }
 
 // Create processor with automatic tracing
-processor, err := conn.Processor("my-topic", "my-consumer-group", handler)
+processor, err := conn.Processor(
+    "my-topic", 
+    "my-consumer-group", 
+    handler,
+    kafkarator.WithProcessorMaxMessages(10),           // Process up to 10 messages per batch
+    kafkarator.WithProcessorReadTimeout(5*time.Second), // 5 second read timeout
+)
 defer processor.Close(ctx)
 
-processed, err := processor.ProcessNext(ctx, 10, 1*time.Second)
+// Process next batch of messages
+processed, err := processor.ProcessNext(ctx)
 ```
 
 For a complete example with testcontainers and Avro serialization, see [examples/kafkarator_processor_demo](../examples/kafkarator_processor_demo).

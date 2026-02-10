@@ -17,6 +17,7 @@ type Processor struct {
 	tel                TelemetryProvider
 	handler            ProcessFunc
 	defaultReadTimeout time.Duration
+	defaultMaxMessages int
 }
 
 // ProcessFunc is a function that processes a single Kafka message.
@@ -30,19 +31,32 @@ type ProcessorOption func(*processorConfig)
 
 type processorConfig struct {
 	readTimeout time.Duration
+	maxMessages int
 }
 
 func defaultProcessorConfig() processorConfig {
 	return processorConfig{
 		readTimeout: 10 * time.Second,
+		maxMessages: 10,
 	}
 }
 
-// WithReadTimeout sets the read timeout for the processor.
+// WithProcessorReadTimeout sets the default read timeout for the processor.
 // Default is 10 seconds.
-func WithReadTimeout(timeout time.Duration) ProcessorOption {
+func WithProcessorReadTimeout(timeout time.Duration) ProcessorOption {
 	return func(cfg *processorConfig) {
 		cfg.readTimeout = timeout
+	}
+}
+
+// WithProcessorMaxMessages sets the default maximum number of messages to process per batch.
+// Default is 1.
+func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
+	return func(cfg *processorConfig) {
+		if maxMessages < 1 {
+			maxMessages = 1
+		}
+		cfg.maxMessages = maxMessages
 	}
 }
 
@@ -51,12 +65,14 @@ func newProcessor(
 	tel TelemetryProvider,
 	handler ProcessFunc,
 	readTimeout time.Duration,
+	maxMessages int,
 ) *Processor {
 	return &Processor{
 		reader:             reader,
 		tel:                tel,
 		handler:            handler,
 		defaultReadTimeout: readTimeout,
+		defaultMaxMessages: maxMessages,
 	}
 }
 
@@ -66,26 +82,15 @@ func (p *Processor) Close(ctx context.Context) error {
 }
 
 // ProcessNext processes the next batch of messages from Kafka.
-// It reads up to maxMessages, processes each one with the configured handler,
+// It reads messages, processes each one with the configured handler,
 // and commits offsets only after all messages are successfully processed.
 //
-// Parameters:
-//   - maxMessages: Maximum number of messages to process in this batch (defaults to 1 if <= 0)
-//   - readTimeout: Maximum time to wait for messages (uses defaultReadTimeout if <= 0)
+// The number of messages and read timeout are configured when creating the Processor
+// using WithProcessorMaxMessages and WithProcessorReadTimeout.
 //
 // Returns the number of messages successfully processed and any error encountered.
-func (p *Processor) ProcessNext(ctx context.Context, maxMessages int, readTimeout time.Duration) (int, error) {
-	// Use default maxMessages if not set
-	if maxMessages <= 0 {
-		maxMessages = 1
-	}
-
-	// Use default read timeout if not set
-	if readTimeout <= 0 {
-		readTimeout = p.defaultReadTimeout
-	}
-
-	msgs, commit, err := p.reader.Read(ctx, maxMessages, readTimeout)
+func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
+	msgs, commit, err := p.reader.Read(ctx, p.defaultMaxMessages, p.defaultReadTimeout)
 	if err != nil {
 		return 0, fmt.Errorf("read messages: %w", err)
 	}

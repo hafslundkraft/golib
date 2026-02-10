@@ -135,7 +135,7 @@ func retryRead(ctx context.Context, reader *Reader, count int, timeout time.Dura
 }
 
 // retryProcess attempts to process messages with retries for topic availability.
-func retryProcess(ctx context.Context, processor *Processor, count int, timeout time.Duration) (int, error) {
+func retryProcess(ctx context.Context, processor *Processor) (int, error) {
 	var processed int
 	var err error
 
@@ -144,7 +144,7 @@ func retryProcess(ctx context.Context, processor *Processor, count int, timeout 
 			time.Sleep(testRetryDelay)
 		}
 
-		processed, err = processor.ProcessNext(ctx, count, timeout)
+		processed, err = processor.ProcessNext(ctx)
 		if err == nil && processed > 0 {
 			return processed, nil
 		}
@@ -354,7 +354,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 		return nil
 	}
 
-	processor, err := conn.Processor(topic, group, handler, WithReadTimeout(testTimeout))
+	processor, err := conn.Processor(topic, group, handler, WithProcessorReadTimeout(testTimeout))
 	require.NoError(t, err)
 	defer processor.Close(ctx)
 
@@ -381,7 +381,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 	time.Sleep(testTopicCreateDelay)
 
 	// Process message with retry
-	count, err := retryProcess(ctx, processor, 1, testTimeout)
+	count, err := retryProcess(ctx, processor)
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "expected 1 message processed")
 

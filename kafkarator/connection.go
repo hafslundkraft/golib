@@ -305,7 +305,7 @@ func (c *Connection) Processor(
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
-	return newProcessor(reader, c.tel, handler, cfg.readTimeout), nil
+	return newProcessor(reader, c.tel, handler, cfg.readTimeout, cfg.maxMessages), nil
 }
 
 // ChannelReader returns a channel that emits messages from the given Kafka topic.
