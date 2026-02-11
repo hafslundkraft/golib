@@ -211,7 +211,6 @@ func defaultReaderOptions() readerOptions {
 // Possible values:
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
-//   - `none`: error if no committed offset exists for the consumer group
 func WithReaderAutoOffsetReset(v autoOffsetReset) ReaderOption {
 	v.validate()
 	return func(o *readerOptions) {
@@ -301,7 +300,9 @@ func (c *Connection) Processor(
 		opt(&cfg)
 	}
 
-	reader, err := c.Reader(topic, consumerGroup)
+	reader, err := c.Reader(topic, consumerGroup,
+		WithReaderAutoOffsetReset(cfg.autoOffsetReset),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
