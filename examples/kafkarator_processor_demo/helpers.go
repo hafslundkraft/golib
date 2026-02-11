@@ -36,7 +36,7 @@ func getRedpandaSchemaRegistryAddress(ctx context.Context, container *redpanda.C
 	return url
 }
 
-// setupKafkaConnection creates a kafkarator connection with mock schema registry
+// setupKafkaConnection creates a kafkarator connection with schema registry
 func setupKafkaConnection(broker, schemaRegistryURL, schema string, tp *telemetry.Provider) *kafkarator.Connection {
 	config := &kafkarator.Config{
 		Broker:   broker,
