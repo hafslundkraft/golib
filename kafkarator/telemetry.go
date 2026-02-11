@@ -16,9 +16,10 @@ import (
 // See: https://opentelemetry.io/docs/specs/semconv/messaging/kafka/
 const (
 	// Operation names (custom, not in semconv)
-	MessagingOperationNameSend   = "send"
-	MessagingOperationNamePoll   = "poll"
-	MessagingOperationNameCommit = "commit"
+	MessagingOperationNameSend    = "send"
+	MessagingOperationNamePoll    = "poll"
+	MessagingOperationNameCommit  = "commit"
+	MessagingOperationNameProcess = "process"
 
 	// Error type for unknown errors
 	DefaultErrorType = "_OTHER"
@@ -40,11 +41,11 @@ func getErrorType(err error) string {
 	return DefaultErrorType
 }
 
-// startProducerSpan creates a span for a Kafka send operation with all standard attributes.
+// startProduceSpan creates a span for a Kafka send operation with all standard attributes.
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startProducerSpan(ctx context.Context, tracer trace.Tracer, topic string) (context.Context, trace.Span) {
+func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameSend, topic)
 	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindProducer))
 
@@ -90,6 +91,43 @@ func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group stri
 		semconv.MessagingOperationName(MessagingOperationNameCommit),
 		semconv.MessagingOperationTypeSettle,
 	)
+
+	return ctx, span
+}
+
+// startProcessingSpan creates a span for processing a Kafka message with all standard attributes.
+// Caller must call span.End() when the operation completes.
+//
+//nolint:spancheck // Span is returned for caller to manage
+func startProcessingSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	topic string,
+	group string,
+	partition int32,
+	offset int64,
+) (context.Context, trace.Span) {
+	spanName := fmt.Sprintf("%s %s", MessagingOperationNameProcess, topic)
+	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindConsumer))
+
+	attrs := []attribute.KeyValue{
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingConsumerGroupName(group),
+		semconv.MessagingOperationName(MessagingOperationNameProcess),
+		semconv.MessagingOperationTypeProcess,
+	}
+
+	// Only set partition and offset if they have valid values
+	if partition >= 0 {
+		attrs = append(attrs, semconv.MessagingDestinationPartitionID(fmt.Sprintf("%d", partition)))
+	}
+
+	if offset >= 0 {
+		attrs = append(attrs, semconv.MessagingKafkaOffset(int(offset)))
+	}
+
+	span.SetAttributes(attrs...)
 
 	return ctx, span
 }

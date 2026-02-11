@@ -59,7 +59,7 @@ func (w *Writer) Write(ctx context.Context, message *Message) error {
 		return fmt.Errorf("message topic cannot be empty")
 	}
 
-	ctx, span := startProducerSpan(ctx, w.tel.Tracer(), message.Topic)
+	ctx, span := startProduceSpan(ctx, w.tel.Tracer(), message.Topic)
 	defer span.End()
 
 	if w.closed {
