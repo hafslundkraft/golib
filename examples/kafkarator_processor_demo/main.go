@@ -18,6 +18,7 @@ import (
 
 	"github.com/hafslundkraft/golib/kafkarator"
 	"github.com/hafslundkraft/golib/telemetry"
+	"github.com/testcontainers/testcontainers-go"
 )
 
 const (
@@ -31,7 +32,8 @@ const (
 		]
 	}`
 
-	kafkaImage    = "confluentinc/confluent-local:7.5.0"
+	redpandaImage = "docker.redpanda.com/redpandadata/redpanda:v23.3.3"
+
 	topic         = "kafkarator-demo-topic"
 	consumerGroup = "kafkarator-demo-group"
 	messageCount  = 5
@@ -48,17 +50,19 @@ func main() {
 	// This section starts a local Kafka for testing.
 
 	log.Println("Starting Kafka container...")
-	kafkaContainer := startKafkaContainer(ctx)
+	kafkaContainer := startRedpandaContainer(ctx, redpandaImage)
 	defer func() {
 		log.Println("Cleaning up: terminating Kafka container...")
-		if err := kafkaContainer.Terminate(ctx); err != nil {
+		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
 			log.Printf("Failed to terminate container: %v", err)
 		}
 		log.Println("Cleanup complete")
 	}()
 
-	broker := getBrokerAddress(ctx, kafkaContainer)
+	broker := getRedpandaBrokerAddress(ctx, kafkaContainer)
 	log.Printf("Kafka broker: %s", broker)
+	schemaRegistryURL := getRedpandaSchemaRegistryAddress(ctx, kafkaContainer)
+	log.Printf("Schema Registry URL: %s", schemaRegistryURL)
 
 	// Setup telemetry (observability)
 	tp, shutdown := telemetry.New(ctx, "kafkarator-demo", telemetry.WithLocal(true))
@@ -72,7 +76,7 @@ func main() {
 	logger.InfoContext(ctx, "Starting kafkarator demo...")
 
 	// Create kafkarator connection (with Avro schema support)
-	conn := setupKafkaConnection(broker, tp)
+	conn := setupKafkaConnection(broker, schemaRegistryURL, schema, tp)
 	logger.InfoContext(ctx, "Connection created")
 
 	// ========================================
