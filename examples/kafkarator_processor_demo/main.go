@@ -18,7 +18,6 @@ import (
 
 	"github.com/hafslundkraft/golib/kafkarator"
 	"github.com/hafslundkraft/golib/telemetry"
-	"github.com/testcontainers/testcontainers-go"
 )
 
 const (
@@ -53,16 +52,16 @@ func main() {
 	kafkaContainer := startRedpandaContainer(ctx, redpandaImage)
 	defer func() {
 		log.Println("Cleaning up: terminating Kafka container...")
-		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
+		if err := kafkaContainer.Terminate(ctx); err != nil {
 			log.Printf("Failed to terminate container: %v", err)
 		}
 		log.Println("Cleanup complete")
 	}()
 
 	broker := getRedpandaBrokerAddress(ctx, kafkaContainer)
-	log.Printf("Kafka broker: %s", broker)
+	log.Printf("Redpanda Kafka broker: %s", broker)
 	schemaRegistryURL := getRedpandaSchemaRegistryAddress(ctx, kafkaContainer)
-	log.Printf("Schema Registry URL: %s", schemaRegistryURL)
+	log.Printf("Redpanda Schema Registry URL: %s", schemaRegistryURL)
 
 	// Setup telemetry (observability)
 	tp, shutdown := telemetry.New(ctx, "kafkarator-demo", telemetry.WithLocal(true))

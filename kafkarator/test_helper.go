@@ -2,7 +2,6 @@ package kafkarator
 
 import (
 	"fmt"
-	"log"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 )
@@ -13,7 +12,7 @@ type SchemaRegistryTestHelper struct {
 }
 
 // NewSchemaRegistryTestHelper creates a test helper that ensures the given schema is registered in the schema registry
-func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string) *SchemaRegistryTestHelper {
+func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string) (*SchemaRegistryTestHelper, error) {
 	schemaRegistryConfig := SchemaRegistryConfig{
 		SchemaRegistryURL:      schemaRegistryURL,
 		SchemaRegistryUser:     "",
@@ -21,14 +20,14 @@ func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string) *Schem
 	}
 	srClient, err := newTestHelperSchemaRegistryClient(schemaRegistryConfig)
 	if err != nil {
-		log.Fatalf("Failed to create schema registry client: %v", err)
+		return nil, fmt.Errorf("failed to create schema registry client: %w", err)
 	}
 	if err := ensureSchemaRegistered(srClient, topic, schema); err != nil {
-		log.Fatalf("Failed to ensure schema registered: %v", err)
+		return nil, fmt.Errorf("failed to ensure schema registered: %w", err)
 	}
 	return &SchemaRegistryTestHelper{
 		Client: srClient,
-	}
+	}, nil
 }
 
 func ensureSchemaRegistered(client sr.Client, topic, schema string) error {
@@ -43,7 +42,7 @@ func ensureSchemaRegistered(client sr.Client, topic, schema string) error {
 		Schema: schema,
 	}, false)
 	if err != nil {
-		return fmt.Errorf("register schema for subject %s: %w", subject, err)
+		return fmt.Errorf("register schema error %s: %w", subject, err)
 	}
 
 	return nil

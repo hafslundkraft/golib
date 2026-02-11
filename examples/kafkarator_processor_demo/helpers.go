@@ -47,7 +47,10 @@ func setupKafkaConnection(broker, schemaRegistryURL, schema string, tp *telemetr
 			SchemaRegistryPassword: "",
 		},
 	}
-	testHelper := kafkarator.NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema)
+	testHelper, err := kafkarator.NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema)
+	if err != nil {
+		log.Fatalf("Failed to create schema registry test helper: %v", err)
+	}
 	conn, err := kafkarator.New(
 		config,
 		tp,
