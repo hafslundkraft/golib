@@ -47,30 +47,22 @@ func (s *AvroSerializer) Serialize(
 	topic string,
 	value any,
 ) ([]byte, error) {
-	ctx, span := s.tel.Tracer().Start(ctx, "kafkarator.AvroSerializer.Serialize")
-	defer span.End()
-
 	if value == nil {
 		return nil, fmt.Errorf("cannot serialize nil value")
 	}
 
 	subject, err := defaultSubjectNameProvider(topic)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 
-	span.SetAttributes(attribute.String("schema.subject", subject))
-
 	cached, err := s.getOrLoadSchema(ctx, subject)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 
 	avroBytes, err := avro.Marshal(cached.schema, value)
 	if err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("avro marshal failed: %w", err)
 	}
 
@@ -85,12 +77,6 @@ func (s *AvroSerializer) Serialize(
 		byte(cached.schemaID),
 	)
 	final = append(final, avroBytes...)
-
-	span.SetAttributes(
-		attribute.Int("schema.id", cached.schemaID),
-		attribute.Int("avro.payload_size", len(avroBytes)),
-		attribute.Int("final.wire_size", len(final)),
-	)
 
 	return final, nil
 }
