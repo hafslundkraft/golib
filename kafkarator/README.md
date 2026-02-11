@@ -53,10 +53,21 @@ if err != nil {
 
 ```
 
-### Reading messages with channel
-In order to use the deserializer, a schema for the topic must be available in the schema registry.
-Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when
-the reader commits the high watermark is sacrificed; each message is committed automatically.
+### Reading messages
+
+There are three ways to read messages from Kafka, each suited for different use cases:
+
+| Method | What It Does | When to Use | Offset Commits | `maxMessages` |
+|--------|--------------|-------------|-----------------|---------------|
+| **ChannelReader** | Simple Go channel streaming | Quick prototypes, simple apps | Automatic per message | 1 |
+| **Reader** | Read in batches with full control | High-traffic apps, need control | Manual via `Committer` | n |
+| **Processor** | `Reader` with automatic tracing built-in | Need to trace message flow | Automatic after batch | n |
+
+
+#### ChannelReader
+In order to use the deserializer, a schema for the topic must be available in the schema registry. Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when the reader commits the high watermark is sacrificed; each message is committed automatically.
+
+
 ```go
 ctx := context.Background()
 deserializer := conn.Deserializer()
@@ -75,9 +86,11 @@ go func() {
 }()
 ```
 
-### Reading messages with reader
+#### Reader
 In order to use the deserializer, a schema for the topic must be available in the schema registry.
-Read messages in batches, commit offsets only when you want. This is suitable for high-volume scenarios.
+Read messages in batches, commit offsets only when you want. Good for high-volume scenarios where you need full control over error handling and commits. 
+
+
 ```go
 ctx := context.Background()
 reader, err := conn.Reader("my-topic", "my-consumer-group")
@@ -85,9 +98,47 @@ deserializer := conn.Deserializer()
 defer reader.Close(ctx)
 
 messages, committer, _ := reader.Read(ctx, 1000, 1*time.Second)
-_ = committer(ctx)
+
+// Process all messages
 handleManyMessages(messages)
+
+// You decide when to save progress
+_ = committer(ctx)
 ```
+
+
+#### Processor
+In order to use the deserializer, a schema for the topic must be available in the schema registry.
+The Processor wraps the Reader and automatically tracks messages as they flow through your system using OpenTelemetry. It reads trace information from message headers (like `traceparent`), creates spans for each message, and only saves your progress when all messages in a batch succeed.
+
+```go
+ctx := context.Background()
+deserializer := conn.Deserializer()
+
+// Define handler to process each message
+handler := func(ctx context.Context, msg *kafkarator.Message) error {
+    decoded, err := deserializer.Deserialize(ctx, msg.Topic, msg.Value)
+    if err != nil {
+        return err
+    }
+    return handleMessage(ctx, decoded)
+}
+
+// Create processor with automatic tracing
+processor, err := conn.Processor(
+    "my-topic", 
+    "my-consumer-group", 
+    handler,
+    kafkarator.WithProcessorMaxMessages(10),           // Process up to 10 messages per batch
+    kafkarator.WithProcessorReadTimeout(5*time.Second), // 5 second read timeout
+)
+defer processor.Close(ctx)
+
+// Process next batch of messages
+processed, err := processor.ProcessNext(ctx)
+```
+
+For a complete example with testcontainers and Avro serialization, see [examples/kafkarator_processor_demo](../examples/kafkarator_processor_demo).
 
 ## Installation
 

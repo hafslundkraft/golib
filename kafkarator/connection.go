@@ -21,19 +21,20 @@ const (
 	gaugeLag          = "messaging.kafka.consumer.lag"
 )
 
-// Connection represents a Connection to a Kafka service. Connection (currently) only supports
-// message consumption via consumer group, so the group to use must be supplied. This means
+// Connection represents a Connection to a Kafka service. Connection supports both writing
+// and reading messages. For reading, a consumer group must be supplied. This means
 // that multiple copies of the service using this library can be started simultaneously, and Kafka
 // will automatically balance consumption between the consumers, i.e. the service can be scaled
 // horizontally. Of course, this only makes sense if the topic has more than one partition.
 //
-// Two modes of reading are supported: ChannelReader and Reader. The former exposes a channel
-// that emits messages, while the latter exposes a reader. They support two different
+// Three modes of reading are supported: ChannelReader, Reader and Processor. The former exposes a channel
+// that emits messages, while the second exposes a reader. They support two different
 // use-cases where ChannelReader is best for low volume scenarios, while Reader is best for
 // high volume scenarios and/or situations where the client needs to control exactly how and
-// when high watermark offsets are committed.
+// when high watermark offsets are committed. Processor is also available as a higher-level
+// abstraction that wraps Reader with automatic trace propagation and offset management.
 //
-// For writing, a writer is exposed. It supported writing messages, one at a time.
+// For writing, a writer is exposed. It supports writing messages, one at a time.
 type Connection struct {
 	config    Config
 	configMap *kafka.ConfigMap
@@ -157,7 +158,7 @@ func (c *Connection) Test(ctx context.Context) error {
 	return nil
 }
 
-// Serializer returns a serializer for serializing messages from bytes to avro
+// Serializer returns a serializer for serializing Go objects to Avro bytes
 func (c *Connection) Serializer() ValueSerializer {
 	return newAvroSerializer(c.srClient, c.tel)
 }
@@ -187,7 +188,7 @@ func (c *Connection) Writer() (*Writer, error) {
 	return newWriter(p, counter, c.tel), nil
 }
 
-// Deserializer returns a deserializer for deserializing messages from avro to bytes
+// Deserializer returns a deserializer for deserializing Avro bytes to Go objects
 func (c *Connection) Deserializer() ValueDeserializer {
 	return newAvroDeserializer(c.srClient, c.tel)
 }
@@ -272,6 +273,39 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 	}
 
 	return r, nil
+}
+
+// Processor returns a processor that automatically handles trace propagation and span management
+// for message processing. It wraps a Reader and provides a higher-level abstraction where:
+//   - Messages are read in groups (up to maxMessages per ProcessNext call)
+//   - Trace context is automatically extracted from message headers
+//   - Processing spans are created for each message
+//   - Handler is called once per message individually
+//   - Offsets are committed once after all messages are successfully processed
+//
+// The handler function is called for each message individually with a context that includes
+// the propagated trace. If any message fails, processing stops and offsets are NOT committed.
+//
+// This is ideal for services that want automatic distributed tracing and offset management
+// without manual span handling. For more control over reading and committing, use Reader() instead.
+//
+// Use ProcessorOption to configure optional parameters like readTimeout.
+func (c *Connection) Processor(
+	topic string,
+	consumerGroup string,
+	handler ProcessFunc,
+	opts ...ProcessorOption,
+) (*Processor, error) {
+	cfg := defaultProcessorConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	reader, err := c.Reader(topic, consumerGroup)
+	if err != nil {
+		return nil, fmt.Errorf("creating reader: %w", err)
+	}
+	return newProcessor(reader, c.tel, handler, cfg.readTimeout, cfg.maxMessages), nil
 }
 
 // ChannelReader returns a channel that emits messages from the given Kafka topic.

@@ -152,39 +152,46 @@ func writeMessages(
 	return nil
 }
 
-// readAndProcessMessages demonstrates how to read messages from Kafka using kafkarator.
+// readAndProcessMessages demonstrates how to read and process messages from Kafka using the Processor.
 //
 // Key steps:
-//  1. Get a ChannelReader from the connection
-//  2. Read messages from the channel
-//  3. Deserialize and process each message (deserialization happens in the handler)
+//  1. Create a handler function that processes individual messages
+//  2. Create a Processor with the handler (includes automatic tracing and offset management)
+//  3. Call ProcessNext in a loop to process group of messages
 func readAndProcessMessages(ctx context.Context, conn *kafkarator.Connection, logger *slog.Logger) error {
 	logger.InfoContext(ctx, "Reading messages from Kafka...")
 
-	// Step 1: Create a channel reader - messages arrive on a Go channel
-	messageChan, err := conn.ChannelReader(ctx, topic, consumerGroup)
-	if err != nil {
-		return fmt.Errorf("failed to create channel reader: %w", err)
-	}
-
-	// Create handler with deserializer (it will deserialize Avro messages to get the values)
+	// Step 1: Create handler with deserializer (it will deserialize Avro messages to get the values)
 	handler := newMessageHandler(logger, conn.Deserializer())
 
-	// Step 2 & 3: Read from channel and process
-	timeout := time.After(readTimeout)
-	for handler.count < messageCount {
-		select {
-		case msg, ok := <-messageChan:
-			if !ok {
-				return nil // Channel closed
-			}
-			// Process the message (deserializes Avro and extracts values)
-			handler.handle(ctx, &msg)
-		case <-timeout:
-			logger.InfoContext(ctx, "Timeout waiting for messages", "processed", handler.count)
-			return nil
+	// Step 2: Create a Processor - it handles tracing and offset management automatically
+	processor, err := conn.Processor(
+		topic,
+		consumerGroup,
+		handler.handle, // Pass the handler function
+		kafkarator.WithProcessorReadTimeout(10*time.Second),
+		kafkarator.WithProcessorMaxMessages(10),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create processor: %w", err)
+	}
+	defer processor.Close(ctx)
+
+	// Step 3: Process messages in a loop until we've processed enough
+	deadline := time.Now().Add(readTimeout)
+	for handler.count < messageCount && time.Now().Before(deadline) {
+		// ProcessNext reads messages and processes them based on processor configuration
+		processed, err := processor.ProcessNext(ctx)
+		if err != nil {
+			return fmt.Errorf("process messages: %w", err)
+		}
+
+		if processed == 0 {
+			logger.InfoContext(ctx, "No messages available, waiting...")
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 
+	logger.InfoContext(ctx, "Processing complete", "total-processed", handler.count)
 	return nil
 }

@@ -55,7 +55,9 @@ func TestMain(m *testing.M) {
 	broker = brokers[0]
 
 	config = Config{
-		Broker: broker,
+		Env:      "test",
+		Broker:   broker,
+		AuthMode: AuthNone, // No auth for test container
 		SchemaRegistryConfig: SchemaRegistryConfig{
 			SchemaRegistryPassword: "dummy",
 			SchemaRegistryUser:     "none",
