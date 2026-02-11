@@ -7,10 +7,12 @@ import (
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 )
 
+// SchemaRegistryTestHelper is a helper for testing with the schema registry, ensuring the given schema is registered and providing access to the client.
 type SchemaRegistryTestHelper struct {
 	Client sr.Client
 }
 
+// NewSchemaRegistryTestHelper creates a test helper that ensures the given schema is registered in the schema registry
 func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string) *SchemaRegistryTestHelper {
 	schemaRegistryConfig := SchemaRegistryConfig{
 		SchemaRegistryURL:      schemaRegistryURL,
@@ -53,5 +55,9 @@ func topicValueSubject(topic string) string {
 
 func newTestHelperSchemaRegistryClient(cfg SchemaRegistryConfig) (sr.Client, error) {
 	srCfg := sr.NewConfig(cfg.SchemaRegistryURL)
-	return sr.NewClient(srCfg)
+	client, err := sr.NewClient(srCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client %w", err)
+	}
+	return client, nil
 }
