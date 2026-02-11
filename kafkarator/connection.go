@@ -197,25 +197,25 @@ func (c *Connection) Deserializer() ValueDeserializer {
 type ReaderOption func(*readerOptions)
 
 type readerOptions struct {
-	autoOffsetReset string
+	autoOffsetReset autoOffsetReset
 }
 
 func defaultReaderOptions() readerOptions {
 	return readerOptions{
-		autoOffsetReset: "earliest",
+		autoOffsetReset: offsetEarliest,
 	}
 }
 
-// WithAutoOffsetReset overrides Kafka auto.offset.reset.
+// WithReaderAutoOffsetReset overrides Kafka auto.offset.reset.
 // Default is `earliest` if not provided.
-//
 // Possible values:
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
 //   - `none`: error if no committed offset exists for the consumer group
-func WithAutoOffsetReset(value string) ReaderOption {
+func WithReaderAutoOffsetReset(v autoOffsetReset) ReaderOption {
+	v.validate()
 	return func(o *readerOptions) {
-		o.autoOffsetReset = value
+		o.autoOffsetReset = v
 	}
 }
 
@@ -230,7 +230,7 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 	conf := cloneConfigMap(c.configMap)
 
 	conf["group.id"] = group
-	conf["auto.offset.reset"] = ro.autoOffsetReset
+	conf["auto.offset.reset"] = string(ro.autoOffsetReset)
 
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
@@ -305,7 +305,7 @@ func (c *Connection) Processor(
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
-	return newProcessor(reader, c.tel, handler, cfg.readTimeout, cfg.maxMessages), nil
+	return newProcessor(reader, c.tel, handler, cfg.readTimeout, cfg.maxMessages, cfg.autoOffsetReset), nil
 }
 
 // ChannelReader returns a channel that emits messages from the given Kafka topic.

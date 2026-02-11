@@ -13,11 +13,12 @@ import (
 // calls a handler function for each message, and commits offsets only after successful
 // processing of all messages.
 type Processor struct {
-	reader             *Reader
-	tel                TelemetryProvider
-	handler            ProcessFunc
-	defaultReadTimeout time.Duration
-	defaultMaxMessages int
+	reader                 *Reader
+	tel                    TelemetryProvider
+	handler                ProcessFunc
+	defaultReadTimeout     time.Duration
+	defaultMaxMessages     int
+	defaultAutoOffsetReset autoOffsetReset
 }
 
 // ProcessFunc is a function that processes a single Kafka message.
@@ -30,14 +31,16 @@ type ProcessFunc func(ctx context.Context, msg *Message) error
 type ProcessorOption func(*processorConfig)
 
 type processorConfig struct {
-	readTimeout time.Duration
-	maxMessages int
+	readTimeout     time.Duration
+	maxMessages     int
+	autoOffsetReset autoOffsetReset
 }
 
 func defaultProcessorConfig() processorConfig {
 	return processorConfig{
-		readTimeout: 10 * time.Second,
-		maxMessages: 10,
+		readTimeout:     10 * time.Second,
+		maxMessages:     10,
+		autoOffsetReset: offsetEarliest,
 	}
 }
 
@@ -63,19 +66,33 @@ func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
 	}
 }
 
+// WithProcessorAutoOffsetReset sets the default auto offset reset policy for the processor.
+// Default is `earliest`.
+// Valid values are:
+//   - `earliest`: start from the earliest available offset when no committed offset exists
+//   - `latest`: start from the latest offset when no committed offset exists
+func WithProcessorAutoOffsetReset(v autoOffsetReset) ProcessorOption {
+	v.validate()
+	return func(cfg *processorConfig) {
+		cfg.autoOffsetReset = v
+	}
+}
+
 func newProcessor(
 	reader *Reader,
 	tel TelemetryProvider,
 	handler ProcessFunc,
 	readTimeout time.Duration,
 	maxMessages int,
+	autoOffsetReset autoOffsetReset,
 ) *Processor {
 	return &Processor{
-		reader:             reader,
-		tel:                tel,
-		handler:            handler,
-		defaultReadTimeout: readTimeout,
-		defaultMaxMessages: maxMessages,
+		reader:                 reader,
+		tel:                    tel,
+		handler:                handler,
+		defaultReadTimeout:     readTimeout,
+		defaultMaxMessages:     maxMessages,
+		defaultAutoOffsetReset: autoOffsetReset,
 	}
 }
 
