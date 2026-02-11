@@ -47,7 +47,7 @@ func setupKafkaConnection(broker, schemaRegistryURL, schema string, tp *telemetr
 			SchemaRegistryPassword: "",
 		},
 	}
-	testHelper := kafkarator.NewTestHelper(schemaRegistryURL, topic, schema)
+	testHelper := kafkarator.NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema)
 	conn, err := kafkarator.New(
 		config,
 		tp,

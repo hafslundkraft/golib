@@ -11,7 +11,7 @@ type SchemaRegistryTestHelper struct {
 	Client sr.Client
 }
 
-func NewTestHelper(schemaRegistryURL, topic, schema string) *SchemaRegistryTestHelper {
+func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string) *SchemaRegistryTestHelper {
 	schemaRegistryConfig := SchemaRegistryConfig{
 		SchemaRegistryURL:      schemaRegistryURL,
 		SchemaRegistryUser:     "",
