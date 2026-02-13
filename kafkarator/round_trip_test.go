@@ -176,7 +176,6 @@ func assertTraceContext(t *testing.T, parent, child sdktrace.ReadOnlySpan) {
 func TestWriterReaderRoundtrip(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	telemetry := newMockTelemetry()
 	conn, err := New(&config, telemetry)
@@ -206,7 +205,7 @@ func TestWriterReaderRoundtrip(t *testing.T) {
 	// Read message back with retry for topic creation
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group)
+	reader, err := conn.Reader(topic)
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -224,7 +223,6 @@ func TestWriterReaderRoundtrip(t *testing.T) {
 func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	// Setup mock schema registry
 	schemaStr := `{
@@ -297,7 +295,7 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	// Read and deserialize with retry
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group)
+	reader, err := conn.Reader(topic)
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -321,7 +319,6 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	// Setup telemetry with span recording
 	spanRecorder := tracetest.NewSpanRecorder()
@@ -354,7 +351,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 		return nil
 	}
 
-	processor, err := conn.Processor(topic, group, handler, WithProcessorReadTimeout(testTimeout))
+	processor, err := conn.Processor(topic, handler, WithProcessorReadTimeout(testTimeout))
 	require.NoError(t, err)
 	defer processor.Close(ctx)
 
