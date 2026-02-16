@@ -194,6 +194,18 @@ func ConfigFromEnvVars() (*Config, error) {
 	cfg.WorkloadName = strings.TrimSpace(os.Getenv(envHappiWorkloadName))
 	cfg.Env = strings.TrimSpace(os.Getenv(envHappiEnvName))
 
+	if cfg.SystemName == "" {
+		return &Config{}, fmt.Errorf("environment variable %s is not set or is empty", envHappiSystemName)
+	}
+
+	if cfg.WorkloadName == "" {
+		return &Config{}, fmt.Errorf("environment variable %s is not set or is empty", envHappiWorkloadName)
+	}
+
+	if cfg.Env == "" {
+		return &Config{}, fmt.Errorf("environment variable %s is not set or is empty", envHappiEnvName)
+	}
+
 	return &cfg, nil
 }
 
