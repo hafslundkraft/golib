@@ -461,7 +461,7 @@ func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 	// Give Kafka time to auto-create the topic and propagate metadata.
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group, WithReaderAutoOffsetReset(offsetEarliest))
+	reader, err := conn.Reader(topic, group, WithReaderAutoOffsetReset(OffsetEarliest))
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -496,7 +496,7 @@ func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.
 	// Give Kafka time to auto-create the topic and propagate metadata.
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group, WithReaderAutoOffsetReset(offsetLatest))
+	reader, err := conn.Reader(topic, group, WithReaderAutoOffsetReset(OffsetLatest))
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -558,7 +558,7 @@ func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) 
 		topic,
 		group,
 		handler,
-		WithProcessorAutoOffsetReset(offsetEarliest),
+		WithProcessorAutoOffsetReset(OffsetEarliest),
 		WithProcessorReadTimeout(2*time.Second),
 		WithProcessorMaxMessages(1),
 	)
@@ -603,7 +603,7 @@ func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *t
 		topic,
 		group,
 		handler,
-		WithProcessorAutoOffsetReset(offsetLatest),
+		WithProcessorAutoOffsetReset(OffsetLatest),
 		WithProcessorReadTimeout(2*time.Second),
 		WithProcessorMaxMessages(1),
 	)

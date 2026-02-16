@@ -197,12 +197,12 @@ func (c *Connection) Deserializer() ValueDeserializer {
 type ReaderOption func(*readerOptions)
 
 type readerOptions struct {
-	autoOffsetReset autoOffsetReset
+	autoOffsetReset AutoOffsetReset
 }
 
 func defaultReaderOptions() readerOptions {
 	return readerOptions{
-		autoOffsetReset: offsetEarliest,
+		autoOffsetReset: OffsetEarliest,
 	}
 }
 
@@ -211,7 +211,7 @@ func defaultReaderOptions() readerOptions {
 // Possible values:
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
-func WithReaderAutoOffsetReset(v autoOffsetReset) ReaderOption {
+func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
 	v.validate()
 	return func(o *readerOptions) {
 		o.autoOffsetReset = v

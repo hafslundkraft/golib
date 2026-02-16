@@ -18,7 +18,7 @@ type Processor struct {
 	handler                ProcessFunc
 	defaultReadTimeout     time.Duration
 	defaultMaxMessages     int
-	defaultAutoOffsetReset autoOffsetReset
+	defaultAutoOffsetReset AutoOffsetReset
 }
 
 // ProcessFunc is a function that processes a single Kafka message.
@@ -33,14 +33,14 @@ type ProcessorOption func(*processorConfig)
 type processorConfig struct {
 	readTimeout     time.Duration
 	maxMessages     int
-	autoOffsetReset autoOffsetReset
+	autoOffsetReset AutoOffsetReset
 }
 
 func defaultProcessorConfig() processorConfig {
 	return processorConfig{
 		readTimeout:     10 * time.Second,
 		maxMessages:     10,
-		autoOffsetReset: offsetEarliest,
+		autoOffsetReset: OffsetEarliest,
 	}
 }
 
@@ -71,7 +71,7 @@ func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
 // Valid values are:
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
-func WithProcessorAutoOffsetReset(v autoOffsetReset) ProcessorOption {
+func WithProcessorAutoOffsetReset(v AutoOffsetReset) ProcessorOption {
 	v.validate()
 	return func(cfg *processorConfig) {
 		cfg.autoOffsetReset = v
@@ -84,7 +84,7 @@ func newProcessor(
 	handler ProcessFunc,
 	readTimeout time.Duration,
 	maxMessages int,
-	autoOffsetReset autoOffsetReset,
+	autoOffsetReset AutoOffsetReset,
 ) *Processor {
 	return &Processor{
 		reader:                 reader,

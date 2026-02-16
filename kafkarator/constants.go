@@ -6,16 +6,16 @@ import "fmt"
 type AutoOffsetReset string
 
 const (
-    // OffsetEarliest starts consuming from the earliest available offset
-    OffsetEarliest AutoOffsetReset = "earliest"
-    
-    // OffsetLatest starts consuming from the latest offset
-    OffsetLatest AutoOffsetReset = "latest"
+	// OffsetEarliest starts consuming from the earliest available offset
+	OffsetEarliest AutoOffsetReset = "earliest"
+
+	// OffsetLatest starts consuming from the latest offset
+	OffsetLatest AutoOffsetReset = "latest"
 )
 
-func (v autoOffsetReset) validate() {
+func (v AutoOffsetReset) validate() {
 	switch v {
-	case offsetEarliest, offsetLatest:
+	case OffsetEarliest, OffsetLatest:
 		return
 	default:
 		panic(fmt.Sprintf("invalid AutoOffsetReset: %q", v))
