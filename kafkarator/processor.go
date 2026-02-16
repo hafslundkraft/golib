@@ -13,12 +13,11 @@ import (
 // calls a handler function for each message, and commits offsets only after successful
 // processing of all messages.
 type Processor struct {
-	reader                 *Reader
-	tel                    TelemetryProvider
-	handler                ProcessFunc
-	defaultReadTimeout     time.Duration
-	defaultMaxMessages     int
-	defaultAutoOffsetReset AutoOffsetReset
+	reader             *Reader
+	tel                TelemetryProvider
+	handler            ProcessFunc
+	defaultReadTimeout time.Duration
+	defaultMaxMessages int
 }
 
 // ProcessFunc is a function that processes a single Kafka message.
@@ -84,15 +83,13 @@ func newProcessor(
 	handler ProcessFunc,
 	readTimeout time.Duration,
 	maxMessages int,
-	autoOffsetReset AutoOffsetReset,
 ) *Processor {
 	return &Processor{
-		reader:                 reader,
-		tel:                    tel,
-		handler:                handler,
-		defaultReadTimeout:     readTimeout,
-		defaultMaxMessages:     maxMessages,
-		defaultAutoOffsetReset: autoOffsetReset,
+		reader:             reader,
+		tel:                tel,
+		handler:            handler,
+		defaultReadTimeout: readTimeout,
+		defaultMaxMessages: maxMessages,
 	}
 }
 
