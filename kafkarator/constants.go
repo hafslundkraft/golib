@@ -2,11 +2,15 @@ package kafkarator
 
 import "fmt"
 
-type autoOffsetReset string
+// AutoOffsetReset represents the policy for where to start consuming when no committed offset exists
+type AutoOffsetReset string
 
 const (
-	offsetEarliest autoOffsetReset = "earliest"
-	offsetLatest   autoOffsetReset = "latest"
+    // OffsetEarliest starts consuming from the earliest available offset
+    OffsetEarliest AutoOffsetReset = "earliest"
+    
+    // OffsetLatest starts consuming from the latest offset
+    OffsetLatest AutoOffsetReset = "latest"
 )
 
 func (v autoOffsetReset) validate() {
