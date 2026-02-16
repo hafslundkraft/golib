@@ -45,7 +45,7 @@ func setupKafkaConnection(broker string, tp *telemetry.Provider) *kafkarator.Con
 	mockSR := newMockSchemaRegistry()
 	mockSR.addSchema(topic+"-value", schema)
 
-	conn, err := kafkarator.New(config, tp, kafkarator.WithSchemaRegistryClient(mockSR))
+	conn, err := kafkarator.NewConnection(config, tp, kafkarator.WithSchemaRegistryClient(mockSR))
 	if err != nil {
 		log.Fatalf("Failed to create connection: %v", err)
 	}

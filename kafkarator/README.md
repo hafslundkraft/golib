@@ -180,7 +180,7 @@ tel, _ := telemetry.New(
     ctx, "my-service"
     )
 
-conn, err := kafkarator.New(config, telemetryProvider)
+conn, err := kafkarator.NewConnection(config, telemetryProvider)
 if err != nil {
     log.Fatal(err)
 }
@@ -200,7 +200,7 @@ ts := oauth2.StaticTokenSource(&oauth2.Token{
     Expiry: time.Now().Add(1 * time.Hour)
 })
 
-conn, err := kafkarator.New(config, telemetry, kafkarator.WithTokenSource(ts))
+conn, err := kafkarator.NewConnection(config, telemetry, kafkarator.WithTokenSource(ts))
 if err != nil {
     log.Fatal(err)
 }
@@ -269,7 +269,7 @@ config := kafkarator.Config{
     UseSchemaRegistry: false,
 }
 
-conn, err := kafkarator.New(config, telemetry)
+conn, err := kafkarator.NewConnection(config, telemetry)
 if err != nil {
     log.Fatal(err)
 }

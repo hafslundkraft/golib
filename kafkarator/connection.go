@@ -51,7 +51,7 @@ type TelemetryProvider interface {
 	Tracer() trace.Tracer
 }
 
-// Option ... to pass to the New() connection
+// Option ... to pass to the NewConnection() connection
 type Option func(*options)
 
 type options struct {
@@ -76,7 +76,7 @@ func WithSchemaRegistryClient(client SchemaRegistryClient) Option {
 }
 
 // New creates and returns a new connection.
-func New(
+func NewConnection(
 	config *Config,
 	tel TelemetryProvider,
 	opts ...Option,

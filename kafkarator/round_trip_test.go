@@ -179,7 +179,7 @@ func TestWriterReaderRoundtrip(t *testing.T) {
 	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	telemetry := newMockTelemetry()
-	conn, err := New(&config, telemetry)
+	conn, err := NewConnection(&config, telemetry)
 	require.NoError(t, err)
 
 	// Write message
@@ -264,7 +264,7 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	serializer := newAvroSerializer(mockSchemaRegistry, telemetry)
 	deserializer := newAvroDeserializer(mockSchemaRegistry, telemetry)
 
-	conn, err := New(&config, telemetry)
+	conn, err := NewConnection(&config, telemetry)
 	require.NoError(t, err)
 
 	// Serialize and write
@@ -336,7 +336,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 		logger: newMockTelemetry().Logger(),
 	}
 
-	conn, err := New(&config, telemetry)
+	conn, err := NewConnection(&config, telemetry)
 	require.NoError(t, err)
 
 	// Handler that captures message content and trace context
