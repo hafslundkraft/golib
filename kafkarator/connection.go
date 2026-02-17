@@ -56,22 +56,12 @@ type Option func(*options)
 
 type options struct {
 	tokenSource oauth2.TokenSource
-	srClient    SchemaRegistryClient
 }
 
 // WithTokenSource provides the optional TokenSource to use instead of default token provider
 func WithTokenSource(ts oauth2.TokenSource) Option {
 	return func(o *options) {
 		o.tokenSource = ts
-	}
-}
-
-// WithSchemaRegistryClient sets the schema registry client to use internally. If
-// not set, a client will be set up automatically, so the main use case for this
-// option is for unit tests.
-func WithSchemaRegistryClient(client SchemaRegistryClient) Option {
-	return func(o *options) {
-		o.srClient = client
 	}
 }
 
@@ -117,12 +107,9 @@ func NewConnection(
 		}
 	}
 
-	srClient := o.srClient
-	if srClient == nil && config.UseSchemaRegistry {
-		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig)
-		if err != nil {
-			return nil, fmt.Errorf("schema registry client: %w", err)
-		}
+	srClient, err := newSchemaRegistryClient(&config.SchemaRegistryConfig)
+	if err != nil {
+		return nil, fmt.Errorf("schema registry client: %w", err)
 	}
 
 	return &Connection{
