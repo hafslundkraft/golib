@@ -51,10 +51,10 @@ func (e *LineTraceExporter) ExportSpans(ctx context.Context, spans []tracesdk.Re
 		if parentID == "0000000000000000" {
 			parentID = ""
 		} else {
-			parentID = "& parent_id=" + parentID
+			parentID = " & parent_id=" + parentID
 		}
 		spanID := s.SpanContext().SpanID().String()
-		spanInfo := strings.Join([]string{spanID, parentID}, " ")
+		spanInfo := spanID + parentID
 		fmt.Fprintf(
 			e.w,
 			"%s id=%s name=%q start=%s dur=%s status=%s span_id=%s\n",

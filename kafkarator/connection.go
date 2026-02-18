@@ -74,7 +74,7 @@ func WithSchemaRegistryClient(client SchemaRegistryClient) Option {
 	}
 }
 
-// New creates and returns a new connection.
+// NewConnection creates and returns a new connection.
 func NewConnection(
 	config *Config,
 	tel TelemetryProvider,

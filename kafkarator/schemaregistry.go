@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	SubjectNameStringSpan = "schema_registry.subject_name"
-	IDStringSpan          = "schema_registry.schema_id"
+	subjectNameStringSpan = "schema_registry.subject_name"
+	idStringSpan          = "schema_registry.schema_id"
 )
 
+// SchemaRegistryClient is an interface for interacting with the schema registry
 type SchemaRegistryClient interface {
 	GetBySubjectAndID(ctx context.Context, subject string, id int) (sr.SchemaInfo, error)
 	GetLatestSchemaMetadata(ctx context.Context, subject string) (sr.SchemaMetadata, error)
@@ -79,48 +80,68 @@ func newSchemaRegistryClient(cfg *SchemaRegistryConfig, tel TelemetryProvider) (
 	return withSchemaRegistryTracing(base, tel), nil
 }
 
-func (a *confluentSchemaRegistryClient) GetBySubjectAndID(ctx context.Context, subject string, id int) (sr.SchemaInfo, error) {
+func (a *confluentSchemaRegistryClient) GetBySubjectAndID(
+	ctx context.Context,
+	subject string,
+	id int,
+) (sr.SchemaInfo, error) {
 	// NOTE: ctx cannot be passed into confluent SR calls directly (their API doesn't accept ctx),
 	// but we keep ctx in our interface for spans.
-	return a.client.GetBySubjectAndID(subject, id)
+	schemaInfo, err := a.client.GetBySubjectAndID(subject, id)
+	return schemaInfo, fmt.Errorf("confluent SR GetBySubjectAndID error (subject=%s, id=%d): %w", subject, id, err)
 }
 
-func (a *confluentSchemaRegistryClient) GetLatestSchemaMetadata(ctx context.Context, subject string) (sr.SchemaMetadata, error) {
-	return a.client.GetLatestSchemaMetadata(subject)
+func (a *confluentSchemaRegistryClient) GetLatestSchemaMetadata(
+	ctx context.Context,
+	subject string,
+) (sr.SchemaMetadata, error) {
+	meta, err := a.client.GetLatestSchemaMetadata(subject)
+	return meta, fmt.Errorf("confluent SR GetLatestSchemaMetadata error (subject=%s): %w", subject, err)
 }
 
-func (c *tracedSchemaRegistryClient) GetBySubjectAndID(ctx context.Context, subject string, id int) (sr.SchemaInfo, error) {
+func (c *tracedSchemaRegistryClient) GetBySubjectAndID(
+	ctx context.Context,
+	subject string,
+	id int,
+) (sr.SchemaInfo, error) {
 	ctx, span := c.tracer.Start(ctx, "schema_registry.get_by_subject_and_id", trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String(SubjectNameStringSpan, subject),
-		attribute.Int(IDStringSpan, id),
+		attribute.String(subjectNameStringSpan, subject),
+		attribute.Int(idStringSpan, id),
 	)
 
 	info, err := c.next.GetBySubjectAndID(ctx, subject, id)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return sr.SchemaInfo{}, err
+		return sr.SchemaInfo{}, fmt.Errorf("traced SR GetSubjectAndID error (subject=%s, id=%d): %w", subject, id, err)
 	}
 
 	return info, nil
 }
 
-func (c *tracedSchemaRegistryClient) GetLatestSchemaMetadata(ctx context.Context, subject string) (sr.SchemaMetadata, error) {
-	ctx, span := c.tracer.Start(ctx, "schema_registry.get_latest_schema_metadata", trace.WithSpanKind(trace.SpanKindClient))
+func (c *tracedSchemaRegistryClient) GetLatestSchemaMetadata(
+	ctx context.Context,
+	subject string,
+) (sr.SchemaMetadata, error) {
+	ctx, span := c.tracer.Start(
+		ctx,
+		"schema_registry.get_latest_schema_metadata",
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
 	defer span.End()
 
 	meta, err := c.next.GetLatestSchemaMetadata(ctx, subject)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return sr.SchemaMetadata{}, err
+		return sr.SchemaMetadata{}, fmt.Errorf("traced SR GetLatestSchemaMetadata error (subject=%s): %w", subject, err)
 	}
 
-	span.SetAttributes(attribute.String(SubjectNameStringSpan, subject))
-	span.SetAttributes(attribute.Int(IDStringSpan, meta.ID))
+	span.SetAttributes(attribute.String(subjectNameStringSpan, subject))
+	span.SetAttributes(attribute.Int(idStringSpan, meta.ID))
 	return meta, nil
 }
 

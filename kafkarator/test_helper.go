@@ -13,7 +13,10 @@ type schemaRegistryTestHelper struct {
 }
 
 // NewSchemaRegistryTestHelper creates a test helper that ensures the given schema is registered in the schema registry
-func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string, tel TelemetryProvider) (*schemaRegistryTestHelper, error) {
+func NewSchemaRegistryTestHelper(
+	schemaRegistryURL, topic, schema string,
+	tel TelemetryProvider,
+) (*schemaRegistryTestHelper, error) {
 	schemaRegistryConfig := SchemaRegistryConfig{
 		SchemaRegistryURL:      schemaRegistryURL,
 		SchemaRegistryUser:     "",
@@ -61,7 +64,11 @@ func newTestHelperSchemaRegistryClient(cfg SchemaRegistryConfig, tel TelemetryPr
 
 	var srCfg *sr.Config
 	if cfg.SchemaRegistryUser != "" || cfg.SchemaRegistryPassword != "" {
-		srCfg = sr.NewConfigWithBasicAuthentication(cfg.SchemaRegistryURL, cfg.SchemaRegistryUser, cfg.SchemaRegistryPassword)
+		srCfg = sr.NewConfigWithBasicAuthentication(
+			cfg.SchemaRegistryURL,
+			cfg.SchemaRegistryUser,
+			cfg.SchemaRegistryPassword,
+		)
 	} else {
 		srCfg = sr.NewConfig(cfg.SchemaRegistryURL)
 	}
