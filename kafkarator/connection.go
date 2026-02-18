@@ -117,7 +117,7 @@ func NewConnection(
 	}
 
 	srClient := o.srClient
-	if srClient == nil && config.UseSchemaRegistry {
+	if srClient == nil && config.SchemaRegistryConfig.SchemaRegistryURL != "" {
 		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig, tel)
 		if err != nil {
 			return nil, fmt.Errorf("schema registry client: %w", err)

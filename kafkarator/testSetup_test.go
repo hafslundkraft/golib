@@ -29,7 +29,6 @@ func TestMain(m *testing.M) {
 	))
 
 	os.Setenv("ENV", "test")
-	os.Setenv("USE_SCHEMA_REGISTRY", "false")
 	os.Setenv("KAFKA_SASL_SCOPE", "dummy-scope")
 	os.Setenv("KAFKA_AUTH_TYPE", "tls")
 	os.Setenv("SCHEMA_REGISTRY_PASSWORD", "dummy")

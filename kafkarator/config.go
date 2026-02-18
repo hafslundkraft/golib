@@ -37,9 +37,6 @@ const (
 
 	// envSchemaRegistryURL is the URL for the Aiven Schema Registry
 	envSchemaRegistryURL = "KAFKA_SCHEMA_REGISTRY_URL"
-
-	// envUseSchemaRegistry tells us whether schema registry should be used or not
-	envUseSchemaRegistry = "USE_SCHEMA_REGISTRY"
 )
 
 // SASLConfig contains necessary configuration needed to connect to Kafka with SASL
@@ -100,9 +97,6 @@ type Config struct {
 	// Which authentication mode to use towards Kafka service
 	AuthMode AuthMode
 
-	// UseSchemaRegistry enables or disables creation of schema registry client
-	UseSchemaRegistry bool
-
 	// CA certificate for the service
 	CACert string
 
@@ -155,17 +149,11 @@ func ConfigFromEnvVars() (*Config, error) {
 
 	cfg.CACert = caCert
 
-	useSchemaRegistry := os.Getenv(envUseSchemaRegistry)
-
-	if useSchemaRegistry == "true" {
-		cfg.UseSchemaRegistry = true
-		srConfig, err := getSRConfig()
-		if err != nil {
-			return &Config{}, err
-		}
-
-		cfg.SchemaRegistryConfig = *srConfig
+	srConfig, err := getSRConfig()
+	if err != nil {
+		return &Config{}, err
 	}
+	cfg.SchemaRegistryConfig = *srConfig
 
 	if authType == "sasl" {
 		saslConfig, err := getSASLConfig()

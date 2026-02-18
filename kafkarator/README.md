@@ -210,7 +210,6 @@ if err != nil {
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `ENV` | Environment determines which Kafka service and authentication mode | `prod` |
-| `USE_SCHEMA_REGISTRY` | Boolean on whether schema registry should be used or not | `true` |
 | `KAFKA_AUTH_TYPE` | Determines how to authenticate with to Aiven | `sasl` or `tls`|
 
 ##### TLS mode
@@ -266,7 +265,6 @@ config := kafkarator.Config{
     CertFile: "/path/to/client-cert.pem",
     KeyFile:  "/path/to/client-key.pem",
     CACert:   "/path/to/ca-cert.pem",
-    UseSchemaRegistry: false,
 }
 
 conn, err := kafkarator.NewConnection(config, telemetry)

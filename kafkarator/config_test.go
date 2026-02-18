@@ -90,12 +90,15 @@ func TestGetSRConfig_MissingPassword(t *testing.T) {
 
 func TestConfigFromEnvVars_TLS(t *testing.T) {
 	withEnv(t, map[string]string{
-		envEnv:      "test",
-		envAuthType: "tls",
-		envCertFile: "cert.pem",
-		envKeyFile:  "key.pem",
-		envCACert:   "ca.pem",
-		envBroker:   "broker:9090",
+		envEnv:               "test",
+		envAuthType:          "tls",
+		envCertFile:          "cert.pem",
+		envKeyFile:           "key.pem",
+		envCACert:            "ca.pem",
+		envBroker:            "broker:9090",
+		envSchemaRegistryURL: "http://localhost:8081",
+		envKafkaUser:         "user",
+		envKafkaPassword:     "testpassword",
 	}, func() {
 		cfg, err := ConfigFromEnvVars()
 
