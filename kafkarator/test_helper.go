@@ -8,17 +8,18 @@ import (
 
 // schemaRegistryTestHelper is a helper for testing with the schema registry, ensuring the given schema is registered and providing access to the client.
 type schemaRegistryTestHelper struct {
-	Client sr.Client
+	Client    SchemaRegistryClient
+	rawClient sr.Client
 }
 
 // NewSchemaRegistryTestHelper creates a test helper that ensures the given schema is registered in the schema registry
-func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string) (*schemaRegistryTestHelper, error) {
+func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string, tel TelemetryProvider) (*schemaRegistryTestHelper, error) {
 	schemaRegistryConfig := SchemaRegistryConfig{
 		SchemaRegistryURL:      schemaRegistryURL,
 		SchemaRegistryUser:     "",
 		SchemaRegistryPassword: "",
 	}
-	srClient, err := newTestHelperSchemaRegistryClient(schemaRegistryConfig)
+	srClient, err := newTestHelperSchemaRegistryClient(schemaRegistryConfig, tel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create schema registry client: %w", err)
 	}
@@ -26,7 +27,8 @@ func NewSchemaRegistryTestHelper(schemaRegistryURL, topic, schema string) (*sche
 		return nil, fmt.Errorf("failed to ensure schema registered: %w", err)
 	}
 	return &schemaRegistryTestHelper{
-		Client: srClient,
+		Client:    withSchemaRegistryTracing(&confluentSchemaRegistryClient{client: srClient}, tel),
+		rawClient: srClient,
 	}, nil
 }
 
@@ -52,8 +54,20 @@ func topicValueSubject(topic string) string {
 	return topic + "-value"
 }
 
-func newTestHelperSchemaRegistryClient(cfg SchemaRegistryConfig) (sr.Client, error) {
-	srCfg := sr.NewConfig(cfg.SchemaRegistryURL)
+func newTestHelperSchemaRegistryClient(cfg SchemaRegistryConfig, tel TelemetryProvider) (sr.Client, error) {
+	if cfg.SchemaRegistryURL == "" {
+		return nil, fmt.Errorf("schema registry url is empty")
+	}
+
+	var srCfg *sr.Config
+	if cfg.SchemaRegistryUser != "" || cfg.SchemaRegistryPassword != "" {
+		srCfg = sr.NewConfigWithBasicAuthentication(cfg.SchemaRegistryURL, cfg.SchemaRegistryUser, cfg.SchemaRegistryPassword)
+	} else {
+		srCfg = sr.NewConfig(cfg.SchemaRegistryURL)
+	}
+
+	srCfg.HTTPClient = instrumentHTTPClient(srCfg.HTTPClient, tel)
+
 	client, err := sr.NewClient(srCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client %w", err)

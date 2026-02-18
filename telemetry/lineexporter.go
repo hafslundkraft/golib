@@ -47,15 +47,24 @@ func (e *LineTraceExporter) ExportSpans(ctx context.Context, spans []tracesdk.Re
 				tag = tint(colTrace, tag)
 			}
 		}
+		parentID := s.Parent().SpanID().String()
+		if parentID == "0000000000000000" {
+			parentID = ""
+		} else {
+			parentID = "& parent_id=" + parentID
+		}
+		spanID := s.SpanContext().SpanID().String()
+		spanInfo := strings.Join([]string{spanID, parentID}, " ")
 		fmt.Fprintf(
 			e.w,
-			"%s id=%s name=%q start=%s dur=%s status=%s\n",
+			"%s id=%s name=%q start=%s dur=%s status=%s span_id=%s\n",
 			tag,
 			s.SpanContext().TraceID().String(),
 			s.Name(),
 			s.StartTime().Format(time.RFC3339),
 			s.EndTime().Sub(s.StartTime()),
 			status,
+			spanInfo,
 		)
 	}
 	return nil

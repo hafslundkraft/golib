@@ -56,12 +56,21 @@ type Option func(*options)
 
 type options struct {
 	tokenSource oauth2.TokenSource
+	srClient    SchemaRegistryClient
 }
 
 // WithTokenSource provides the optional TokenSource to use instead of default token provider
 func WithTokenSource(ts oauth2.TokenSource) Option {
 	return func(o *options) {
 		o.tokenSource = ts
+	}
+}
+
+// WithSchemaRegistryClient sets the schema registry client to use internally.
+// This is useful for tests and examples using mock schema registries.
+func WithSchemaRegistryClient(client SchemaRegistryClient) Option {
+	return func(o *options) {
+		o.srClient = client
 	}
 }
 
@@ -107,10 +116,15 @@ func NewConnection(
 		}
 	}
 
-	srClient, err := newSchemaRegistryClient(&config.SchemaRegistryConfig)
-	if err != nil {
-		return nil, fmt.Errorf("schema registry client: %w", err)
+	srClient := o.srClient
+	if srClient == nil && config.UseSchemaRegistry {
+		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig, tel)
+		if err != nil {
+			return nil, fmt.Errorf("schema registry client: %w", err)
+		}
 	}
+
+	srClient = withSchemaRegistryTracing(srClient, tel)
 
 	return &Connection{
 		config:        *config,
