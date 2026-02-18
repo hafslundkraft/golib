@@ -18,7 +18,6 @@ import (
 const (
 	// Custom metrics not in semconv
 	meterPollFailures = "messaging.client.poll.failures"
-	gaugeLag          = "messaging.kafka.consumer.lag"
 )
 
 // Connection represents a Connection to a Kafka service. Connection supports both writing
@@ -249,13 +248,6 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 			return nil, fmt.Errorf("start oauth: %w", err)
 		}
 	}
-
-	lagGauge, err := c.tel.Meter().Int64Gauge(gaugeLag)
-	if err != nil {
-		_ = consumer.Close()
-		return nil, fmt.Errorf("create lag gauge %q: %w", gaugeLag, err)
-	}
-
 	counter, err := messagingconv.NewClientConsumedMessages(c.tel.Meter())
 	if err != nil {
 		_ = consumer.Close()
@@ -268,7 +260,7 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 		return nil, fmt.Errorf("create meter counter %q: %w", meterPollFailures, err)
 	}
 
-	r, err := newReader(consumer, counter, failureCounter, lagGauge, c.tel, topic, group)
+	r, err := newReader(consumer, counter, failureCounter, c.tel, topic, group)
 	if err != nil {
 		return nil, err
 	}

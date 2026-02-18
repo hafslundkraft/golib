@@ -330,7 +330,6 @@ The library automatically records the following metrics:
 | `messaging.client.sent.messages` | Counter | Number of messages sent to Kafka | `messaging.system=kafka`, `messaging.operation.name=send`, `messaging.destination.name` (topic), `messaging.destination.partition.id`, `error.type` (on failure) |
 | `messaging.client.consumed.messages` | Counter | Number of messages consumed from Kafka | `messaging.system=kafka`, `messaging.operation.name=poll`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.destination.partition.id` |
 | `messaging.client.poll.failures` | Counter | Number of poll failures | `messaging.system=kafka`, `messaging.operation.name=poll`, `messaging.operation.type=receive`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `error.type` |
-| `messaging.kafka.consumer.lag` | Gauge | Consumer lag per partition | `messaging.system=kafka`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.destination.partition.id` |
 
 ### Traces
 
