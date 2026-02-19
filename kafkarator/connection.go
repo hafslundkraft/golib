@@ -123,8 +123,6 @@ func NewConnection(
 		}
 	}
 
-	srClient = withSchemaRegistryTracing(srClient, tel)
-
 	return &Connection{
 		config:        *config,
 		tel:           tel,

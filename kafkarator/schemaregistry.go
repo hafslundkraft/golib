@@ -17,40 +17,25 @@ const (
 	idStringSpan          = "schema_registry.schema_id"
 )
 
-// SchemaRegistryClient is an interface for interacting with the schema registry
+type confluentSchemaRegistryClient interface {
+	GetBySubjectAndID(subject string, id int) (sr.SchemaInfo, error)
+	GetLatestSchemaMetadata(subject string) (sr.SchemaMetadata, error)
+}
+
+// SchemaRegistryClient is an interface for interacting with the schema registry, allowing for easier testing and abstraction over the actual client implementation.
+// wraps confluent's sr.Client with methods that include context and tracing
 type SchemaRegistryClient interface {
 	GetBySubjectAndID(ctx context.Context, subject string, id int) (sr.SchemaInfo, error)
 	GetLatestSchemaMetadata(ctx context.Context, subject string) (sr.SchemaMetadata, error)
 }
 
-type confluentSchemaRegistryClient struct {
-	client sr.Client
-}
-
 type tracedSchemaRegistryClient struct {
-	next   SchemaRegistryClient
+	client confluentSchemaRegistryClient
 	tracer trace.Tracer
 }
 
 type telemetryHTTPTransporter interface {
 	HTTPTransport(rt http.RoundTripper) *otelhttp.Transport
-}
-
-func withSchemaRegistryTracing(client SchemaRegistryClient, tel TelemetryProvider) SchemaRegistryClient {
-	if client == nil {
-		return nil
-	}
-	if tel == nil {
-		return client
-	}
-	if _, already := client.(*tracedSchemaRegistryClient); already {
-		return client
-	}
-
-	return &tracedSchemaRegistryClient{
-		next:   client,
-		tracer: tel.Tracer(),
-	}
 }
 
 func newSchemaRegistryClient(cfg *SchemaRegistryConfig, tel TelemetryProvider) (SchemaRegistryClient, error) {
@@ -76,27 +61,10 @@ func newSchemaRegistryClient(cfg *SchemaRegistryConfig, tel TelemetryProvider) (
 			err,
 		)
 	}
-	base := &confluentSchemaRegistryClient{client: srClient}
-	return withSchemaRegistryTracing(base, tel), nil
-}
-
-func (a *confluentSchemaRegistryClient) GetBySubjectAndID(
-	ctx context.Context,
-	subject string,
-	id int,
-) (sr.SchemaInfo, error) {
-	// NOTE: ctx cannot be passed into confluent SR calls directly (their API doesn't accept ctx),
-	// but we keep ctx in our interface for spans.
-	schemaInfo, err := a.client.GetBySubjectAndID(subject, id)
-	return schemaInfo, fmt.Errorf("confluent SR GetBySubjectAndID error (subject=%s, id=%d): %w", subject, id, err)
-}
-
-func (a *confluentSchemaRegistryClient) GetLatestSchemaMetadata(
-	ctx context.Context,
-	subject string,
-) (sr.SchemaMetadata, error) {
-	meta, err := a.client.GetLatestSchemaMetadata(subject)
-	return meta, fmt.Errorf("confluent SR GetLatestSchemaMetadata error (subject=%s): %w", subject, err)
+	return &tracedSchemaRegistryClient{
+		client: srClient,
+		tracer: tel.Tracer(),
+	}, nil
 }
 
 func (c *tracedSchemaRegistryClient) GetBySubjectAndID(
@@ -104,7 +72,7 @@ func (c *tracedSchemaRegistryClient) GetBySubjectAndID(
 	subject string,
 	id int,
 ) (sr.SchemaInfo, error) {
-	ctx, span := c.tracer.Start(ctx, "schema_registry.get_by_subject_and_id", trace.WithSpanKind(trace.SpanKindClient))
+	_, span := c.tracer.Start(ctx, "schema_registry.get_by_subject_and_id", trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 
 	span.SetAttributes(
@@ -112,7 +80,7 @@ func (c *tracedSchemaRegistryClient) GetBySubjectAndID(
 		attribute.Int(idStringSpan, id),
 	)
 
-	info, err := c.next.GetBySubjectAndID(ctx, subject, id)
+	info, err := c.client.GetBySubjectAndID(subject, id)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -126,14 +94,14 @@ func (c *tracedSchemaRegistryClient) GetLatestSchemaMetadata(
 	ctx context.Context,
 	subject string,
 ) (sr.SchemaMetadata, error) {
-	ctx, span := c.tracer.Start(
+	_, span := c.tracer.Start(
 		ctx,
 		"schema_registry.get_latest_schema_metadata",
 		trace.WithSpanKind(trace.SpanKindClient),
 	)
 	defer span.End()
 
-	meta, err := c.next.GetLatestSchemaMetadata(ctx, subject)
+	meta, err := c.client.GetLatestSchemaMetadata(subject)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())

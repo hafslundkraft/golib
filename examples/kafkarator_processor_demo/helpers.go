@@ -54,7 +54,7 @@ func setupKafkaConnection(broker, schemaRegistryURL, schema string, tp *telemetr
 	conn, err := kafkarator.NewConnection(
 		config,
 		tp,
-		kafkarator.WithSchemaRegistryClient(testHelper.Client),
+		kafkarator.WithSchemaRegistryClient(testHelper),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create connection: %v", err)

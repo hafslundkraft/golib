@@ -238,10 +238,11 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	}`
 
 	mockSchemaRegistry := newMockSRClient()
+	mockSRClient := mockSchemaRegistry
 	subject := fmt.Sprintf("%s-value", topic)
 
 	// Configure mock for serialization
-	mockSchemaRegistry.latest[subject] = sr.SchemaMetadata{
+	mockSRClient.latest[subject] = sr.SchemaMetadata{
 		SchemaInfo: sr.SchemaInfo{
 			Schema:     schemaStr,
 			SchemaType: "AVRO",
@@ -252,17 +253,17 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	}
 
 	// Configure mock for deserialization
-	if mockSchemaRegistry.byID[subject] == nil {
-		mockSchemaRegistry.byID[subject] = make(map[int]sr.SchemaInfo)
+	if mockSRClient.byID[subject] == nil {
+		mockSRClient.byID[subject] = make(map[int]sr.SchemaInfo)
 	}
-	mockSchemaRegistry.byID[subject][123] = sr.SchemaInfo{
+	mockSRClient.byID[subject][123] = sr.SchemaInfo{
 		Schema:     schemaStr,
 		SchemaType: "AVRO",
 	}
 
 	telemetry := newMockTelemetry()
-	serializer := newAvroSerializer(mockSchemaRegistry, telemetry)
-	deserializer := newAvroDeserializer(mockSchemaRegistry, telemetry)
+	serializer := newAvroSerializer(mockSRClient, telemetry)
+	deserializer := newAvroDeserializer(mockSRClient, telemetry)
 
 	conn, err := NewConnection(&config, telemetry)
 	require.NoError(t, err)
