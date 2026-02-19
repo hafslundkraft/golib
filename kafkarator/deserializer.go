@@ -57,7 +57,7 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 		return nil, fmt.Errorf("schema registry lookup: %w", err)
 	}
 
-	schema, err := d.cache.GetOrParse(schemaID, subject, info.Schema)
+	schema, err := d.cache.getOrParse(schemaID, subject, info.Schema)
 	if err != nil {
 		return nil, fmt.Errorf("get or parse schema: %w", err)
 	}

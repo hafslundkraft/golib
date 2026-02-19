@@ -23,7 +23,7 @@ func newParsedSchemaCache() *parsedSchemaCache {
 	}
 }
 
-func (c *parsedSchemaCache) GetOrParse(schemaID int, subject, schemaStr string) (avro.Schema, error) {
+func (c *parsedSchemaCache) getOrParse(schemaID int, subject, schemaStr string) (avro.Schema, error) {
 	if schemaStr == "" {
 		return nil, fmt.Errorf("schema string is empty for subject %s and id %d", subject, schemaID)
 	}

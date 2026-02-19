@@ -57,7 +57,7 @@ func (s *AvroSerializer) Serialize(
 		return nil, fmt.Errorf("get latest schema metadata: %w", err)
 	}
 
-	schema, err := s.cache.GetOrParse(meta.ID, subject, meta.Schema)
+	schema, err := s.cache.getOrParse(meta.ID, subject, meta.Schema)
 	if err != nil {
 		return nil, fmt.Errorf("get or parse schema: %w", err)
 	}
