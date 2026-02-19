@@ -7,9 +7,6 @@ import (
 )
 
 const (
-	// env is the environment that the app is running in
-	envEnv = "ENV"
-
 	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
 	envBroker = "KAFKA_BROKER"
 
@@ -40,6 +37,15 @@ const (
 
 	// envUseSchemaRegistry tells us whether schema registry should be used or not
 	envUseSchemaRegistry = "USE_SCHEMA_REGISTRY"
+
+	// envHappiWorkloadName is the name of the workload on the happi platform.
+	envHappiWorkloadName = "HAPPI_WORKLOAD_NAME"
+
+	// envHappiSystemName is the name of the system on the happi platform.
+	envHappiSystemName = "HAPPI_SYSTEM_NAME"
+
+	// envHappiEnvName is the name of the environment on the happi platform, e.g. "dev", "prod", etc.
+	envHappiEnvName = "HAPPI_ENV"
 )
 
 // SASLConfig contains necessary configuration needed to connect to Kafka with SASL
@@ -91,9 +97,6 @@ const (
 
 // Config contains all necessary configuration needed to connect to Kafka.
 type Config struct {
-	// Env is the environment (dev, test, prod)
-	Env string
-
 	// Broker is the Kafka broker
 	Broker string
 
@@ -114,17 +117,21 @@ type Config struct {
 
 	// Schema registry configuration
 	SchemaRegistryConfig SchemaRegistryConfig
+
+	// Env is the environment name on the happi platform, e.g. "dev", "prod", etc. Used for consumer group generation.
+	Env string
+
+	// SystemName is the name of the system on the happi platform. Used for consumer group generation.
+	SystemName string
+
+	// WorkloadName is the name of the workload on the happi platform. Used for consumer group generation.
+	WorkloadName string
 }
 
 // ConfigFromEnvVars loads and returns an instance with values that are fetched from environment variables defined
 // in this package. If any of these variables do not exist, an error is returned.
 func ConfigFromEnvVars() (*Config, error) {
 	cfg := Config{}
-	env := os.Getenv(envEnv)
-	if env == "" {
-		return &Config{}, fmt.Errorf("env is not set (%s)", envEnv)
-	}
-	cfg.Env = env
 
 	authType := strings.ToLower(os.Getenv(envAuthType))
 	var authMode AuthMode
@@ -181,6 +188,22 @@ func ConfigFromEnvVars() (*Config, error) {
 		}
 
 		cfg.TLS = *tlsConfig
+	}
+
+	cfg.SystemName = strings.TrimSpace(os.Getenv(envHappiSystemName))
+	cfg.WorkloadName = strings.TrimSpace(os.Getenv(envHappiWorkloadName))
+	cfg.Env = strings.TrimSpace(os.Getenv(envHappiEnvName))
+
+	if cfg.SystemName == "" {
+		return &Config{}, fmt.Errorf("environment variable %s is not set or is empty", envHappiSystemName)
+	}
+
+	if cfg.WorkloadName == "" {
+		return &Config{}, fmt.Errorf("environment variable %s is not set or is empty", envHappiWorkloadName)
+	}
+
+	if cfg.Env == "" {
+		return &Config{}, fmt.Errorf("environment variable %s is not set or is empty", envHappiEnvName)
 	}
 
 	return &cfg, nil

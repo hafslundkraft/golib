@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -219,7 +220,7 @@ func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
 }
 
 // Reader returns a reader that is used to fetch messages from Kafka.
-func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader, error) {
+func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error) {
 	ro := defaultReaderOptions()
 
 	for _, opt := range opts {
@@ -227,6 +228,10 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 	}
 
 	conf := cloneConfigMap(c.configMap)
+	group, err := c.consumerGroupName(topic)
+	if err != nil {
+		return nil, fmt.Errorf("consumer group name: %w", err)
+	}
 
 	conf["group.id"] = group
 	conf["auto.offset.reset"] = string(ro.autoOffsetReset)
@@ -291,7 +296,6 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 // Use ProcessorOption to configure optional parameters like readTimeout.
 func (c *Connection) Processor(
 	topic string,
-	consumerGroup string,
 	handler ProcessFunc,
 	opts ...ProcessorOption,
 ) (*Processor, error) {
@@ -300,7 +304,7 @@ func (c *Connection) Processor(
 		opt(&cfg)
 	}
 
-	reader, err := c.Reader(topic, consumerGroup,
+	reader, err := c.Reader(topic,
 		WithReaderAutoOffsetReset(cfg.autoOffsetReset),
 	)
 	if err != nil {
@@ -320,9 +324,8 @@ func (c *Connection) Processor(
 func (c *Connection) ChannelReader(
 	ctx context.Context,
 	topic string,
-	group string,
 ) (<-chan Message, error) {
-	reader, err := c.Reader(topic, group)
+	reader, err := c.Reader(topic)
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
@@ -372,4 +375,21 @@ func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) erro
 	}
 
 	return nil
+}
+
+func (c *Connection) consumerGroupName(topic string) (string, error) {
+	system := strings.TrimSpace(c.config.SystemName)
+	env := strings.TrimSpace(c.config.Env)
+	workloadName := strings.TrimSpace(c.config.WorkloadName)
+	topic = strings.TrimSpace(topic)
+
+	if system == "" || env == "" || workloadName == "" {
+		return "", fmt.Errorf("system name, env and workload name must be set in config")
+	}
+
+	if topic == "" {
+		return "", fmt.Errorf("topic cannot be empty")
+	}
+
+	return fmt.Sprintf("%s.%s.%s.%s", system, env, workloadName, topic), nil
 }

@@ -39,6 +39,9 @@ func setupKafkaConnection(broker string, tp *telemetry.Provider) *kafkarator.Con
 			SchemaRegistryUser:     "none",
 			SchemaRegistryPassword: "dummy",
 		},
+		Env:          "test",
+		SystemName:   "kafkarator",
+		WorkloadName: "processor-demo",
 	}
 
 	// Register schema in mock registry

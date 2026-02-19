@@ -59,52 +59,9 @@ There are three ways to read messages from Kafka, each suited for different use 
 
 | Method | What It Does | When to Use | Offset Commits | `maxMessages` |
 |--------|--------------|-------------|-----------------|---------------|
+| **Processor** | `Reader` with automatic tracing built-in | Need to trace message flow | Automatic after batch | n |
 | **ChannelReader** | Simple Go channel streaming | Quick prototypes, simple apps | Automatic per message | 1 |
 | **Reader** | Read in batches with full control | High-traffic apps, need control | Manual via `Committer` | n |
-| **Processor** | `Reader` with automatic tracing built-in | Need to trace message flow | Automatic after batch | n |
-
-
-#### ChannelReader
-In order to use the deserializer, a schema for the topic must be available in the schema registry. Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when the reader commits the high watermark is sacrificed; each message is committed automatically.
-
-
-```go
-ctx := context.Background()
-deserializer := conn.Deserializer()
-messageChan, _ := conn.ChannelReader(ctx, "my_topic", "my-consumer-group")
-
-go func() {
-    for {
-        msg, ok := <-messageChan
-        if !ok {
-            // channel closed
-        return
-	}
-	decoded, _ := deserializer.Deserialize(ctx, "my-topic", msg)
-    handleMessage(decoded)
-}
-}()
-```
-
-#### Reader
-In order to use the deserializer, a schema for the topic must be available in the schema registry.
-Read messages in batches, commit offsets only when you want. Good for high-volume scenarios where you need full control over error handling and commits. 
-
-
-```go
-ctx := context.Background()
-reader, err := conn.Reader("my-topic", "my-consumer-group")
-deserializer := conn.Deserializer()
-defer reader.Close(ctx)
-
-messages, committer, _ := reader.Read(ctx, 1000, 1*time.Second)
-
-// Process all messages
-handleManyMessages(messages)
-
-// You decide when to save progress
-_ = committer(ctx)
-```
 
 
 #### Processor
@@ -126,16 +83,58 @@ handler := func(ctx context.Context, msg *kafkarator.Message) error {
 
 // Create processor with automatic tracing
 processor, err := conn.Processor(
-    "my-topic", 
-    "my-consumer-group", 
+    "my-topic",
     handler,
-    kafkarator.WithProcessorMaxMessages(10),           // Process up to 10 messages per batch
+    kafkarator.WithProcessorMaxMessages(10),           // Process up to 10 messages per call to ProcessNext
     kafkarator.WithProcessorReadTimeout(5*time.Second), // 5 second read timeout
 )
 defer processor.Close(ctx)
 
-// Process next batch of messages
+// Process next collection of messages, automatically handling trace context and commits
 processed, err := processor.ProcessNext(ctx)
+```
+
+
+#### ChannelReader
+In order to use the deserializer, a schema for the topic must be available in the schema registry. Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when the reader commits the high watermark is sacrificed; each message is committed automatically.
+
+
+```go
+ctx := context.Background()
+deserializer := conn.Deserializer()
+messageChan, _ := conn.ChannelReader(ctx, "my_topic")
+
+go func() {
+    for {
+        msg, ok := <-messageChan
+        if !ok {
+            // channel closed
+        return
+	}
+	decoded, _ := deserializer.Deserialize(ctx, "my-topic", msg)
+    handleMessage(decoded)
+}
+}()
+```
+
+#### Reader
+In order to use the deserializer, a schema for the topic must be available in the schema registry.
+Read messages in batches, commit offsets only when you want. Good for high-volume scenarios where you need full control over error handling and commits. 
+
+
+```go
+ctx := context.Background()
+reader, err := conn.Reader("my-topic")
+deserializer := conn.Deserializer()
+defer reader.Close(ctx)
+
+messages, committer, _ := reader.Read(ctx, 1000, 1*time.Second)
+
+// Process all messages
+handleManyMessages(messages)
+
+// You decide when to save progress
+_ = committer(ctx)
 ```
 
 For a complete example with testcontainers and Avro serialization, see [examples/kafkarator_processor_demo](../examples/kafkarator_processor_demo).
