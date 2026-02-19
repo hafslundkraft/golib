@@ -195,28 +195,31 @@ func (c *Connection) Deserializer() ValueDeserializer {
 }
 
 // ReaderOption for options to pass to the Reader() function
-type ReaderOption func(*readerOptions)
+type ReaderOption func(*readerOptions) error
 
 type readerOptions struct {
-	autoOffsetReset string
+	autoOffsetReset AutoOffsetReset
 }
 
 func defaultReaderOptions() readerOptions {
 	return readerOptions{
-		autoOffsetReset: "earliest",
+		autoOffsetReset: OffsetEarliest,
 	}
 }
 
-// WithAutoOffsetReset overrides Kafka auto.offset.reset.
+// WithReaderAutoOffsetReset overrides Kafka auto.offset.reset.
 // Default is `earliest` if not provided.
-//
 // Possible values:
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
-//   - `none`: error if no committed offset exists for the consumer group
-func WithAutoOffsetReset(value string) ReaderOption {
-	return func(o *readerOptions) {
-		o.autoOffsetReset = value
+func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
+	err := v.validate()
+	if err != nil {
+		return nil
+	}
+	return func(o *readerOptions) error {
+		o.autoOffsetReset = v
+		return nil
 	}
 }
 
@@ -225,7 +228,9 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 	ro := defaultReaderOptions()
 
 	for _, opt := range opts {
-		opt(&ro)
+		if err := opt(&ro); err != nil {
+			return nil, fmt.Errorf("reader option failed: %w", err)
+		}
 	}
 
 	conf := cloneConfigMap(c.configMap)
@@ -235,7 +240,7 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 	}
 
 	conf["group.id"] = group
-	conf["auto.offset.reset"] = ro.autoOffsetReset
+	conf["auto.offset.reset"] = string(ro.autoOffsetReset)
 
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
@@ -302,10 +307,14 @@ func (c *Connection) Processor(
 ) (*Processor, error) {
 	cfg := defaultProcessorConfig()
 	for _, opt := range opts {
-		opt(&cfg)
+		if err := opt(&cfg); err != nil {
+			return nil, fmt.Errorf("processor option failed: %w", err)
+		}
 	}
 
-	reader, err := c.Reader(topic)
+	reader, err := c.Reader(topic,
+		WithReaderAutoOffsetReset(cfg.autoOffsetReset),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}

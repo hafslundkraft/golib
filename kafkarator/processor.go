@@ -27,39 +27,59 @@ type Processor struct {
 type ProcessFunc func(ctx context.Context, msg *Message) error
 
 // ProcessorOption configures a Processor instance.
-type ProcessorOption func(*processorConfig)
+type ProcessorOption func(*processorConfig) error
 
 type processorConfig struct {
-	readTimeout time.Duration
-	maxMessages int
+	readTimeout     time.Duration
+	maxMessages     int
+	autoOffsetReset AutoOffsetReset
 }
 
 func defaultProcessorConfig() processorConfig {
 	return processorConfig{
-		readTimeout: 10 * time.Second,
-		maxMessages: 10,
+		readTimeout:     10 * time.Second,
+		maxMessages:     10,
+		autoOffsetReset: OffsetEarliest,
 	}
 }
 
 // WithProcessorReadTimeout sets the default read timeout for the processor.
 // Default is 10 seconds.
 func WithProcessorReadTimeout(timeout time.Duration) ProcessorOption {
-	return func(cfg *processorConfig) {
+	return func(cfg *processorConfig) error {
 		if timeout < 0 {
 			timeout = 0
 		}
 		cfg.readTimeout = timeout
+		return nil
 	}
 }
 
 // WithProcessorMaxMessages sets the default maximum number of messages to process per batch.
 // Default is 10.
 func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
-	return func(cfg *processorConfig) {
+	return func(cfg *processorConfig) error {
 		if maxMessages < 1 {
 			maxMessages = 10
 		}
 		cfg.maxMessages = maxMessages
+		return nil
+	}
+}
+
+// WithProcessorAutoOffsetReset sets the default auto offset reset policy for the processor.
+// Default is `earliest`.
+// Valid values are:
+//   - `earliest`: start from the earliest available offset when no committed offset exists
+//   - `latest`: start from the latest offset when no committed offset exists
+func WithProcessorAutoOffsetReset(v AutoOffsetReset) ProcessorOption {
+	err := v.validate()
+	if err != nil {
+		return nil
+	}
+	return func(cfg *processorConfig) error {
+		cfg.autoOffsetReset = v
+		return nil
 	}
 }
 
