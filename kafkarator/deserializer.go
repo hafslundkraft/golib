@@ -18,6 +18,7 @@ type ValueDeserializer interface {
 type AvroDeserializer struct {
 	srClient SchemaRegistryClient
 	tel      TelemetryProvider
+	cache    *parsedSchemaCache
 }
 
 func newAvroDeserializer(
@@ -34,6 +35,7 @@ func newAvroDeserializer(
 	return &AvroDeserializer{
 		srClient: srClient,
 		tel:      tel,
+		cache:    newParsedSchemaCache(),
 	}
 }
 
@@ -55,9 +57,9 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 		return nil, fmt.Errorf("schema registry lookup: %w", err)
 	}
 
-	schema, err := avro.Parse(info.Schema)
+	schema, err := d.cache.GetOrParse(schemaID, subject, info.Schema)
 	if err != nil {
-		return nil, fmt.Errorf("schema parse failed: %w", err)
+		return nil, fmt.Errorf("get or parse schema: %w", err)
 	}
 
 	var out any

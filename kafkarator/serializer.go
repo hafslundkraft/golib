@@ -19,6 +19,7 @@ type ValueSerializer interface {
 type AvroSerializer struct {
 	srClient SchemaRegistryClient
 	tel      TelemetryProvider
+	cache    *parsedSchemaCache
 }
 
 func newAvroSerializer(srClient SchemaRegistryClient, tel TelemetryProvider) *AvroSerializer {
@@ -32,6 +33,7 @@ func newAvroSerializer(srClient SchemaRegistryClient, tel TelemetryProvider) *Av
 	return &AvroSerializer{
 		srClient: srClient,
 		tel:      tel,
+		cache:    newParsedSchemaCache(),
 	}
 }
 
@@ -55,13 +57,9 @@ func (s *AvroSerializer) Serialize(
 		return nil, fmt.Errorf("get latest schema metadata: %w", err)
 	}
 
-	if meta.Schema == "" {
-		return nil, fmt.Errorf("empty schema for subject %s", subject)
-	}
-
-	schema, err := avro.Parse(meta.Schema)
+	schema, err := s.cache.GetOrParse(meta.ID, subject, meta.Schema)
 	if err != nil {
-		return nil, fmt.Errorf("parse avro schema: %w", err)
+		return nil, fmt.Errorf("get or parse schema: %w", err)
 	}
 
 	avroBytes, err := avro.Marshal(schema, value)
