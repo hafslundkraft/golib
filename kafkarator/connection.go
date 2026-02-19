@@ -195,7 +195,7 @@ func (c *Connection) Deserializer() ValueDeserializer {
 }
 
 // ReaderOption for options to pass to the Reader() function
-type ReaderOption func(*readerOptions)
+type ReaderOption func(*readerOptions) error
 
 type readerOptions struct {
 	autoOffsetReset AutoOffsetReset
@@ -213,9 +213,13 @@ func defaultReaderOptions() readerOptions {
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
 func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
-	v.validate()
-	return func(o *readerOptions) {
+	err := v.validate()
+	if err != nil {
+		return nil
+	}
+	return func(o *readerOptions) error {
 		o.autoOffsetReset = v
+		return nil
 	}
 }
 
@@ -224,7 +228,9 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 	ro := defaultReaderOptions()
 
 	for _, opt := range opts {
-		opt(&ro)
+		if err := opt(&ro); err != nil {
+			return nil, fmt.Errorf("reader option failed: %w", err)
+		}
 	}
 
 	conf := cloneConfigMap(c.configMap)
@@ -301,7 +307,9 @@ func (c *Connection) Processor(
 ) (*Processor, error) {
 	cfg := defaultProcessorConfig()
 	for _, opt := range opts {
-		opt(&cfg)
+		if err := opt(&cfg); err != nil {
+			return nil, fmt.Errorf("processor option failed: %w", err)
+		}
 	}
 
 	reader, err := c.Reader(topic,

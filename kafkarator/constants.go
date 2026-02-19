@@ -13,11 +13,11 @@ const (
 	OffsetLatest AutoOffsetReset = "latest"
 )
 
-func (v AutoOffsetReset) validate() {
+func (v AutoOffsetReset) validate() error {
 	switch v {
 	case OffsetEarliest, OffsetLatest:
-		return
+		return nil
 	default:
-		panic(fmt.Sprintf("invalid AutoOffsetReset: %q", v))
+		return fmt.Errorf("invalid AutoOffsetReset: %q", v)
 	}
 }
