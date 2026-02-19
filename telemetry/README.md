@@ -47,6 +47,7 @@ The exact behavior of the provider can be configured using options passed to the
 * **WithLocal**: If set to true, the provider will print traces and logs to STDOUT. This is useful for local development and testing.
 * **WithLocalWriter**: Allows you to specify a custom io.Writer for local terminal output. It also enables local mode.
 * **WithLocalColors**: If set to true, the local output will include ANSI color codes for better readability in terminals that support colors. This option is only effective when local mode is enabled.
+* **WithSimpleLogProcessor**: Configures the logger to use a simple log processor instead of the default batch processor. This can be useful for low-throughput applications or short-lived jobs.
 * **WithAttributes**: Adds extra attributes/fields to the underlying telemetry providers. Currently only works for logs.
 * **WithTestIDGenerator**: Enables deterministic trace and span ID generation for testing. This should only be used in tests.
 
