@@ -437,7 +437,6 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	tel := newMockTelemetry()
 	conn, err := New(&config, tel)
@@ -458,7 +457,7 @@ func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 	// Give Kafka time to auto-create the topic and propagate metadata.
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group, WithReaderAutoOffsetReset(OffsetEarliest))
+	reader, err := conn.Reader(topic, WithReaderAutoOffsetReset(OffsetEarliest))
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -472,7 +471,6 @@ func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	tel := newMockTelemetry()
 	conn, err := New(&config, tel)
@@ -493,7 +491,7 @@ func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.
 	// Give Kafka time to auto-create the topic and propagate metadata.
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group, WithReaderAutoOffsetReset(OffsetLatest))
+	reader, err := conn.Reader(topic, WithReaderAutoOffsetReset(OffsetLatest))
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -526,7 +524,6 @@ func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.
 func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	tel := newMockTelemetry()
 	conn, err := New(&config, tel)
@@ -553,7 +550,6 @@ func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) 
 
 	processor, err := conn.Processor(
 		topic,
-		group,
 		handler,
 		WithProcessorAutoOffsetReset(OffsetEarliest),
 		WithProcessorReadTimeout(2*time.Second),
@@ -571,7 +567,6 @@ func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) 
 func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	tel := newMockTelemetry()
 	conn, err := New(&config, tel)
@@ -598,7 +593,6 @@ func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *t
 
 	processor, err := conn.Processor(
 		topic,
-		group,
 		handler,
 		WithProcessorAutoOffsetReset(OffsetLatest),
 		WithProcessorReadTimeout(2*time.Second),
