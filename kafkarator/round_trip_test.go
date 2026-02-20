@@ -248,8 +248,7 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 		]
 	}`
 
-	mockSchemaRegistry := newMockSRClient()
-	mockSRClient := mockSchemaRegistry
+	mockSRClient := newMockSRClient()
 	subject := fmt.Sprintf("%s-value", topic)
 
 	// Configure mock for serialization

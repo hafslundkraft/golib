@@ -33,10 +33,9 @@ const (
 
 	redpandaImage = "docker.redpanda.com/redpandadata/redpanda:v23.3.3"
 
-	topic         = "kafkarator-demo-topic"
-	consumerGroup = "kafkarator-demo-group"
-	messageCount  = 5
-	readTimeout   = 10 * time.Second
+	topic        = "kafkarator-demo-topic"
+	messageCount = 5
+	readTimeout  = 10 * time.Second
 )
 
 func main() {
