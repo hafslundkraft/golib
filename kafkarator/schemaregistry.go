@@ -50,9 +50,14 @@ func newSchemaRegistryClient(cfg *SchemaRegistryConfig, tel TelemetryProvider) (
 		return nil, fmt.Errorf("telemetry provider was not provided")
 	}
 
-	cfgSR := sr.NewConfigWithBasicAuthentication(
-		cfg.SchemaRegistryURL, cfg.SchemaRegistryUser, cfg.SchemaRegistryPassword,
-	)
+	var cfgSR *sr.Config
+	if cfg.SchemaRegistryUser == "" && cfg.SchemaRegistryPassword == "" {
+		cfgSR = sr.NewConfig(cfg.SchemaRegistryURL)
+	} else {
+		cfgSR = sr.NewConfigWithBasicAuthentication(
+			cfg.SchemaRegistryURL, cfg.SchemaRegistryUser, cfg.SchemaRegistryPassword,
+		)
+	}
 	cfgSR.HTTPClient = instrumentHTTPClient(cfgSR.HTTPClient, tel)
 	srClient, err := sr.NewClient(cfgSR)
 	if err != nil {
