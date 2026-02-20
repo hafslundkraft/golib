@@ -21,7 +21,6 @@ func newReader(
 	c *kafka.Consumer,
 	rmc messagingconv.ClientConsumedMessages,
 	pfc metric.Int64Counter,
-	lagGauge metric.Int64Gauge,
 	tel TelemetryProvider,
 	topic string,
 	consumerGroup string,
@@ -30,7 +29,6 @@ func newReader(
 		consumer:            c,
 		readMessagesCounter: rmc,
 		pollFailuresCounter: pfc,
-		lagGauge:            lagGauge,
 		tel:                 tel,
 		topic:               topic,
 		consumerGroup:       consumerGroup,
@@ -48,7 +46,6 @@ type Reader struct {
 	consumer            *kafka.Consumer
 	readMessagesCounter messagingconv.ClientConsumedMessages
 	pollFailuresCounter metric.Int64Counter
-	lagGauge            metric.Int64Gauge
 	tel                 TelemetryProvider
 	closed              bool
 	topic               string

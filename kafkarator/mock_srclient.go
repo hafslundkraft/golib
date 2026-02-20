@@ -1,6 +1,7 @@
 package kafkarator
 
 import (
+	"context"
 	"errors"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
@@ -30,7 +31,7 @@ func newMockSRClient() *mockSRClient {
 
 // Methods used by AvroSerializer
 
-func (m *mockSRClient) GetLatestSchemaMetadata(subject string) (sr.SchemaMetadata, error) {
+func (m *mockSRClient) GetLatestSchemaMetadata(ctx context.Context, subject string) (sr.SchemaMetadata, error) {
 	m.getLatestCalls++
 	if m.errLatest != nil {
 		return sr.SchemaMetadata{}, m.errLatest
@@ -44,7 +45,7 @@ func (m *mockSRClient) GetLatestSchemaMetadata(subject string) (sr.SchemaMetadat
 
 // Methods used by AvroDeserializer
 
-func (m *mockSRClient) GetBySubjectAndID(subject string, id int) (sr.SchemaInfo, error) {
+func (m *mockSRClient) GetBySubjectAndID(ctx context.Context, subject string, id int) (sr.SchemaInfo, error) {
 	m.getBySubjectAndIDCalls++
 
 	if m.errByID != nil {

@@ -179,7 +179,7 @@ tel, _ := telemetry.New(
     ctx, "my-service"
     )
 
-conn, err := kafkarator.New(config, telemetryProvider)
+conn, err := kafkarator.NewConnection(config, telemetryProvider)
 if err != nil {
     log.Fatal(err)
 }
@@ -199,7 +199,7 @@ ts := oauth2.StaticTokenSource(&oauth2.Token{
     Expiry: time.Now().Add(1 * time.Hour)
 })
 
-conn, err := kafkarator.New(config, telemetry, kafkarator.WithTokenSource(ts))
+conn, err := kafkarator.NewConnection(config, telemetry, kafkarator.WithTokenSource(ts))
 if err != nil {
     log.Fatal(err)
 }
@@ -209,7 +209,6 @@ if err != nil {
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `ENV` | Environment determines which Kafka service and authentication mode | `prod` |
-| `USE_SCHEMA_REGISTRY` | Boolean on whether schema registry should be used or not | `true` |
 | `KAFKA_AUTH_TYPE` | Determines how to authenticate with to Aiven | `sasl` or `tls`|
 
 ##### TLS mode
@@ -265,10 +264,9 @@ config := kafkarator.Config{
     CertFile: "/path/to/client-cert.pem",
     KeyFile:  "/path/to/client-key.pem",
     CACert:   "/path/to/ca-cert.pem",
-    UseSchemaRegistry: false,
 }
 
-conn, err := kafkarator.New(config, telemetry)
+conn, err := kafkarator.NewConnection(config, telemetry)
 if err != nil {
     log.Fatal(err)
 }
@@ -331,7 +329,6 @@ The library automatically records the following metrics:
 | `messaging.client.sent.messages` | Counter | Number of messages sent to Kafka | `messaging.system=kafka`, `messaging.operation.name=send`, `messaging.destination.name` (topic), `messaging.destination.partition.id`, `error.type` (on failure) |
 | `messaging.client.consumed.messages` | Counter | Number of messages consumed from Kafka | `messaging.system=kafka`, `messaging.operation.name=poll`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.destination.partition.id` |
 | `messaging.client.poll.failures` | Counter | Number of poll failures | `messaging.system=kafka`, `messaging.operation.name=poll`, `messaging.operation.type=receive`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `error.type` |
-| `messaging.kafka.consumer.lag` | Gauge | Consumer lag per partition | `messaging.system=kafka`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.destination.partition.id` |
 
 ### Traces
 

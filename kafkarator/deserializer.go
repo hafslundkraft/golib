@@ -3,7 +3,6 @@ package kafkarator
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/hamba/avro/v2"
 )
@@ -19,9 +18,7 @@ type ValueDeserializer interface {
 type AvroDeserializer struct {
 	srClient SchemaRegistryClient
 	tel      TelemetryProvider
-
-	mu      sync.Mutex
-	schemas map[string]cachedSchema
+	cache    *parsedSchemaCache
 }
 
 func newAvroDeserializer(
@@ -38,7 +35,7 @@ func newAvroDeserializer(
 	return &AvroDeserializer{
 		srClient: srClient,
 		tel:      tel,
-		schemas:  map[string]cachedSchema{},
+		cache:    newParsedSchemaCache(),
 	}
 }
 
@@ -55,9 +52,14 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 		return nil, err
 	}
 
-	schema, err := d.loadSchema(ctx, subject, schemaID)
+	info, err := d.srClient.GetBySubjectAndID(ctx, subject, schemaID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("schema registry lookup: %w", err)
+	}
+
+	schema, err := d.cache.getOrParse(schemaID, subject, info.Schema)
+	if err != nil {
+		return nil, fmt.Errorf("get or parse schema: %w", err)
 	}
 
 	var out any
@@ -68,35 +70,4 @@ func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value 
 	}
 
 	return out, nil
-}
-
-func (d *AvroDeserializer) loadSchema(ctx context.Context, subject string, schemaID int) (avro.Schema, error) {
-	d.mu.Lock()
-	s, ok := d.schemas[subject]
-	d.mu.Unlock()
-
-	if ok && s.schemaID == schemaID {
-		return s.schema, nil
-	}
-
-	_, span := d.tel.Tracer().Start(ctx, "kafkarator.AvroDeserializer.loadSchema")
-	defer span.End()
-
-	info, err := d.srClient.GetBySubjectAndID(subject, schemaID)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("schema registry lookup: %w", err)
-	}
-
-	parsed, err := avro.Parse(info.Schema)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("schema parse failed: %w", err)
-	}
-
-	d.mu.Lock()
-	d.schemas[subject] = cachedSchema{schemaID: schemaID, schema: parsed}
-	d.mu.Unlock()
-
-	return parsed, nil
 }

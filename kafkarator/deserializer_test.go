@@ -126,7 +126,7 @@ func TestAvroDeserializer_BadPayload(t *testing.T) {
 	}
 }
 
-func TestAvroDeserializer_SchemaCache(t *testing.T) {
+func TestAvroDeserializer_DoesNotKeepLocalSchemaCache(t *testing.T) {
 	ctx := context.Background()
 
 	schemaStr := `{
@@ -157,10 +157,11 @@ func TestAvroDeserializer_SchemaCache(t *testing.T) {
 	// First call loads schema from registry
 	d.Deserialize(ctx, "test-topic", wire)
 
-	// Second call must hit cache
+	// Second call goes through schema registry client again.
+	// The client implementation is responsible for caching.
 	d.Deserialize(ctx, "test-topic", wire)
 
-	if mock.getBySubjectAndIDCalls != 1 {
-		t.Fatalf("expected schema registry to be called once, got %d", mock.getBySubjectAndIDCalls)
+	if mock.getBySubjectAndIDCalls != 2 {
+		t.Fatalf("expected schema registry to be called twice, got %d", mock.getBySubjectAndIDCalls)
 	}
 }

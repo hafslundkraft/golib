@@ -191,7 +191,7 @@ func TestWriterReaderRoundtrip(t *testing.T) {
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	telemetry := newMockTelemetry()
-	conn, err := New(&config, telemetry)
+	conn, err := NewConnection(&config, telemetry)
 	require.NoError(t, err)
 
 	// Write message
@@ -248,11 +248,11 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 		]
 	}`
 
-	mockSchemaRegistry := newMockSRClient()
+	mockSRClient := newMockSRClient()
 	subject := fmt.Sprintf("%s-value", topic)
 
 	// Configure mock for serialization
-	mockSchemaRegistry.latest[subject] = sr.SchemaMetadata{
+	mockSRClient.latest[subject] = sr.SchemaMetadata{
 		SchemaInfo: sr.SchemaInfo{
 			Schema:     schemaStr,
 			SchemaType: "AVRO",
@@ -263,19 +263,19 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	}
 
 	// Configure mock for deserialization
-	if mockSchemaRegistry.byID[subject] == nil {
-		mockSchemaRegistry.byID[subject] = make(map[int]sr.SchemaInfo)
+	if mockSRClient.byID[subject] == nil {
+		mockSRClient.byID[subject] = make(map[int]sr.SchemaInfo)
 	}
-	mockSchemaRegistry.byID[subject][123] = sr.SchemaInfo{
+	mockSRClient.byID[subject][123] = sr.SchemaInfo{
 		Schema:     schemaStr,
 		SchemaType: "AVRO",
 	}
 
 	telemetry := newMockTelemetry()
-	serializer := newAvroSerializer(mockSchemaRegistry, telemetry)
-	deserializer := newAvroDeserializer(mockSchemaRegistry, telemetry)
+	serializer := newAvroSerializer(mockSRClient, telemetry)
+	deserializer := newAvroDeserializer(mockSRClient, telemetry)
 
-	conn, err := New(&config, telemetry)
+	conn, err := NewConnection(&config, telemetry)
 	require.NoError(t, err)
 
 	// Serialize and write
@@ -346,7 +346,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 		logger: newMockTelemetry().Logger(),
 	}
 
-	conn, err := New(&config, telemetry)
+	conn, err := NewConnection(&config, telemetry)
 	require.NoError(t, err)
 
 	// Handler that captures message content and trace context
@@ -439,7 +439,7 @@ func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()
@@ -473,7 +473,7 @@ func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()
@@ -526,7 +526,7 @@ func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) 
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()
@@ -569,7 +569,7 @@ func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *t
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()

@@ -98,6 +98,9 @@ func TestConfigFromEnvVars_TLS(t *testing.T) {
 		envKeyFile:           "key.pem",
 		envCACert:            "ca.pem",
 		envBroker:            "broker:9090",
+		envSchemaRegistryURL: "localhost:8081",
+		envKafkaUser:         "user",
+		envKafkaPassword:     "secret",
 	}, func() {
 		cfg, err := ConfigFromEnvVars()
 

@@ -19,7 +19,6 @@ import (
 const (
 	// Custom metrics not in semconv
 	meterPollFailures = "messaging.client.poll.failures"
-	gaugeLag          = "messaging.kafka.consumer.lag"
 )
 
 // Connection represents a Connection to a Kafka service. Connection supports both writing
@@ -52,7 +51,7 @@ type TelemetryProvider interface {
 	Tracer() trace.Tracer
 }
 
-// Option ... to pass to the New() connection
+// Option ... to pass to the NewConnection() connection
 type Option func(*options)
 
 type options struct {
@@ -67,17 +66,16 @@ func WithTokenSource(ts oauth2.TokenSource) Option {
 	}
 }
 
-// WithSchemaRegistryClient sets the schema registry client to use internally. If
-// not set, a client will be set up automatically, so the main use case for this
-// option is for unit tests.
+// WithSchemaRegistryClient sets the schema registry client to use internally.
+// This is useful for tests and examples using mock schema registries.
 func WithSchemaRegistryClient(client SchemaRegistryClient) Option {
 	return func(o *options) {
 		o.srClient = client
 	}
 }
 
-// New creates and returns a new connection.
-func New(
+// NewConnection creates and returns a new connection.
+func NewConnection(
 	config *Config,
 	tel TelemetryProvider,
 	opts ...Option,
@@ -119,8 +117,8 @@ func New(
 	}
 
 	srClient := o.srClient
-	if srClient == nil && config.UseSchemaRegistry {
-		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig)
+	if srClient == nil && config.SchemaRegistryConfig.SchemaRegistryURL != "" {
+		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig, tel)
 		if err != nil {
 			return nil, fmt.Errorf("schema registry client: %w", err)
 		}
@@ -258,13 +256,6 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 			return nil, fmt.Errorf("start oauth: %w", err)
 		}
 	}
-
-	lagGauge, err := c.tel.Meter().Int64Gauge(gaugeLag)
-	if err != nil {
-		_ = consumer.Close()
-		return nil, fmt.Errorf("create lag gauge %q: %w", gaugeLag, err)
-	}
-
 	counter, err := messagingconv.NewClientConsumedMessages(c.tel.Meter())
 	if err != nil {
 		_ = consumer.Close()
@@ -277,7 +268,7 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 		return nil, fmt.Errorf("create meter counter %q: %w", meterPollFailures, err)
 	}
 
-	r, err := newReader(consumer, counter, failureCounter, lagGauge, c.tel, topic, group)
+	r, err := newReader(consumer, counter, failureCounter, c.tel, topic, group)
 	if err != nil {
 		return nil, err
 	}

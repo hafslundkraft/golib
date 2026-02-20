@@ -3,10 +3,8 @@ package kafkarator
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/hamba/avro/v2"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // ValueSerializer serializes domain values into a byte representation
@@ -21,9 +19,7 @@ type ValueSerializer interface {
 type AvroSerializer struct {
 	srClient SchemaRegistryClient
 	tel      TelemetryProvider
-
-	mu          sync.Mutex
-	schemaCache map[string]cachedSchema
+	cache    *parsedSchemaCache
 }
 
 func newAvroSerializer(srClient SchemaRegistryClient, tel TelemetryProvider) *AvroSerializer {
@@ -35,9 +31,9 @@ func newAvroSerializer(srClient SchemaRegistryClient, tel TelemetryProvider) *Av
 	}
 
 	return &AvroSerializer{
-		srClient:    srClient,
-		tel:         tel,
-		schemaCache: make(map[string]cachedSchema),
+		srClient: srClient,
+		tel:      tel,
+		cache:    newParsedSchemaCache(),
 	}
 }
 
@@ -56,12 +52,17 @@ func (s *AvroSerializer) Serialize(
 		return nil, err
 	}
 
-	cached, err := s.getOrLoadSchema(ctx, subject)
+	meta, err := s.srClient.GetLatestSchemaMetadata(ctx, subject)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get latest schema metadata: %w", err)
 	}
 
-	avroBytes, err := avro.Marshal(cached.schema, value)
+	schema, err := s.cache.getOrParse(meta.ID, subject, meta.Schema)
+	if err != nil {
+		return nil, fmt.Errorf("get or parse schema: %w", err)
+	}
+
+	avroBytes, err := avro.Marshal(schema, value)
 	if err != nil {
 		return nil, fmt.Errorf("avro marshal failed: %w", err)
 	}
@@ -71,64 +72,12 @@ func (s *AvroSerializer) Serialize(
 	final := make([]byte, 0, len(avroBytes)+5)
 	final = append(final,
 		0,
-		byte(cached.schemaID>>24),
-		byte(cached.schemaID>>16),
-		byte(cached.schemaID>>8),
-		byte(cached.schemaID),
+		byte(meta.ID>>24),
+		byte(meta.ID>>16),
+		byte(meta.ID>>8),
+		byte(meta.ID),
 	)
 	final = append(final, avroBytes...)
 
 	return final, nil
-}
-
-func (s *AvroSerializer) getOrLoadSchema(
-	ctx context.Context,
-	subject string,
-) (cachedSchema, error) {
-	s.mu.Lock()
-	cached, ok := s.schemaCache[subject]
-	s.mu.Unlock()
-
-	if ok && cached.schemaLoaded {
-		return cached, nil
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if cached, ok := s.schemaCache[subject]; ok && cached.schemaLoaded {
-		return cached, nil
-	}
-
-	_, span := s.tel.Tracer().Start(ctx, "kafkarator.AvroSerializer.loadSchema")
-	defer span.End()
-
-	span.SetAttributes(attribute.String("schema.subject", subject))
-
-	meta, err := s.srClient.GetLatestSchemaMetadata(subject)
-	if err != nil {
-		span.RecordError(err)
-		return cachedSchema{}, fmt.Errorf("get latest schema metadata: %w", err)
-	}
-
-	if meta.Schema == "" {
-		return cachedSchema{}, fmt.Errorf("empty schema for subject %s", subject)
-	}
-
-	schema, err := avro.Parse(meta.Schema)
-	if err != nil {
-		span.RecordError(err)
-		return cachedSchema{}, fmt.Errorf("parse avro schema: %w", err)
-	}
-
-	cached = cachedSchema{
-		schema:       schema,
-		schemaID:     meta.ID,
-		schemaLoaded: true,
-	}
-
-	s.schemaCache[subject] = cached
-	span.SetAttributes(attribute.Int("schema.id", meta.ID))
-
-	return cached, nil
 }
