@@ -98,6 +98,8 @@ processed, err := processor.ProcessNext(ctx)
 #### ChannelReader
 In order to use the deserializer, a schema for the topic must be available in the schema registry. Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when the reader commits the high watermark is sacrificed; each message is committed automatically.
 
+>Note: when an internal read/commit error occurs, the channel is closed.
+
 
 ```go
 ctx := context.Background()
@@ -179,7 +181,7 @@ tel, _ := telemetry.New(
     ctx, "my-service"
     )
 
-conn, err := kafkarator.NewConnection(config, telemetryProvider)
+conn, err := kafkarator.NewConnection(config, tel)
 if err != nil {
     log.Fatal(err)
 }
@@ -254,9 +256,15 @@ r, err := conn.Reader("my-topic",
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `ENV` | Environment determines which Kafka service and authentication mode | `prod` |
+| `HAPPI_SYSTEM_NAME` | System name used when generating consumer group IDs | `billing` |
+| `HAPPI_WORKLOAD_NAME` | Workload name used when generating consumer group IDs | `invoice-processor` |
+| `HAPPI_ENV` | Environment name used when generating consumer group IDs | `prod` |
 | `KAFKA_AUTH_TYPE` | Determines how to authenticate with to Aiven | `sasl` or `tls`|
+| `KAFKA_BROKER` | Kafka broker address to use | `broker1:9092` |
+| `KAFKA_CA_CERT` | Either path to the Certificate Authority file or the certificate itself | `/path/to/ca-cert.pem` |
 | `KAFKA_SCHEMA_REGISTRY_URL` | URL to the desired schema registry you want to use | `https://url.com:9090` |
+| `KAFKA_USERNAME` | Username to authenticate with to the desired schema registry | `username` |
+| `KAFKA_PASSWORD` | Password to authenticate with to Aiven Schema Registry | `pass` |
 
 ##### TLS mode
 
@@ -265,7 +273,6 @@ These environment variables are necessary as well for TLS mode
 |----------|-------------|---------|
 | `KAFKA_CERT_FILE` | Path to the client certificate file | `/path/to/client-cert.pem` |
 | `KAFKA_KEY_FILE` | Path to the client key file | `/path/to/client-key.pem` |
-| `KAFKA_CA_CERT` | Either path to the Certificate Authority file or the certificate itself | `/path/to/ca-cert.pem` |
 
 ##### SASL mode
 
@@ -274,30 +281,9 @@ These environment variables are necessary as well for SASL mode. AZURE_KAFKA_SCO
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AZURE_KAFKA_SCOPE` | Azure scope to use for fetching tokens to authenticate with to Aiven | `api://aaaa-bbbb-cccc-dddd` |
-| `KAFKA_CA_CERT` | Either path to the Certificate Authority file or the certificate itself | `/path/to/ca-cert.pem` |
 
 
-#### Optional Environment Variables
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `KAFKA_BROKER` | Kafka broker address to use | `broker1:9092` |
-| `KAFKA_USER` | Username to authenticate with to the desired schema registry | `username` |
-| `KAFKA_PASSWORD` | Password to authenticate with to Aiven Schema Registry | `pass` |
-
-If any of the above variables are not set, they will default to:
-
-Test environment:
-- KAFKA_BROKER = kafka-test-ture-test.com
-- KAFKA_SCHEMA_REGISTRY_URL = kafka-test-ture-test.com:18360
-- KAFKA_USER: object ID from Azure as username for the application
-- KAFKA_PASSWORD: password associated with the user in Aiven
-
-Prod environment:
-- KAFKA_BROKER = kafka-prod-ture-prod.com
-- KAFKA_SCHEMA_REGISTRY_URL = kafka-prod-ture-prod.com:11132
-- KAFKA_USER: object ID from Azure as username for the application
-- KAFKA_PASSWORD: password associated with the user in Aiven
+There are no built-in environment defaults in `ConfigFromEnvVars()`. Missing required variables return an error.
 
 
 ### Programmatic Configuration
@@ -306,14 +292,24 @@ Alternatively, you can create a `Config` struct directly:
 
 ```go
 config := kafkarator.Config{
-    Broker:  "broker1:9092",
-    CertFile: "/path/to/client-cert.pem",
-    KeyFile:  "/path/to/client-key.pem",
+    Broker:   "broker1:9092",
+    AuthMode: kafkarator.AuthTLS,
     CACert:   "/path/to/ca-cert.pem",
-
+    TLS: kafkarator.TLSConfig{
+        CertFile: "/path/to/client-cert.pem",
+        KeyFile:  "/path/to/client-key.pem",
+    },
+    SchemaRegistryConfig: kafkarator.SchemaRegistryConfig{
+        SchemaRegistryURL:      "https://schema-registry:8081",
+        SchemaRegistryUser:     "username",
+        SchemaRegistryPassword: "password",
+    },
+    SystemName:   "billing",
+    WorkloadName: "invoice-processor",
+    Env:          "prod",
 }
 
-conn, err := kafkarator.NewConnection(config, telemetry)
+conn, err := kafkarator.NewConnection(&config, telemetry)
 if err != nil {
     log.Fatal(err)
 }

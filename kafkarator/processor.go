@@ -73,11 +73,10 @@ func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
 func WithProcessorAutoOffsetReset(v AutoOffsetReset) ProcessorOption {
-	err := v.validate()
-	if err != nil {
-		return nil
-	}
 	return func(cfg *processorConfig) error {
+		if err := v.validate(); err != nil {
+			return err
+		}
 		cfg.autoOffsetReset = v
 		return nil
 	}
