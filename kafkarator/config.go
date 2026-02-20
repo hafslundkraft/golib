@@ -35,9 +35,6 @@ const (
 	// envSchemaRegistryURL is the URL for the Aiven Schema Registry
 	envSchemaRegistryURL = "KAFKA_SCHEMA_REGISTRY_URL"
 
-	// envUseSchemaRegistry tells us whether schema registry should be used or not
-	envUseSchemaRegistry = "USE_SCHEMA_REGISTRY"
-
 	// envHappiWorkloadName is the name of the workload on the happi platform.
 	envHappiWorkloadName = "HAPPI_WORKLOAD_NAME"
 

@@ -440,7 +440,7 @@ func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()
@@ -474,7 +474,7 @@ func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()
@@ -527,7 +527,7 @@ func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) 
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()
@@ -570,7 +570,7 @@ func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *t
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
 
 	tel := newMockTelemetry()
-	conn, err := New(&config, tel)
+	conn, err := NewConnection(&config, tel)
 	require.NoError(t, err)
 
 	writer, err := conn.Writer()
