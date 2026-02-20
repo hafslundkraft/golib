@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 		propagation.Baggage{},
 	))
 
-	os.Setenv("ENV", "test")
+	os.Setenv("HAPPI_ENV", "test")
 	os.Setenv("KAFKA_SASL_SCOPE", "dummy-scope")
 	os.Setenv("KAFKA_AUTH_TYPE", "tls")
 	os.Setenv("SCHEMA_REGISTRY_PASSWORD", "dummy")
@@ -54,7 +54,6 @@ func TestMain(m *testing.M) {
 	broker = brokers[0]
 
 	config = Config{
-		Env:      "test",
 		Broker:   broker,
 		AuthMode: AuthNone, // No auth for test container
 		SchemaRegistryConfig: SchemaRegistryConfig{
@@ -62,6 +61,9 @@ func TestMain(m *testing.M) {
 			SchemaRegistryUser:     "none",
 			SchemaRegistryURL:      "",
 		},
+		SystemName:   "kafkarator",
+		Env:          "test",
+		WorkloadName: "integration-tests",
 	}
 
 	// Run all tests

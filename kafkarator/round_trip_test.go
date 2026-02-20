@@ -105,6 +105,19 @@ func waitFor(condition func() bool, timeout time.Duration) bool {
 	return false
 }
 
+func waitForConsumerAssignment(t *testing.T, reader *Reader, timeout time.Duration) {
+	t.Helper()
+
+	assigned := waitFor(func() bool {
+		// Poll
+		_ = reader.consumer.Poll(int(testPollFrequency.Milliseconds()))
+		parts, err := reader.consumer.Assignment()
+		return err == nil && len(parts) > 0
+	}, timeout)
+
+	require.True(t, assigned, "consumer did not get partition assignment within timeout")
+}
+
 // assertDelivery waits for delivery and asserts no error occurred.
 func assertDelivery(t *testing.T, status *deliveryStatus, timeout time.Duration) {
 	t.Helper()
@@ -176,7 +189,6 @@ func assertTraceContext(t *testing.T, parent, child sdktrace.ReadOnlySpan) {
 func TestWriterReaderRoundtrip(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	telemetry := newMockTelemetry()
 	conn, err := NewConnection(&config, telemetry)
@@ -206,7 +218,7 @@ func TestWriterReaderRoundtrip(t *testing.T) {
 	// Read message back with retry for topic creation
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group)
+	reader, err := conn.Reader(topic)
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -224,7 +236,6 @@ func TestWriterReaderRoundtrip(t *testing.T) {
 func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	// Setup mock schema registry
 	schemaStr := `{
@@ -298,7 +309,7 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	// Read and deserialize with retry
 	time.Sleep(testTopicCreateDelay)
 
-	reader, err := conn.Reader(topic, group)
+	reader, err := conn.Reader(topic)
 	require.NoError(t, err)
 	defer reader.Close(ctx)
 
@@ -322,7 +333,6 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
-	group := fmt.Sprintf("kafkarator-it-g-%s", generateID())
 
 	// Setup telemetry with span recording
 	spanRecorder := tracetest.NewSpanRecorder()
@@ -355,7 +365,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 		return nil
 	}
 
-	processor, err := conn.Processor(topic, group, handler, WithProcessorReadTimeout(testTimeout))
+	processor, err := conn.Processor(topic, handler, WithProcessorReadTimeout(testTimeout))
 	require.NoError(t, err)
 	defer processor.Close(ctx)
 
@@ -423,4 +433,194 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 	// Verify same trace across send and process
 	assert.Equal(t, sendSpan.SpanContext().TraceID(), processSpan.SpanContext().TraceID(),
 		"send and process spans should share the same trace ID")
+}
+
+func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
+	ctx := context.Background()
+	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
+
+	tel := newMockTelemetry()
+	conn, err := New(&config, tel)
+	require.NoError(t, err)
+
+	writer, err := conn.Writer()
+	require.NoError(t, err)
+	defer writer.Close(ctx)
+
+	produced := &Message{
+		Topic:   topic,
+		Key:     []byte("k"),
+		Value:   []byte("v1"),
+		Headers: map[string][]byte{},
+	}
+
+	require.NoError(t, writer.Write(ctx, produced))
+	// Give Kafka time to auto-create the topic and propagate metadata.
+	time.Sleep(testTopicCreateDelay)
+
+	reader, err := conn.Reader(topic, WithReaderAutoOffsetReset(OffsetEarliest))
+	require.NoError(t, err)
+	defer reader.Close(ctx)
+
+	msgs, commit, err := retryRead(ctx, reader, 1, testTimeout)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, produced.Value, msgs[0].Value)
+	require.NoError(t, commit(ctx))
+}
+
+func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.T) {
+	ctx := context.Background()
+	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
+
+	tel := newMockTelemetry()
+	conn, err := New(&config, tel)
+	require.NoError(t, err)
+
+	writer, err := conn.Writer()
+	require.NoError(t, err)
+	defer writer.Close(ctx)
+
+	// Produce a message *before* the consumer group exists.
+	require.NoError(t, writer.Write(ctx, &Message{
+		Topic:   topic,
+		Key:     []byte("k"),
+		Value:   []byte("v1"),
+		Headers: map[string][]byte{},
+	}))
+
+	// Give Kafka time to auto-create the topic and propagate metadata.
+	time.Sleep(testTopicCreateDelay)
+
+	reader, err := conn.Reader(topic, WithReaderAutoOffsetReset(OffsetLatest))
+	require.NoError(t, err)
+	defer reader.Close(ctx)
+
+	// Ensure the consumer group has joined and received an assignment before producing v2.
+	// Otherwise the first assignment could happen after v2 is produced and `latest` would
+	// skip it.
+	waitForConsumerAssignment(t, reader, testTimeout)
+
+	// With `latest`, the pre-existing message should be skipped.
+	msgs, commit, err := reader.Read(ctx, 1, 2*time.Second)
+	require.NoError(t, err)
+	require.Empty(t, msgs, "should not receive any messages with latest offset reset")
+	require.NoError(t, commit(ctx))
+
+	// Now produce a new message; the reader should receive this.
+	require.NoError(t, writer.Write(ctx, &Message{
+		Topic:   topic,
+		Key:     []byte("k"),
+		Value:   []byte("v2"),
+		Headers: map[string][]byte{},
+	}))
+
+	msgs, commit, err = retryRead(ctx, reader, 1, testTimeout)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, []byte("v2"), msgs[0].Value)
+	require.NoError(t, commit(ctx))
+}
+
+func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) {
+	ctx := context.Background()
+	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
+
+	tel := newMockTelemetry()
+	conn, err := New(&config, tel)
+	require.NoError(t, err)
+
+	writer, err := conn.Writer()
+	require.NoError(t, err)
+	defer writer.Close(ctx)
+
+	// Produce a message *before* the processor starts.
+	require.NoError(t, writer.Write(ctx, &Message{
+		Topic:   topic,
+		Key:     []byte("k"),
+		Value:   []byte("v1"),
+		Headers: map[string][]byte{},
+	}))
+	time.Sleep(testTopicCreateDelay)
+
+	var handled int
+	handler := func(_ context.Context, _ *Message) error {
+		handled++
+		return nil
+	}
+
+	processor, err := conn.Processor(
+		topic,
+		handler,
+		WithProcessorAutoOffsetReset(OffsetEarliest),
+		WithProcessorReadTimeout(2*time.Second),
+		WithProcessorMaxMessages(1),
+	)
+	require.NoError(t, err)
+	defer processor.Close(ctx)
+
+	count, err := retryProcess(ctx, processor)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, 1, handled)
+}
+
+func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *testing.T) {
+	ctx := context.Background()
+	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
+
+	tel := newMockTelemetry()
+	conn, err := New(&config, tel)
+	require.NoError(t, err)
+
+	writer, err := conn.Writer()
+	require.NoError(t, err)
+	defer writer.Close(ctx)
+
+	// Produce a message *before* the processor starts.
+	require.NoError(t, writer.Write(ctx, &Message{
+		Topic:   topic,
+		Key:     []byte("k"),
+		Value:   []byte("v1"),
+		Headers: map[string][]byte{},
+	}))
+	time.Sleep(testTopicCreateDelay)
+
+	var handled int
+	handler := func(_ context.Context, _ *Message) error {
+		handled++
+		return nil
+	}
+
+	processor, err := conn.Processor(
+		topic,
+		handler,
+		WithProcessorAutoOffsetReset(OffsetLatest),
+		WithProcessorReadTimeout(2*time.Second),
+		WithProcessorMaxMessages(1),
+	)
+	require.NoError(t, err)
+	defer processor.Close(ctx)
+
+	// Ensure consumer assignment happens before producing v2.
+	waitForConsumerAssignment(t, processor.reader, testTimeout)
+
+	// With `latest`, the pre-existing message should be skipped.
+	count, err := processor.ProcessNext(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, count)
+	require.Equal(t, 0, handled)
+
+	// Now produce a new message; the processor should handle it.
+	require.NoError(t, writer.Write(ctx, &Message{
+		Topic:   topic,
+		Key:     []byte("k"),
+		Value:   []byte("v2"),
+		Headers: map[string][]byte{},
+	}))
+
+	count, err = retryProcess(ctx, processor)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, 1, handled)
 }

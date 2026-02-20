@@ -170,7 +170,6 @@ func readAndProcessMessages(ctx context.Context, conn *kafkarator.Connection, lo
 	// Step 2: Create a Processor - it handles tracing and offset management automatically
 	processor, err := conn.Processor(
 		topic,
-		consumerGroup,
 		handler.handle, // Pass the handler function
 		kafkarator.WithProcessorReadTimeout(10*time.Second),
 		kafkarator.WithProcessorMaxMessages(10),

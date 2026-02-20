@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -192,43 +193,52 @@ func (c *Connection) Deserializer() ValueDeserializer {
 }
 
 // ReaderOption for options to pass to the Reader() function
-type ReaderOption func(*readerOptions)
+type ReaderOption func(*readerOptions) error
 
 type readerOptions struct {
-	autoOffsetReset string
+	autoOffsetReset AutoOffsetReset
 }
 
 func defaultReaderOptions() readerOptions {
 	return readerOptions{
-		autoOffsetReset: "earliest",
+		autoOffsetReset: OffsetEarliest,
 	}
 }
 
-// WithAutoOffsetReset overrides Kafka auto.offset.reset.
+// WithReaderAutoOffsetReset overrides Kafka auto.offset.reset.
 // Default is `earliest` if not provided.
-//
 // Possible values:
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
-//   - `none`: error if no committed offset exists for the consumer group
-func WithAutoOffsetReset(value string) ReaderOption {
-	return func(o *readerOptions) {
-		o.autoOffsetReset = value
+func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
+	err := v.validate()
+	if err != nil {
+		return nil
+	}
+	return func(o *readerOptions) error {
+		o.autoOffsetReset = v
+		return nil
 	}
 }
 
 // Reader returns a reader that is used to fetch messages from Kafka.
-func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader, error) {
+func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error) {
 	ro := defaultReaderOptions()
 
 	for _, opt := range opts {
-		opt(&ro)
+		if err := opt(&ro); err != nil {
+			return nil, fmt.Errorf("reader option failed: %w", err)
+		}
 	}
 
 	conf := cloneConfigMap(c.configMap)
+	group, err := c.consumerGroupName(topic)
+	if err != nil {
+		return nil, fmt.Errorf("consumer group name: %w", err)
+	}
 
 	conf["group.id"] = group
-	conf["auto.offset.reset"] = ro.autoOffsetReset
+	conf["auto.offset.reset"] = string(ro.autoOffsetReset)
 
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
@@ -283,16 +293,19 @@ func (c *Connection) Reader(topic, group string, opts ...ReaderOption) (*Reader,
 // Use ProcessorOption to configure optional parameters like readTimeout.
 func (c *Connection) Processor(
 	topic string,
-	consumerGroup string,
 	handler ProcessFunc,
 	opts ...ProcessorOption,
 ) (*Processor, error) {
 	cfg := defaultProcessorConfig()
 	for _, opt := range opts {
-		opt(&cfg)
+		if err := opt(&cfg); err != nil {
+			return nil, fmt.Errorf("processor option failed: %w", err)
+		}
 	}
 
-	reader, err := c.Reader(topic, consumerGroup)
+	reader, err := c.Reader(topic,
+		WithReaderAutoOffsetReset(cfg.autoOffsetReset),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
@@ -310,9 +323,8 @@ func (c *Connection) Processor(
 func (c *Connection) ChannelReader(
 	ctx context.Context,
 	topic string,
-	group string,
 ) (<-chan Message, error) {
-	reader, err := c.Reader(topic, group)
+	reader, err := c.Reader(topic)
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
@@ -362,4 +374,21 @@ func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) erro
 	}
 
 	return nil
+}
+
+func (c *Connection) consumerGroupName(topic string) (string, error) {
+	system := strings.TrimSpace(c.config.SystemName)
+	env := strings.TrimSpace(c.config.Env)
+	workloadName := strings.TrimSpace(c.config.WorkloadName)
+	topic = strings.TrimSpace(topic)
+
+	if system == "" || env == "" || workloadName == "" {
+		return "", fmt.Errorf("system name, env and workload name must be set in config")
+	}
+
+	if topic == "" {
+		return "", fmt.Errorf("topic cannot be empty")
+	}
+
+	return fmt.Sprintf("%s.%s.%s.%s", system, env, workloadName, topic), nil
 }
