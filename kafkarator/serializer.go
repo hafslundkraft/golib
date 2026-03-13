@@ -72,10 +72,10 @@ func (s *AvroSerializer) Serialize(
 	final := make([]byte, 0, len(avroBytes)+5)
 	final = append(final,
 		0,
-		byte(meta.ID>>24),
-		byte(meta.ID>>16),
-		byte(meta.ID>>8),
-		byte(meta.ID),
+		byte((meta.ID>>24)&0xff),
+		byte((meta.ID>>16)&0xff),
+		byte((meta.ID>>8)&0xff),
+		byte(meta.ID&0xff),
 	)
 	final = append(final, avroBytes...)
 

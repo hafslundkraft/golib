@@ -12,7 +12,6 @@ import (
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -151,20 +150,10 @@ func (p *Provider) LoggerProvider() log.LoggerProvider {
 // HTTPMiddleware constructs a plain http middleware that instruments incoming
 // requests with traces and metrics.
 func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
-	return otelhttp.NewMiddleware("http-server",
+	otelMW := otelhttp.NewMiddleware("http-server",
 		otelhttp.WithPropagators(p.propagator),
 		otelhttp.WithTracerProvider(p.tracerProvider),
 		otelhttp.WithMeterProvider(p.meterProvider),
-		otelhttp.WithMetricAttributesFn(func(r *http.Request) []attribute.KeyValue {
-			// Stripping the method to leave only the route
-			_, route, found := strings.Cut(r.Pattern, " ")
-			if found {
-				return []attribute.KeyValue{semconv.HTTPRoute(route)}
-			} else if r.Pattern != "" {
-				return []attribute.KeyValue{semconv.HTTPRoute(r.Pattern)}
-			}
-			return nil
-		}),
 		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
 			if r.Pattern == "" {
 				return r.Method + " 404 Not Found"
@@ -172,6 +161,25 @@ func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 			return r.Pattern
 		}),
 	)
+	return func(h http.Handler) http.Handler {
+		return otelMW(labelerMiddleware(h))
+	}
+}
+
+func labelerMiddleware(next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		labeler, _ := otelhttp.LabelerFromContext(r.Context())
+
+		// Stripping the method to leave only the route
+		_, route, found := strings.Cut(r.Pattern, " ")
+		if found {
+			labeler.Add(semconv.HTTPRoute(route))
+		} else if r.Pattern != "" {
+			labeler.Add(semconv.HTTPRoute(r.Pattern))
+		}
+
+		next.ServeHTTP(w, r)
+	}
 }
 
 // HTTPTransport constructs an instrumented RoundTripper. Add this to an HTTP

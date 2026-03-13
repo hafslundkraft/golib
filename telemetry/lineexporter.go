@@ -168,7 +168,7 @@ func attributeString(set attribute.Set) string {
 		if i > 0 {
 			builder.WriteString(", ")
 		}
-		builder.WriteString(fmt.Sprintf("%s=%s", v.Key, v.Value.AsString()))
+		fmt.Fprintf(&builder, "%s=%s", v.Key, v.Value.AsString())
 	}
 	return builder.String()
 }
