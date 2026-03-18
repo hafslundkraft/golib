@@ -4,6 +4,7 @@ A collection of Hafslund Go libraries.
 
 ## Available Packages
 
+- **[database](./database)** - PostgreSQL connectivity with OAuth token authentication and transaction retry helpers
 - **[identity](./identity)** - Support for fetching OAuth tokens based on K8s service account identity
 - **[kafkarator](./kafkarator)** - Reading/writing messages from Kafka topics, integrated with *telemetry*
 - **[telemetry](./telemetry)** - OpenTelemetry integration providing logging, metrics, and tracing capabilities

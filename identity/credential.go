@@ -6,7 +6,10 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// A Credential is anything that can be used to produce an oauth2.TokenSource
+// A Credential is anything that can be used to produce an oauth2.TokenSource.
+// The provided context is used for the lifetime of the token source (e.g. for
+// HTTP requests during token refresh), so it must not be canceled while the
+// token source is still in use.
 type Credential interface {
 	TokenSource(ctx context.Context, opts ...func(*TokenOptions)) oauth2.TokenSource
 }
