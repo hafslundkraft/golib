@@ -4,9 +4,10 @@ import (
 	"context"
 	"log"
 
+	redpanda "github.com/testcontainers/testcontainers-go/modules/redpanda"
+
 	"github.com/hafslundkraft/golib/kafkarator"
 	"github.com/hafslundkraft/golib/telemetry"
-	redpanda "github.com/testcontainers/testcontainers-go/modules/redpanda"
 )
 
 func startRedpandaContainer(ctx context.Context, redpandaImage string) *redpanda.Container {

@@ -42,7 +42,10 @@ func NewWorkloadCredential() (WorkloadCredential, error) {
 	}, nil
 }
 
-// TokenSource constructs an oauth2.TokenSource that will return a cached or new HAPPI token.
+// TokenSource constructs an oauth2.TokenSource that will return a cached or
+// new HAPPI token. The provided context is retained for the lifetime of the
+// token source and used for HTTP requests during token refresh, so it must
+// not be canceled while the token source is still in use.
 func (w *WorkloadCredential) TokenSource(ctx context.Context, options ...func(*TokenOptions)) oauth2.TokenSource {
 	var opts TokenOptions
 	for _, opt := range options {

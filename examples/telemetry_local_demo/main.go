@@ -14,11 +14,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/hafslundkraft/golib/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/hafslundkraft/golib/telemetry"
 )
 
 func main() {

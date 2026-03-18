@@ -19,7 +19,7 @@ max-len = 120
 sections = [
     "standard",
     "default",
-    "prefix(github.com/HafslundEcoVannkraft)",
+    "prefix(github.com/hafslundkraft)",
     "blank",
     "dot",
     "localmodule",
