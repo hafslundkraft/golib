@@ -10,7 +10,7 @@ jobs:
     outputs:
       modules: ${{ steps.set-modules.outputs.modules }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - id: set-modules
         run: echo "modules=[$(find -type f -name go.mod -printf '"%h",')]" >> $GITHUB_OUTPUT
 
