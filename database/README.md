@@ -99,7 +99,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	pgCfg, err := postgres.NewConfig(os.Getenv, cred,
+	pgCfg, err := postgres.NewConfig(os.Getenv, &cred,
 		postgres.WithTracer(otelpgx.NewTracer(otelpgx.WithTracerProvider(provider.TracerProvider()))),
 	)
 	if err != nil {
