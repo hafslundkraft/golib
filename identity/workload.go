@@ -26,17 +26,17 @@ var _ Credential = (*WorkloadCredential)(nil)
 
 // NewWorkloadCredential creates a new WorkloadCredential based on configuration
 // set by the HAPPI platform in the environment.
-func NewWorkloadCredential() (WorkloadCredential, error) {
+func NewWorkloadCredential() (*WorkloadCredential, error) {
 	clientTokenFilePath := os.Getenv("HAPPI_SERVICE_ACCOUNT_TOKEN_PATH")
 	if clientTokenFilePath == "" {
 		clientTokenFilePath = "/happi/idp-token" //nolint:gosec // This is not a secret
 	}
 	tokenURL := os.Getenv("HAPPI_TOKEN_URL")
 	if tokenURL == "" {
-		return WorkloadCredential{}, fmt.Errorf("HAPPI_TOKEN_URL not set")
+		return nil, fmt.Errorf("HAPPI_TOKEN_URL not set")
 	}
 
-	return WorkloadCredential{
+	return &WorkloadCredential{
 		TokenURL:  tokenURL,
 		TokenFile: clientTokenFilePath,
 	}, nil
