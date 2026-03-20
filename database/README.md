@@ -30,7 +30,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	pgCfg, err := postgres.NewConfig(os.Getenv, cred)
+	pgCfg, err := postgres.NewConfig(os.Getenv, &cred)
 	if err != nil {
 		log.Fatal(err)
 	}
