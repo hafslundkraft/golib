@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/hafslundkraft/golib/identity v0.0.0-20260318125446-f90130442101
-	github.com/jackc/pgx/v5 v5.8.1-0.20260309124523-6e1e9ebdf4b7
+	github.com/jackc/pgx/v5 v5.9.1
 )
 
 require (
