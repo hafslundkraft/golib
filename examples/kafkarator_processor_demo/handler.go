@@ -27,23 +27,14 @@ func (h *messageHandler) handle(
 	msg *kafkarator.Message,
 ) error {
 	// Deserialize the Avro message to get the actual values
-	decoded, err := h.deserializer.Deserialize(ctx, msg.Topic, msg.Value)
-	if err != nil {
+	var decodedMap map[string]any
+	if err := h.deserializer.Deserialize(ctx, msg.Topic, msg.Value, &decodedMap); err != nil {
 		h.logger.ErrorContext(ctx, "Failed to deserialize message", "error", err, "topic", msg.Topic)
 		return fmt.Errorf("deserialize message: %w", err)
 	}
-	if decoded == nil {
+	if decodedMap == nil {
 		h.logger.WarnContext(ctx, "Received nil decoded message", "topic", msg.Topic)
 		return fmt.Errorf("decoded message is nil for topic %s", msg.Topic)
-	}
-
-	decodedMap, ok := decoded.(map[string]any)
-	if !ok {
-		h.logger.WarnContext(ctx, "Decoded message is not a map",
-			"topic", msg.Topic,
-			"type", fmt.Sprintf("%T", decoded),
-		)
-		return fmt.Errorf("decoded message is not a map, got %T", decoded)
 	}
 
 	h.count++
