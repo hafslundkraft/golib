@@ -316,13 +316,12 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, msgs, 1, "expected 1 message")
 
-	decoded, err := deserializer.Deserialize(ctx, topic, msgs[0].Value)
+	var out map[string]any
+	err = deserializer.Deserialize(ctx, topic, msgs[0].Value, &out)
 	require.NoError(t, err)
 
-	decodedMap, ok := decoded.(map[string]interface{})
-	require.True(t, ok, "decoded value should be a map")
-	assert.Equal(t, valueObj["id"], decodedMap["id"])
-	assert.Equal(t, valueObj["ts"], decodedMap["ts"])
+	assert.Equal(t, valueObj["id"], out["id"])
+	assert.Equal(t, valueObj["ts"], out["ts"])
 
 	require.NoError(t, commit(ctx))
 }
