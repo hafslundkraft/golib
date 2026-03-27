@@ -51,7 +51,12 @@ func newAvroDeserializer(
 func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value []byte, out any) error {
 	// Not Avro Confluent framing
 	if len(value) < 5 || value[0] != magicByte {
-		return fmt.Errorf("invalid Avro framing: expected magic byte %d and at least 5 bytes, got %d bytes with first byte %d", magicByte, len(value), value[0])
+		return fmt.Errorf(
+			"invalid Avro framing: expected magic byte %d and at least 5 bytes, got %d bytes with first byte %d",
+			magicByte,
+			len(value),
+			value[0],
+		)
 	}
 
 	schemaID := int(value[1])<<24 | int(value[2])<<16 | int(value[3])<<8 | int(value[4])
