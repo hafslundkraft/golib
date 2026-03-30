@@ -9,8 +9,9 @@ import (
 
 // ValueDeserializer deserializes bytes into domain values
 type ValueDeserializer interface {
-	// Deserialize takes bytes and returns the message deserialized with its given schema
-	Deserialize(ctx context.Context, topic string, value []byte) (any, error)
+	// Deserialize decodes value into out. out must be a non-nil pointer.
+	// If value is not Avro-framed, out is left unchanged and nil is returned.
+	Deserialize(ctx context.Context, topic string, value []byte, out any) error
 }
 
 // AvroDeserializer deserializes values with Avro encoding and the
@@ -40,34 +41,45 @@ func newAvroDeserializer(
 }
 
 // Deserialize deserializes the bytes to a domain value according to its schema
-func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value []byte) (any, error) {
+// Example:
+//
+//	var value MyStruct
+//	err := deserializer.Deserialize(ctx, topic, bytes, &value)
+//	if err != nil {
+//		// handle error
+//	}
+func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value []byte, out any) error {
 	// Not Avro Confluent framing
 	if len(value) < 5 || value[0] != magicByte {
-		return nil, nil
+		return fmt.Errorf(
+			"invalid Avro framing: expected magic byte %d and at least 5 bytes, got %d bytes with first byte %d",
+			magicByte,
+			len(value),
+			value[0],
+		)
 	}
 
 	schemaID := int(value[1])<<24 | int(value[2])<<16 | int(value[3])<<8 | int(value[4])
 	subject, err := defaultSubjectNameProvider(topic)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	info, err := d.srClient.GetBySubjectAndID(ctx, subject, schemaID)
 	if err != nil {
-		return nil, fmt.Errorf("schema registry lookup: %w", err)
+		return fmt.Errorf("schema registry lookup: %w", err)
 	}
 
 	schema, err := d.cache.getOrParse(schemaID, subject, info.Schema)
 	if err != nil {
-		return nil, fmt.Errorf("get or parse schema: %w", err)
+		return fmt.Errorf("get or parse schema: %w", err)
 	}
 
-	var out any
 	payload := value[5:]
 
 	if err := avro.Unmarshal(schema, payload, &out); err != nil {
-		return nil, fmt.Errorf("avro decode failed: %w", err)
+		return fmt.Errorf("avro decode failed: %w", err)
 	}
 
-	return out, nil
+	return nil
 }
