@@ -3,6 +3,7 @@ package kafkarator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
@@ -66,11 +67,8 @@ func TestAvroDeserializer_InvalidMagicByte(t *testing.T) {
 
 	var out map[string]any
 	err := d.Deserialize(ctx, "test-topic", []byte{9, 9, 9}, &out)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out != nil {
-		t.Fatalf("expected nil (non-avro), got %#v", out)
+	if err == nil || !strings.HasPrefix(err.Error(), "invalid Avro framing") {
+		t.Fatalf("expected invalid framing error, got %v", err)
 	}
 }
 
