@@ -1,0 +1,44 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - .github/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Tag changed modules
+        run: |
+          changed_files=$(git diff --name-only ${{ github.event.before }} HEAD)
+
+          for gomod in $(find . -name go.mod -not -path ./examples/go.mod); do
+            module=$(dirname "$gomod" | sed 's|^\./||')
+            if echo "$changed_files" | grep -q "^${module}/"; then
+              latest=$(git tag -l "${module}/v*" --sort=-v:refname | head -1)
+              if [ -z "$latest" ]; then
+                next="${module}/v0.1.0"
+              else
+                version="${latest#${module}/v}"
+                IFS='.' read -r major minor patch <<< "$version"
+                next="${module}/v${major}.${minor}.$((patch + 1))"
+              fi
+              echo "Tagging ${next}"
+              git tag "$next"
+            fi
+          done
+
+          git push --tags
