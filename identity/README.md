@@ -1,5 +1,7 @@
 # identity
 
+![Version](https://img.shields.io/github/v/tag/hafslundkraft/golib?filter=identity/v*&label=version)
+
 Library for fetching OAuth tokens based on K8s service account identity,
 using the RFC 7521 client assertion flow. Assumes to be running on the
 Happi Platform (where it will find the service account token on

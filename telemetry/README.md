@@ -1,5 +1,7 @@
 # telemetry
 
+![Version](https://img.shields.io/github/v/tag/hafslundkraft/golib?filter=telemetry/v*&label=version)
+
 Helper library for setting up OpenTelemetry.
 
 ## Minimal Example

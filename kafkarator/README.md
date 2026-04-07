@@ -1,5 +1,7 @@
 # Kafkarator
 
+![Version](https://img.shields.io/github/v/tag/hafslundkraft/golib?filter=kafkarator/v*&label=version)
+
 A Go library for connecting to and interacting with Kafka services, with support for both TLS-secured and SASL (OAuth) connections.
 
 The reason for you to use this package, instead of just using a library such as `github.com/confluentinc/confluent-kafka-go/v2` (
