@@ -1,5 +1,7 @@
 # database/postgres
 
+![Version](https://img.shields.io/github/v/tag/hafslundkraft/golib?filter=database/v*&label=version)
+
 Library for connecting to PostgreSQL databases on the Happi Platform
 using OAuth token-based authentication. Supports both connection pools
 and single connections, with read-write and read-only host separation.
