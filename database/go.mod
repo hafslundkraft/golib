@@ -3,7 +3,7 @@ module github.com/hafslundkraft/golib/database
 go 1.26.0
 
 require (
-	github.com/hafslundkraft/golib/identity v0.0.0-20260318125446-f90130442101
+	github.com/hafslundkraft/golib/identity v0.1.0
 	github.com/jackc/pgx/v5 v5.9.1
 )
 
