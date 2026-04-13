@@ -1,8 +1,8 @@
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/hafslundkraft/golib/identity v0.0.0-20260318125446-f90130442101 h1:tP5+WseTN0sudMY0h2Nm+PhpOk8vDFN+8CiQZWrPFHk=
-github.com/hafslundkraft/golib/identity v0.0.0-20260318125446-f90130442101/go.mod h1:5Tah88TdXa44e3e1K2Ug6xDmVgTFIsVNonEzA3iJApk=
+github.com/hafslundkraft/golib/identity v0.1.0 h1:Dwm+dJZm3wH9g8JMVOqtt6CCCNUwcXND0QmqaAiTpNg=
+github.com/hafslundkraft/golib/identity v0.1.0/go.mod h1:5Tah88TdXa44e3e1K2Ug6xDmVgTFIsVNonEzA3iJApk=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
