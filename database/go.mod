@@ -3,7 +3,7 @@ module github.com/hafslundkraft/golib/database
 go 1.26.0
 
 require (
-	github.com/hafslundkraft/golib/identity v0.1.0
+	github.com/hafslundkraft/golib/identity v0.1.1
 	github.com/jackc/pgx/v5 v5.9.2
 )
 
@@ -13,5 +13,5 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 )
