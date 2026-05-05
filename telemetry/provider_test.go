@@ -12,7 +12,7 @@ import (
 
 func TestProvider(t *testing.T) {
 	ctx := t.Context()
-	tel, shutdown := New(ctx, "test",
+	tel, shutdown := New(ctx,
 		WithLocal(true),
 		WithAttributes(map[string]string{
 			"app": "test",
@@ -47,7 +47,7 @@ func TestProvider_withLocalWriter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := t.Context()
 		var buf bytes.Buffer
-		tel, shutdown := New(ctx, "test",
+		tel, shutdown := New(ctx,
 			WithLocalWriter(&buf),
 			WithLocalColors(false),
 			WithTestIDGenerator(),
