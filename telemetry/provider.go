@@ -30,8 +30,7 @@ const happiTelemetryName = "happi-telemetry"
 // Provider is the telemetry provider. Contains handles for logging, metrics and
 // traces.
 type Provider struct {
-	propagator  propagation.TextMapPropagator
-	serviceName string
+	propagator propagation.TextMapPropagator
 
 	tracer         trace.Tracer
 	meter          metric.Meter
@@ -60,11 +59,7 @@ func (c config) localWriter() io.Writer {
 //
 // The caller should call the returned shutdown function to make sure remaining
 // data is flushed and resources are freed.
-func New(
-	ctx context.Context,
-	serviceName string,
-	opts ...OptionFunc,
-) (provider *Provider, shutdown func(ctx context.Context) error) {
+func New(ctx context.Context, opts ...OptionFunc) (provider *Provider, shutdown func(ctx context.Context) error) {
 	cfg := config{localColors: true}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -90,7 +85,7 @@ func New(
 
 	propagator := newPropagator()
 
-	logger := otelslog.NewLogger(serviceName, otelslog.WithLoggerProvider(lp))
+	logger := otelslog.NewLogger("github.com/hafslundkraft/golib/telemetry", otelslog.WithLoggerProvider(lp))
 
 	// Sort attribute keys for deterministic ordering
 	keys := make([]string, 0, len(cfg.attributes))
@@ -104,8 +99,7 @@ func New(
 	}
 
 	return &Provider{
-		propagator:  propagator,
-		serviceName: serviceName,
+		propagator: propagator,
 
 		tracerProvider: tp,
 		meterProvider:  mp,

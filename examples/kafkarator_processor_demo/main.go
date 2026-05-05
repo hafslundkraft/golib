@@ -63,7 +63,7 @@ func main() {
 	log.Printf("Redpanda Schema Registry URL: %s", schemaRegistryURL)
 
 	// Setup telemetry (observability)
-	tp, shutdown := telemetry.New(ctx, "kafkarator-demo", telemetry.WithLocal(true))
+	tp, shutdown := telemetry.New(ctx, telemetry.WithLocal(true))
 	defer func() {
 		if err := shutdown(ctx); err != nil {
 			log.Printf("Failed to shutdown telemetry: %v", err)
