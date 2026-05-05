@@ -19,7 +19,7 @@ import (
 func main() {
 	ctx := context.Background()
 	
-	tel, shutdown := telemetry.New(ctx, "my-app-name", telemetry.WithLocal(os.Getenv("ENV") == "local"))
+	tel, shutdown := telemetry.New(ctx, telemetry.WithLocal(os.Getenv("ENV") == "local"))
 	defer shutdown(ctx)
 
 	log := tel.Logger()
