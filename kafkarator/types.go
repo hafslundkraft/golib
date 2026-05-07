@@ -26,8 +26,6 @@ type Message struct {
 	// Value is the actual payload of the message. This is what you want to unmarshal when consuming
 	Value []byte
 
-	Decoded any
-
 	// Headers are keys value header pairs associated with the message.
 	Headers map[string][]byte
 }

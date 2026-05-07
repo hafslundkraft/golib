@@ -192,6 +192,18 @@ func (c *Connection) Deserializer() ValueDeserializer {
 	return newAvroDeserializer(c.srClient, c.tel)
 }
 
+// SchemaRegistryClient returns the underlying Schema Registry client.
+// Useful for sub-packages (e.g. claimcheck) that need direct SR access.
+func (c *Connection) SchemaRegistryClient() SchemaRegistryClient {
+	return c.srClient
+}
+
+// Tracer returns the OpenTelemetry tracer from the connection's TelemetryProvider.
+// Useful for sub-packages (e.g. claimcheck) that need to emit spans.
+func (c *Connection) Tracer() trace.Tracer {
+	return c.tel.Tracer()
+}
+
 // ReaderOption for options to pass to the Reader() function
 type ReaderOption func(*readerOptions) error
 
