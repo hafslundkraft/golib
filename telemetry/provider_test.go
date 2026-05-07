@@ -7,6 +7,7 @@ import (
 	"testing/synctest"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/contrib/processors/minsev"
 	"go.opentelemetry.io/otel/codes"
 )
 
@@ -94,4 +95,28 @@ func TestProvider_withLocalWriter(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestProvider_withMinSeverity(t *testing.T) {
+	ctx := t.Context()
+	var buf bytes.Buffer
+	tel, shutdown := New(ctx,
+		WithLocalWriter(&buf),
+		WithLocalColors(false),
+		WithMinSeverity(minsev.SeverityWarn),
+	)
+
+	log := tel.Logger()
+	log.DebugContext(ctx, "debug-line")
+	log.InfoContext(ctx, "info-line")
+	log.WarnContext(ctx, "warn-line")
+	log.ErrorContext(ctx, "error-line")
+
+	require.NoError(t, shutdown(ctx))
+
+	out := buf.String()
+	require.NotContains(t, out, "debug-line")
+	require.NotContains(t, out, "info-line")
+	require.Contains(t, out, "warn-line")
+	require.Contains(t, out, "error-line")
 }

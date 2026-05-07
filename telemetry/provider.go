@@ -12,6 +12,7 @@ import (
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/processors/minsev"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -46,6 +47,7 @@ type config struct {
 	localColors bool
 	attributes  map[string]string
 	testIDGen   bool
+	minSeverity minsev.Severitier
 }
 
 func (c config) localWriter() io.Writer {
@@ -227,23 +229,19 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 }
 
 func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
-	opts := make([]logsdk.LoggerProviderOption, 0, 2)
+	var proc logsdk.Processor
 	if cfg.local {
-		opts = append(
-			opts,
-			logsdk.WithProcessor(
-				logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()}),
-			),
-		)
+		proc = logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()})
 	} else {
 		otlpLogExporter, err := otlploghttp.New(ctx)
 		if err != nil {
 			panic(err)
 		}
-		opts = append(opts,
-			logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)),
-		)
+		proc = logsdk.NewBatchProcessor(otlpLogExporter)
+	}
+	if cfg.minSeverity != nil {
+		proc = minsev.NewLogProcessor(proc, cfg.minSeverity)
 	}
 
-	return logsdk.NewLoggerProvider(opts...)
+	return logsdk.NewLoggerProvider(logsdk.WithProcessor(proc))
 }
