@@ -25,19 +25,19 @@ import (
 )
 
 const (
-	envHappiSystemName  = "HAPPI_SYSTEM_NAME"
-	envHappiEnv         = "HAPPI_ENV"
-	envIDPIssuerURL     = "HAPPI_IDP_ISSUER_URL"
-	envIDPTokenFile     = "HAPPI_IDP_TOKEN_FILE"
-	envAWSTokenFile     = "AWS_WEB_IDENTITY_TOKEN_FILE"
+	envHappiSystemName = "HAPPI_SYSTEM_NAME"
+	envHappiEnv        = "HAPPI_ENV"
+	envIDPIssuerURL    = "HAPPI_IDP_ISSUER_URL"
+	envIDPTokenFile    = "HAPPI_IDP_TOKEN_FILE"        //nolint:gosec // environment variable name, not a credential
+	envAWSTokenFile    = "AWS_WEB_IDENTITY_TOKEN_FILE" //nolint:gosec // environment variable name, not a credential
 	// envS3Endpoint and envSTSEndpoint are the standard AWS SDK environment
 	// variables injected by the Happi operator to point clients at the
 	// cluster-local Ceph RadosGW endpoint. boto3/botocore reads them
 	// automatically; we do the same here.
 	envS3Endpoint       = "AWS_ENDPOINT_URL_S3"
 	envSTSEndpoint      = "AWS_ENDPOINT_URL_STS"
-	defaultIDPTokenFile = "/happi/idp-token"
-	defaultAWSTokenFile = "/tmp/ceph_token" // #nosec G108 — well-known path on Happi pods
+	defaultIDPTokenFile = "/happi/idp-token" //nolint:gosec // well-known path on Happi pods, not a hardcoded credential
+	defaultAWSTokenFile = "/tmp/ceph_token"  // #nosec G108 — well-known path on Happi pods
 	defaultIDPS3Scope   = "ceph_rgw"
 
 	tokenExpiryMargin      = 60 * time.Second
@@ -61,7 +61,10 @@ func claimCheckRoleARN(system, env, bucket, access string) (string, error) {
 		}
 	}
 	if len(missing) > 0 {
-		return "", fmt.Errorf("claimCheckRoleARN: required argument(s) empty or whitespace: %s", strings.Join(missing, ", "))
+		return "", fmt.Errorf(
+			"claimCheckRoleARN: required argument(s) empty or whitespace: %s",
+			strings.Join(missing, ", "),
+		)
 	}
 	return fmt.Sprintf("arn:aws:iam:::role/happi/%s/%s/%s/%s.%s.%s.%s",
 		system, env, bucket, system, env, bucket, access), nil
@@ -94,7 +97,7 @@ type s3ClientOptions struct {
 //  4. Assumes the role via AssumeRoleWithWebIdentity, refreshing as needed.
 //
 // access should be "rw" for writers or "r" for readers.
-func newS3Client(bucket, access string, opts s3ClientOptions) (S3Client, error) {
+func newS3Client(bucket, access string, opts *s3ClientOptions) (S3Client, error) {
 	system := os.Getenv(envHappiSystemName)
 	env := os.Getenv(envHappiEnv)
 	if strings.TrimSpace(system) == "" {
@@ -201,7 +204,7 @@ func (e *tokenExchanger) ensureFreshToken(ctx context.Context) error {
 // exchangeToken performs the IDP token exchange and writes the AWS token file.
 // Returns the token lifetime.
 func (e *tokenExchanger) exchangeToken(ctx context.Context) (_ time.Duration, retErr error) {
-	_, span := e.tracer.Start(ctx, "idp token exchange",
+	ctx, span := e.tracer.Start(ctx, "idp token exchange",
 		trace.WithSpanKind(trace.SpanKindClient),
 	)
 	defer func() {
@@ -378,7 +381,12 @@ func (p *s3Client) CreateMultipartUpload(ctx context.Context, bucket, key string
 	return aws.ToString(out.UploadId), nil
 }
 
-func (p *s3Client) UploadPart(ctx context.Context, bucket, key, uploadID string, partNumber int, body io.Reader) (string, error) {
+func (p *s3Client) UploadPart(
+	ctx context.Context,
+	bucket, key, uploadID string,
+	partNumber int,
+	body io.Reader,
+) (string, error) {
 	c, err := p.awsClient(ctx)
 	if err != nil {
 		return "", err
@@ -397,7 +405,11 @@ func (p *s3Client) UploadPart(ctx context.Context, bucket, key, uploadID string,
 	return aws.ToString(out.ETag), nil
 }
 
-func (p *s3Client) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []CompletedPart) error {
+func (p *s3Client) CompleteMultipartUpload(
+	ctx context.Context,
+	bucket, key, uploadID string,
+	parts []CompletedPart,
+) error {
 	c, err := p.awsClient(ctx)
 	if err != nil {
 		return err
@@ -510,7 +522,7 @@ func defaultS3WriterFactory() func(bucket string) (S3Writer, error) {
 		if c, ok := cache[bucket]; ok {
 			return c, nil
 		}
-		c, err := newS3Client(bucket, "rw", s3ClientOptions{})
+		c, err := newS3Client(bucket, "rw", &s3ClientOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -522,14 +534,14 @@ func defaultS3WriterFactory() func(bucket string) (S3Writer, error) {
 // defaultS3ReaderFor creates a production S3Reader for the given topic's
 // default bucket. Called when no WithProcessorS3Client option is provided to NewProcessor.
 func defaultS3ReaderFor(topic string) (S3Reader, error) {
-	return newS3Client(DefaultBucketResolver(topic), "r", s3ClientOptions{})
+	return newS3Client(DefaultBucketResolver(topic), "r", &s3ClientOptions{})
 }
 
 // isError is a helper to check for AWS SDK typed errors.
 func isError[T error](err error, target T) bool {
 	// errors.As-style check via interface
 	type asInterface interface {
-		As(any) bool
+		As(target any) bool
 	}
 	if a, ok := any(err).(asInterface); ok {
 		return a.As(&target)

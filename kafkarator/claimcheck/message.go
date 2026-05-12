@@ -2,11 +2,15 @@ package claimcheck
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
 
 	parquet "github.com/parquet-go/parquet-go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Message wraps a raw Kafka message value and provides lazy access
@@ -69,16 +73,34 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 		return func(yield func(T, error) bool) {}
 	}
 	return func(yield func(T, error) bool) {
-		pr, err := m.Payload(ctx)
+		env, err := m.PeekEnvelope(ctx)
 		if err != nil {
 			yield(zero, err)
 			return
 		}
-		defer pr.Close() //nolint:errcheck
+		ctx, span := m.resolver.tracer.Start(ctx, "claim_check resolve "+m.Topic,
+			trace.WithSpanKind(trace.SpanKindClient),
+			trace.WithAttributes(
+				attribute.String("messaging.destination.name", m.Topic),
+				attribute.String("claim_check.batch_id", env.BatchID),
+				attribute.Int64("claim_check.record_count", env.RecordCount),
+				attribute.Int64("claim_check.byte_size", env.ByteSize),
+				attribute.String("claim_check.storage_uri", env.StorageURI),
+			),
+		)
+		defer span.End()
+
+		pr, err := m.Payload(ctx)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			yield(zero, err)
+			return
+		}
+		defer pr.Close() //nolint:errcheck // Close on PayloadReader is a no-op
 
 		r := parquet.NewGenericReader[T](pr)
-
-		defer r.Close() //nolint:errcheck
+		defer r.Close() //nolint:errcheck // parquet.GenericReader.Close flushes nothing on read
 
 		buf := make([]T, 64)
 		for {
@@ -88,7 +110,7 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 					return
 				}
 			}
-			if readErr == io.EOF {
+			if errors.Is(readErr, io.EOF) {
 				return
 			}
 			if readErr != nil {

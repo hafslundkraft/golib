@@ -96,7 +96,7 @@ func TestAvroParquet_Primitives(t *testing.T) {
 
 	t.Run("unknown_primitive_returns_error", func(t *testing.T) {
 		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", `"integer"`)))
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "integer")
 	})
 }
@@ -160,14 +160,14 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 	t.Run("unknown_logical_type_returns_error", func(t *testing.T) {
 		avroType := `{"type":"bytes","logicalType":"decimal","precision":9,"scale":2}`
 		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", avroType)))
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "decimal")
 	})
 
 	t.Run("unknown_logical_type_name_in_error", func(t *testing.T) {
 		avroType := `{"type":"int","logicalType":"custom-type"}`
 		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", avroType)))
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "custom-type")
 	})
 }
@@ -231,9 +231,9 @@ func TestAvroParquet_ComplexTypes(t *testing.T) {
 	})
 
 	t.Run("enum_maps_to_string", func(t *testing.T) {
-		avroEnum := `{"type":"enum","name":"Colour","symbols":["RED","GREEN","BLUE"]}`
-		schema := mustBuildSchema(t, avroRecord(avroField("colour", avroEnum)))
-		f := findField(t, schema, "colour")
+		avroEnum := `{"type":"enum","name":"Color","symbols":["RED","GREEN","BLUE"]}`
+		schema := mustBuildSchema(t, avroRecord(avroField("color", avroEnum)))
+		f := findField(t, schema, "color")
 		assert.Equal(t, "STRING", f.Type().String())
 	})
 
@@ -289,7 +289,7 @@ func TestAvroParquet_Unions(t *testing.T) {
 
 	t.Run("multi_branch_union_returns_error", func(t *testing.T) {
 		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", `["null","string","int"]`)))
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "multi-branch")
 	})
 
@@ -300,7 +300,7 @@ func TestAvroParquet_Unions(t *testing.T) {
 
 	t.Run("multi_branch_union_error_includes_type", func(t *testing.T) {
 		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", `["null","string","long"]`)))
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, strings.ToLower(err.Error()), "multi-branch")
 	})
 }

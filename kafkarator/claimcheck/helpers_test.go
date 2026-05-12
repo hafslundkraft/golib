@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	kafkarator "github.com/hafslundkraft/golib/kafkarator"
-	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 	"github.com/stretchr/testify/require"
+
+	kafkarator "github.com/hafslundkraft/golib/kafkarator"
+
+	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 )
 
 // fakeSchemaFetcher implements SchemaFetcher for tests.
@@ -20,7 +22,10 @@ type fakeSchemaFetcher struct {
 	subject   string // last subject requested
 }
 
-func (f *fakeSchemaFetcher) GetLatestSchema(_ context.Context, subject string) (string, int, int, error) {
+func (f *fakeSchemaFetcher) GetLatestSchema(
+	_ context.Context,
+	subject string,
+) (schemaStr string, version, id int, err error) {
 	f.subject = subject
 	return f.schemaStr, f.version, f.id, nil
 }
@@ -39,7 +44,11 @@ type fakeEnvelopeDeserializer struct {
 	env *claimcheck.Envelope
 }
 
-func (f *fakeEnvelopeDeserializer) DeserializeEnvelope(_ context.Context, _ string, _ []byte) (*claimcheck.Envelope, error) {
+func (f *fakeEnvelopeDeserializer) DeserializeEnvelope(
+	_ context.Context,
+	_ string,
+	_ []byte,
+) (*claimcheck.Envelope, error) {
 	return f.env, nil
 }
 
@@ -59,7 +68,7 @@ func (c *captureKW) Close(_ context.Context) error { return nil }
 type jsonSerializer struct{}
 
 func (j *jsonSerializer) Serialize(_ context.Context, _ string, value any) ([]byte, error) {
-	return json.Marshal(value)
+	return json.Marshal(value) //nolint:wrapcheck — test helper, wrapping adds no value
 }
 
 // unmarshalEnvelope decodes a JSON-serialized envelope captured from a test KafkaWriter.
@@ -71,7 +80,7 @@ func unmarshalEnvelope(t *testing.T, data []byte) *claimcheck.Envelope {
 }
 
 // bucketAndKey splits an s3://bucket/key URI into its two components.
-func bucketAndKey(t *testing.T, storageURI string) (string, string) {
+func bucketAndKey(t *testing.T, storageURI string) (bucket, key string) {
 	t.Helper()
 	trimmed := strings.TrimPrefix(storageURI, "s3://")
 	idx := strings.IndexByte(trimmed, '/')

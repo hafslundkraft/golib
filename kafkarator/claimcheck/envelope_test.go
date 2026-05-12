@@ -17,6 +17,6 @@ func TestClaimCheckRoleARN_CorrectFormat(t *testing.T) {
 
 func TestClaimCheckRoleARN_RejectsEmptyArgs(t *testing.T) {
 	_, err := claimcheck.ClaimCheckRoleARN("", "prod", "bucket", "rw")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "system")
 }

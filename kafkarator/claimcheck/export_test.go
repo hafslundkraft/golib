@@ -22,7 +22,13 @@ type EnvelopeDeserializer = envelopeDeserializer
 
 // NewMessage constructs a Message with an embedded resolver. For use in tests
 // that exercise handler logic without a full [Processor] setup.
-func NewMessage(topic string, key, value []byte, headers map[string][]byte, s3 S3Reader, de EnvelopeDeserializer) *Message {
+func NewMessage(
+	topic string,
+	key, value []byte,
+	headers map[string][]byte,
+	s3 S3Reader,
+	de EnvelopeDeserializer,
+) *Message {
 	return &Message{
 		Topic:    topic,
 		Key:      key,

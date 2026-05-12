@@ -104,11 +104,10 @@ func writeRecords(
 	w, err := claimcheck.NewWriter(conn,
 		claimcheck.WithWriterS3Client(s3),
 	)
-
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
 	}
-	defer w.Close(ctx) //nolint:errcheck
+	defer w.Close(ctx) //nolint:errcheck // close error in defer is intentionally discarded
 
 	batch, err := w.NewBatch(ctx, topic)
 	if err != nil {
@@ -153,13 +152,15 @@ func processMessages(
 	proc, err := claimcheck.NewProcessor(conn, topic, handler.HandleMessage,
 		claimcheck.WithProcessorS3Client(s3),
 	)
-
 	if err != nil {
 		return fmt.Errorf("create processor: %w", err)
 	}
-	defer proc.Close(ctx) //nolint:errcheck
+	defer proc.Close(ctx) //nolint:errcheck // close error in defer is intentionally discarded
 
 	n, err := proc.ProcessNext(ctx)
 	logger.InfoContext(ctx, "ProcessNext done", "envelopes", n)
-	return err
+	if err != nil {
+		return fmt.Errorf("process next: %w", err)
+	}
+	return nil
 }

@@ -82,7 +82,7 @@ func (w *multipartWriter) flushPart() error {
 	return nil
 }
 
-// Complete flushes any remaining buffered bytes and finalises the multipart
+// Complete flushes any remaining buffered bytes and finalizes the multipart
 // upload. Returns the total number of bytes uploaded.
 func (w *multipartWriter) Complete(ctx context.Context) (int64, error) {
 	if err := w.flushPart(); err != nil {
@@ -113,7 +113,14 @@ type stageSession struct {
 	logger  *slog.Logger // never nil
 }
 
-func newStageSession(ctx context.Context, s3 S3Writer, bucket, topic string, partSize int, tracer trace.Tracer, logger *slog.Logger) (*stageSession, context.Context, error) {
+func newStageSession(
+	ctx context.Context,
+	s3 S3Writer,
+	bucket, topic string,
+	partSize int,
+	tracer trace.Tracer,
+	logger *slog.Logger,
+) (*stageSession, context.Context, error) {
 	batchID := uuid.New().String()
 	key := topic + "/" + batchID + ".parquet"
 
@@ -133,10 +140,18 @@ func newStageSession(ctx context.Context, s3 S3Writer, bucket, topic string, par
 		span.End()
 		return nil, ctx, err
 	}
-	return &stageSession{topic: topic, batchID: batchID, s3Key: key, pipe: pipe, span: span}, spanCtx, nil
+	return &stageSession{
+			topic:   topic,
+			batchID: batchID,
+			s3Key:   key,
+			pipe:    pipe,
+			span:    span,
+			logger:  logger,
+		},
+		spanCtx, nil
 }
 
-// complete finalises the S3 multipart upload and builds the Envelope.
+// complete finalizes the S3 multipart upload and builds the Envelope.
 // Must be called after the Parquet writer is closed.
 func (s *stageSession) complete(ctx context.Context, recordCount int64) error {
 	byteSize, err := s.pipe.Complete(ctx)
@@ -167,8 +182,9 @@ func (s *stageSession) abort() {
 	if s.env != nil {
 		// Upload completed successfully before abort was called (e.g. Kafka write
 		// failed after Commit). Best-effort delete to avoid orphaned S3 objects.
-		if err := s.pipe.s3.DeleteObject(context.Background(), s.pipe.bucket, s.s3Key); err != nil {
-			s.logger.Warn("claimcheck: failed to delete orphaned S3 object",
+		ctx := context.Background()
+		if err := s.pipe.s3.DeleteObject(ctx, s.pipe.bucket, s.s3Key); err != nil {
+			s.logger.WarnContext(ctx, "claimcheck: failed to delete orphaned S3 object",
 				"bucket", s.pipe.bucket,
 				"key", s.s3Key,
 				"err", err,
@@ -257,7 +273,11 @@ func withLogger(l *slog.Logger) stagerOption {
 
 // newStagerWithFactory creates a stager that calls factory(bucket) to obtain
 // the S3Writer for each unique bucket.
-func newStagerWithFactory(factory func(bucket string) (S3Writer, error), fetcher SchemaFetcher, opts ...stagerOption) *stager {
+func newStagerWithFactory(
+	factory func(bucket string) (S3Writer, error),
+	fetcher SchemaFetcher,
+	opts ...stagerOption,
+) *stager {
 	st := &stager{
 		s3Factory:      factory,
 		schemaFetcher:  fetcher,

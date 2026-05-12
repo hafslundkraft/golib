@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"testing"
 
@@ -302,7 +303,7 @@ func TestPayloadReader_ReadAtDoesNotMoveSequentialPosition(t *testing.T) {
 
 	buf := make([]R, 10)
 	n, err := r.Read(buf)
-	require.True(t, err == nil || err == io.EOF, "unexpected read error: %v", err)
+	require.True(t, err == nil || errors.Is(err, io.EOF), "unexpected read error: %v", err)
 	assert.Equal(t, 5, n, "all rows should be readable after ReadAt footer reads")
 
 	// Verify that ReadAt for the last byte (footer size check) also still works.

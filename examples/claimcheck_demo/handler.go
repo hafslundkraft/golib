@@ -9,7 +9,6 @@ import (
 )
 
 type messageHandler struct {
-	count  int
 	logger *slog.Logger
 }
 
@@ -19,7 +18,7 @@ func (h *messageHandler) HandleMessage(ctx context.Context, msg *claimcheck.Mess
 		return fmt.Errorf("peek envelope: %w", err)
 	}
 	h.logger.InfoContext(ctx, "Envelope received",
-		"batch_id", meta.BatchID,
+		"batch-id", meta.BatchID,
 		"records", meta.RecordCount,
 		"bytes", meta.ByteSize,
 	)
@@ -29,9 +28,9 @@ func (h *messageHandler) HandleMessage(ctx context.Context, msg *claimcheck.Mess
 			return fmt.Errorf("stream records: %w", err)
 		}
 		h.logger.InfoContext(ctx, "  record",
-			"sensor_id", r.SensorID,
+			"sensor-id", r.SensorID,
 			"value", r.Value,
-			"ts_ms", r.TsMs,
+			"ts-ms", r.TsMs,
 		)
 	}
 	return nil

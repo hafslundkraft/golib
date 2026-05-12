@@ -38,7 +38,7 @@ type Envelope struct {
 	// ByteSize is the total size of the Parquet file in bytes.
 	ByteSize int64 `avro:"byte_size"`
 
-	// CreatedAt is the UTC timestamp at which the batch was finalised,
+	// CreatedAt is the UTC timestamp at which the batch was finalized,
 	// expressed as milliseconds since the Unix epoch.
 	CreatedAt int64 `avro:"created_at"`
 }

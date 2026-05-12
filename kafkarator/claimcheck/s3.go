@@ -6,7 +6,7 @@ import (
 )
 
 // CompletedPart holds the part number and ETag returned by UploadPart,
-// required to finalise a multipart upload.
+// required to finalize a multipart upload.
 type CompletedPart struct {
 	PartNumber int
 	ETag       string
@@ -21,7 +21,12 @@ type S3Writer interface {
 	// UploadPart uploads one part of a multipart upload. The caller is
 	// responsible for reading body exactly once; the implementation must not
 	// buffer the entire body.
-	UploadPart(ctx context.Context, bucket, key, uploadID string, partNumber int, body io.Reader) (etag string, err error)
+	UploadPart(
+		ctx context.Context,
+		bucket, key, uploadID string,
+		partNumber int,
+		body io.Reader,
+	) (etag string, err error)
 
 	// CompleteMultipartUpload assembles all previously uploaded parts into the
 	// final object.

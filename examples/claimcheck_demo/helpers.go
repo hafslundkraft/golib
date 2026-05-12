@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
@@ -80,5 +79,5 @@ func registerPayloadSchema(srURL, payloadSchema string) {
 	if _, err := client.Register(subject, sr.SchemaInfo{Schema: payloadSchema}, false); err != nil {
 		log.Fatalf("failed to register payload schema: %v", err)
 	}
-	fmt.Printf("Payload schema registered under %q\n", subject)
+	log.Printf("Payload schema registered under %q", subject)
 }

@@ -169,7 +169,7 @@ func avroComplexToNode(schema map[string]any) (parquet.Node, error) {
 		return parquet.Map(parquet.String(), valueNode), nil
 
 	case "enum":
-		// Avro enums are serialised as their symbol string.
+		// Avro enums are serialized as their symbol string.
 		return parquet.String(), nil
 
 	case "fixed":

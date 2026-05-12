@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	kafkarator "github.com/hafslundkraft/golib/kafkarator"
 	"go.opentelemetry.io/otel/trace"
+
+	kafkarator "github.com/hafslundkraft/golib/kafkarator"
 )
 
 // deserializer decodes Confluent Avro wire-format bytes into a Go value.
@@ -138,12 +139,19 @@ func NewProcessor(
 
 // ProcessNext processes the next batch of claim-check messages.
 func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
-	return p.processor.ProcessNext(ctx)
+	n, err := p.processor.ProcessNext(ctx)
+	if err != nil {
+		return n, fmt.Errorf("claimcheck: process next: %w", err)
+	}
+	return n, nil
 }
 
 // Close releases the underlying consumer resources.
 func (p *Processor) Close(ctx context.Context) error {
-	return p.processor.Close(ctx)
+	if err := p.processor.Close(ctx); err != nil {
+		return fmt.Errorf("claimcheck: close processor: %w", err)
+	}
+	return nil
 }
 
 type avroDeserializer struct {

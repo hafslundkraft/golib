@@ -2,11 +2,10 @@ package claimcheck
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -43,17 +42,7 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 	if err != nil {
 		return nil, err
 	}
-	spanCtx, span := r.tracer.Start(ctx, "claim_check resolve "+env.Topic,
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			attribute.String("messaging.destination.name", env.Topic),
-			attribute.String("claim_check.batch_id", env.BatchID),
-			attribute.Int64("claim_check.record_count", env.RecordCount),
-			attribute.Int64("claim_check.byte_size", env.ByteSize),
-			attribute.String("claim_check.storage_uri", env.StorageURI),
-		),
-	)
-	return &PayloadReader{ctx: spanCtx, span: span, s3: r.s3, bucket: bucket, key: key, size: env.ByteSize}, nil
+	return &PayloadReader{ctx: ctx, s3: r.s3, bucket: bucket, key: key, size: env.ByteSize}, nil
 }
 
 // PayloadReader provides read access to the raw Parquet bytes of a
@@ -65,8 +54,7 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 // calls are safe and there is no sequential read position to disturb. Close
 // is a no-op because no persistent connection is held between calls.
 type PayloadReader struct {
-	ctx    context.Context //nolint:containedctx — stored to satisfy io.ReaderAt (no ctx param)
-	span   trace.Span
+	ctx    context.Context //nolint:containedctx — stored to satisfy io.ReaderAt which has no ctx parameter
 	s3     S3Reader
 	bucket string
 	key    string
@@ -90,27 +78,25 @@ func (p *PayloadReader) ReadAt(b []byte, off int64) (int, error) {
 	rangeHdr := fmt.Sprintf("bytes=%d-%d", off, end)
 	body, _, err := p.s3.GetObject(p.ctx, p.bucket, p.key, &rangeHdr)
 	if err != nil {
-		p.span.RecordError(err)
-		p.span.SetStatus(codes.Error, err.Error())
 		return 0, fmt.Errorf("claimcheck: ReadAt range-GET %s: %w", rangeHdr, err)
 	}
 	defer body.Close() //nolint:errcheck
 	n, err := io.ReadFull(body, b[:end-off+1])
-	if err == io.ErrUnexpectedEOF {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
 		err = io.EOF
 	}
 	if err == nil && pastEnd {
 		err = io.EOF
 	}
+
 	return n, err
 }
 
 // Size returns the total size of the Parquet file in bytes.
 func (p *PayloadReader) Size() int64 { return p.size }
 
-// Close ends the resolve span. Must be called when the caller is done reading
-// the payload. Safe to call multiple times.
+// Close is a no-op. Must be called when the caller is done reading the
+// payload to satisfy io.Closer. Safe to call multiple times.
 func (p *PayloadReader) Close() error {
-	p.span.End()
 	return nil
 }

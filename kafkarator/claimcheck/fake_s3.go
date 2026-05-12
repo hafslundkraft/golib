@@ -1,6 +1,7 @@
 package claimcheck
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -25,7 +26,7 @@ type fakeUpload struct {
 	parts  map[int][]byte
 }
 
-// NewFakeS3Client returns an initialised FakeS3Client.
+// NewFakeS3Client returns an initialized FakeS3Client.
 func NewFakeS3Client() *FakeS3Client {
 	return &FakeS3Client{
 		Store:   make(map[string][]byte),
@@ -48,7 +49,12 @@ func (f *FakeS3Client) CreateMultipartUpload(_ context.Context, bucket, key stri
 }
 
 // UploadPart implements S3Client.
-func (f *FakeS3Client) UploadPart(_ context.Context, bucket, key, uploadID string, partNumber int, body io.Reader) (string, error) {
+func (f *FakeS3Client) UploadPart(
+	_ context.Context,
+	bucket, key, uploadID string,
+	partNumber int,
+	body io.Reader,
+) (string, error) {
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return "", fmt.Errorf("fake s3: read part body: %w", err)
@@ -64,7 +70,11 @@ func (f *FakeS3Client) UploadPart(_ context.Context, bucket, key, uploadID strin
 }
 
 // CompleteMultipartUpload implements S3Client.
-func (f *FakeS3Client) CompleteMultipartUpload(_ context.Context, bucket, key, uploadID string, parts []CompletedPart) error {
+func (f *FakeS3Client) CompleteMultipartUpload(
+	_ context.Context,
+	bucket, key, uploadID string,
+	parts []CompletedPart,
+) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	u, ok := f.uploads[uploadID]
@@ -115,7 +125,11 @@ func (f *FakeS3Client) DeleteObject(_ context.Context, bucket, key string) error
 }
 
 // GetObject implements S3Client.
-func (f *FakeS3Client) GetObject(_ context.Context, bucket, key string, byteRange *string) (io.ReadCloser, int64, error) {
+func (f *FakeS3Client) GetObject(
+	_ context.Context,
+	bucket, key string,
+	byteRange *string,
+) (io.ReadCloser, int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	data, ok := f.Store[f.storeKey(bucket, key)]
@@ -130,7 +144,7 @@ func (f *FakeS3Client) GetObject(_ context.Context, bucket, key string, byteRang
 		}
 		data = sliced
 	}
-	return io.NopCloser(strings.NewReader(string(data))), fullSize, nil
+	return io.NopCloser(bytes.NewReader(data)), fullSize, nil
 }
 
 // applyByteRange parses an HTTP Range header value such as "bytes=1024-" or

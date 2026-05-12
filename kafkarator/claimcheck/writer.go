@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	kafkarator "github.com/hafslundkraft/golib/kafkarator"
 	parquet "github.com/parquet-go/parquet-go"
 	"go.opentelemetry.io/otel/trace"
+
+	kafkarator "github.com/hafslundkraft/golib/kafkarator"
 )
 
 // serializer serializes a value to Confluent Avro wire-format bytes.
@@ -111,7 +112,10 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 
 // Close closes the underlying Kafka writer.
 func (w *Writer) Close(ctx context.Context) error {
-	return w.kw.Close(ctx)
+	if err := w.kw.Close(ctx); err != nil {
+		return fmt.Errorf("claimcheck: close kafka writer: %w", err)
+	}
+	return nil
 }
 
 // BatchOption configures a single Batch call.
@@ -133,7 +137,7 @@ func WithBatchHeaders(headers map[string][]byte) BatchOption {
 }
 
 // Batch is an open write session returned by [Writer.NewBatch]. Write records
-// into it, then call Produce to finalise the S3 upload and produce the envelope
+// into it, then call Produce to finalize the S3 upload and produce the envelope
 // to Kafka, or Cleanup to discard without producing.
 //
 // Records can be any Go value whose fields map to the Avro schema registered
@@ -175,7 +179,7 @@ func (b *Batch) flushRowGroup() error {
 	return nil
 }
 
-// Produce finalises the Parquet upload and produces the envelope to Kafka.
+// Produce finalizes the Parquet upload and produces the envelope to Kafka.
 // Returns an error if called on a closed batch.
 func (b *Batch) Produce(ctx context.Context) error {
 	if b.done {
@@ -270,7 +274,10 @@ func newSRSchemaFetcher(client kafkarator.SchemaRegistryClient) SchemaFetcher {
 	return &srSchemaFetcher{client: client}
 }
 
-func (f *srSchemaFetcher) GetLatestSchema(ctx context.Context, subject string) (string, int, int, error) {
+func (f *srSchemaFetcher) GetLatestSchema(
+	ctx context.Context,
+	subject string,
+) (schemaStr string, version, id int, err error) {
 	meta, err := f.client.GetLatestSchemaMetadata(ctx, subject)
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("claimcheck: schema registry GetLatestSchemaMetadata(%q): %w", subject, err)
