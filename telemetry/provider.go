@@ -229,19 +229,32 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 }
 
 func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
-	var proc logsdk.Processor
+	var processors []logsdk.Processor
 	if cfg.local {
-		proc = logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()})
+		processors = append(processors, logsdk.NewBatchProcessor(&LineLogExporter{
+			Colors: cfg.localColors,
+			w:      cfg.localWriter(),
+		}))
 	} else {
 		otlpLogExporter, err := otlploghttp.New(ctx)
 		if err != nil {
 			panic(err)
 		}
-		proc = logsdk.NewBatchProcessor(otlpLogExporter)
-	}
-	if cfg.minSeverity != nil {
-		proc = minsev.NewLogProcessor(proc, cfg.minSeverity)
+		processors = append(processors,
+			logsdk.NewBatchProcessor(otlpLogExporter),
+			logsdk.NewBatchProcessor(&LineLogExporter{
+				IncludeViaMarker: true,
+				w:                cfg.localWriter(),
+			}),
+		)
 	}
 
-	return logsdk.NewLoggerProvider(logsdk.WithProcessor(proc))
+	opts := make([]logsdk.LoggerProviderOption, 0, len(processors))
+	for _, p := range processors {
+		if cfg.minSeverity != nil {
+			p = minsev.NewLogProcessor(p, cfg.minSeverity)
+		}
+		opts = append(opts, logsdk.WithProcessor(p))
+	}
+	return logsdk.NewLoggerProvider(opts...)
 }

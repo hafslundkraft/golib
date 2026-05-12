@@ -94,6 +94,8 @@ func TestProvider_withLocalWriter(t *testing.T) {
 				t.Errorf("Expected log to contain %q, but it did not. Full log:\n%s", e, loggedContent)
 			}
 		}
+		require.NotContains(t, string(loggedContent), "happi.via",
+			"local mode should not emit the stdout dedup marker")
 	})
 }
 
