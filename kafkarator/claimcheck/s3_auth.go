@@ -483,6 +483,21 @@ func (p *s3Client) GetObject(ctx context.Context, bucket, key string, byteRange 
 	return out.Body, aws.ToInt64(out.ContentLength), nil
 }
 
+func (p *s3Client) DeleteObject(ctx context.Context, bucket, key string) error {
+	c, err := p.awsClient(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.DeleteObject(ctx, &awss3.DeleteObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	if err != nil && !isError(err, &types.NoSuchKey{}) {
+		return fmt.Errorf("claimcheck: DeleteObject: %w", err)
+	}
+	return nil
+}
+
 // defaultS3WriterFactory returns a caching factory that creates a production
 // S3Writer for each unique bucket on first use. Called when no WithWriterS3Client
 // option is provided to NewWriter.

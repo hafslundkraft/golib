@@ -204,6 +204,12 @@ func (c *Connection) Tracer() trace.Tracer {
 	return c.tel.Tracer()
 }
 
+// Logger returns the slog.Logger from the connection's TelemetryProvider.
+// Useful for sub-packages (e.g. claimcheck) that need structured logging.
+func (c *Connection) Logger() *slog.Logger {
+	return c.tel.Logger()
+}
+
 // ReaderOption for options to pass to the Reader() function
 type ReaderOption func(*readerOptions) error
 

@@ -106,6 +106,14 @@ func (f *FakeS3Client) PutObject(_ context.Context, bucket, key string, body io.
 	return nil
 }
 
+// DeleteObject implements S3Client.
+func (f *FakeS3Client) DeleteObject(_ context.Context, bucket, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.Store, f.storeKey(bucket, key))
+	return nil
+}
+
 // GetObject implements S3Client.
 func (f *FakeS3Client) GetObject(_ context.Context, bucket, key string, byteRange *string) (io.ReadCloser, int64, error) {
 	f.mu.Lock()

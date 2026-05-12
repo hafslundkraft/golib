@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -108,10 +109,11 @@ type stageSession struct {
 	s3Key   string
 	pipe    *multipartWriter
 	env     *Envelope
-	span    trace.Span // may be a no-op span
+	span    trace.Span   // may be a no-op span
+	logger  *slog.Logger // never nil
 }
 
-func newStageSession(ctx context.Context, s3 S3Writer, bucket, topic string, partSize int, tracer trace.Tracer) (*stageSession, context.Context, error) {
+func newStageSession(ctx context.Context, s3 S3Writer, bucket, topic string, partSize int, tracer trace.Tracer, logger *slog.Logger) (*stageSession, context.Context, error) {
 	batchID := uuid.New().String()
 	key := topic + "/" + batchID + ".parquet"
 
@@ -162,7 +164,19 @@ func (s *stageSession) complete(ctx context.Context, recordCount int64) error {
 }
 
 func (s *stageSession) abort() {
-	s.pipe.Abort()
+	if s.env != nil {
+		// Upload completed successfully before abort was called (e.g. Kafka write
+		// failed after Commit). Best-effort delete to avoid orphaned S3 objects.
+		if err := s.pipe.s3.DeleteObject(context.Background(), s.pipe.bucket, s.s3Key); err != nil {
+			s.logger.Warn("claimcheck: failed to delete orphaned S3 object",
+				"bucket", s.pipe.bucket,
+				"key", s.s3Key,
+				"err", err,
+			)
+		}
+	} else {
+		s.pipe.Abort()
+	}
 	s.span.SetStatus(codes.Error, "batch aborted")
 	s.span.End()
 }
@@ -200,6 +214,7 @@ type stager struct {
 	rowGroupSize   int
 	partSize       int
 	tracer         trace.Tracer
+	logger         *slog.Logger
 }
 
 type stagerOption func(*stager)
@@ -232,6 +247,14 @@ func withTracer(t trace.Tracer) stagerOption {
 	}
 }
 
+func withLogger(l *slog.Logger) stagerOption {
+	return func(s *stager) {
+		if l != nil {
+			s.logger = l
+		}
+	}
+}
+
 // newStagerWithFactory creates a stager that calls factory(bucket) to obtain
 // the S3Writer for each unique bucket.
 func newStagerWithFactory(factory func(bucket string) (S3Writer, error), fetcher SchemaFetcher, opts ...stagerOption) *stager {
@@ -242,6 +265,7 @@ func newStagerWithFactory(factory func(bucket string) (S3Writer, error), fetcher
 		rowGroupSize:   defaultRowGroupSize,
 		partSize:       minPartSize,
 		tracer:         nooptrace.NewTracerProvider().Tracer(""),
+		logger:         slog.Default(),
 	}
 	for _, o := range opts {
 		o(st)
@@ -276,7 +300,7 @@ func (s *stager) stage(ctx context.Context, topic string) (*stageSession, *parqu
 		return nil, nil, fmt.Errorf("claimcheck: create S3 writer for bucket %q: %w", bucket, err)
 	}
 
-	sess, _, err := newStageSession(ctx, s3, bucket, topic, s.partSize, s.tracer)
+	sess, _, err := newStageSession(ctx, s3, bucket, topic, s.partSize, s.tracer, s.logger)
 	if err != nil {
 		return nil, nil, err
 	}

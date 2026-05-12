@@ -29,10 +29,10 @@ func TestMultipartWriter_CompleteFlushesSmallPayload(t *testing.T) {
 
 	batch, err := w.NewBatch(context.Background(), "test-topic")
 	require.NoError(t, err)
-	defer batch.Abort()
+	defer batch.Cleanup()
 
 	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
-	require.NoError(t, batch.Commit(context.Background()))
+	require.NoError(t, batch.Produce(context.Background()))
 
 	env := unmarshalEnvelope(t, kw.last.Value)
 	assert.Equal(t, "test-topic", env.Topic)
@@ -57,7 +57,7 @@ func TestMultipartWriter_AbortLeavesNoObject(t *testing.T) {
 	batch, err := w.NewBatch(context.Background(), "abort-topic")
 	require.NoError(t, err)
 	require.NoError(t, batch.Write(map[string]any{"id": int32(99)}))
-	batch.Abort()
+	batch.Cleanup()
 
 	assert.Empty(t, s3.Store, "abort must leave no object in store")
 }
@@ -80,7 +80,7 @@ func TestStager_UsesPayloadSubject(t *testing.T) {
 
 	batch, err := w.NewBatch(context.Background(), "demo-topic")
 	require.NoError(t, err)
-	batch.Abort()
+	batch.Cleanup()
 
 	assert.Equal(t, "demo-topic-claim-check-payload", fetcher.subject)
 }
@@ -102,12 +102,12 @@ func TestStager_BucketDerivedFromResolver(t *testing.T) {
 
 	batch, err := w.NewBatch(context.Background(), topic)
 	require.NoError(t, err)
-	batch.Abort()
+	batch.Cleanup()
 
 	assert.Equal(t, expected, capturedBucket)
 }
 
-func TestBatch_WriteCommitAndReadRecords(t *testing.T) {
+func TestBatch_WriteProduceAndReadRecords(t *testing.T) {
 	type Event struct {
 		ID   int32  `parquet:"id"`
 		Name string `parquet:"name"`
@@ -124,13 +124,13 @@ func TestBatch_WriteCommitAndReadRecords(t *testing.T) {
 
 	batch, err := w.NewBatch(context.Background(), topic)
 	require.NoError(t, err)
-	defer batch.Abort()
+	defer batch.Cleanup()
 
 	input := []Event{{1, "alice"}, {2, "bob"}, {3, "carol"}}
 	for _, r := range input {
 		require.NoError(t, batch.Write(r))
 	}
-	require.NoError(t, batch.Commit(context.Background()))
+	require.NoError(t, batch.Produce(context.Background()))
 
 	env := unmarshalEnvelope(t, kw.last.Value)
 	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
@@ -158,10 +158,10 @@ func TestBatch_KeyAndHeadersPropagated(t *testing.T) {
 		claimcheck.WithBatchHeaders(map[string][]byte{"x-source": []byte("test")}),
 	)
 	require.NoError(t, err)
-	defer batch.Abort()
+	defer batch.Cleanup()
 
 	require.NoError(t, batch.Write(map[string]any{"v": int32(42)}))
-	require.NoError(t, batch.Commit(context.Background()))
+	require.NoError(t, batch.Produce(context.Background()))
 
 	assert.Equal(t, []byte("my-key"), kw.last.Key)
 	assert.Equal(t, []byte("test"), kw.last.Headers["x-source"])
@@ -183,7 +183,7 @@ func TestBatch_FlushesMultipleRowGroups(t *testing.T) {
 	for i := range 6 {
 		require.NoError(t, batch.Write(map[string]any{"id": int32(i)}))
 	}
-	require.NoError(t, batch.Commit(context.Background()))
+	require.NoError(t, batch.Produce(context.Background()))
 
 	env := unmarshalEnvelope(t, kw.last.Value)
 	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
@@ -215,7 +215,7 @@ func TestBatch_ParquetFooterEmbeddsAvroMetadata(t *testing.T) {
 	batch, err := w.NewBatch(context.Background(), topic)
 	require.NoError(t, err)
 	require.NoError(t, batch.Write(map[string]any{"v": int64(42)}))
-	require.NoError(t, batch.Commit(context.Background()))
+	require.NoError(t, batch.Produce(context.Background()))
 
 	env := unmarshalEnvelope(t, kw.last.Value)
 	bucket, key := bucketAndKey(t, env.StorageURI)
@@ -232,7 +232,7 @@ func TestBatch_ParquetFooterEmbeddsAvroMetadata(t *testing.T) {
 	assert.Equal(t, "55", kv["avro.schema.id"])
 }
 
-func TestBatch_CommitAfterAbortReturnsError(t *testing.T) {
+func TestBatch_ProduceAfterCleanupReturnsError(t *testing.T) {
 	s3 := claimcheck.NewFakeS3Client()
 	w := claimcheck.NewTestWriter(&captureKW{}, &jsonSerializer{},
 		claimcheck.WithWriterS3Client(s3),
@@ -242,12 +242,12 @@ func TestBatch_CommitAfterAbortReturnsError(t *testing.T) {
 	batch, err := w.NewBatch(context.Background(), "double-close")
 	require.NoError(t, err)
 
-	batch.Abort()
-	assert.Error(t, batch.Commit(context.Background()))
+	batch.Cleanup()
+	assert.Error(t, batch.Produce(context.Background()))
 }
 
-func TestBatch_AbortAfterCommitIsNoop(t *testing.T) {
-	// The idiomatic pattern is `defer batch.Abort()` — must be silent after a successful Commit.
+func TestBatch_CleanupAfterProduceIsNoop(t *testing.T) {
+	// The idiomatic pattern is `defer batch.Cleanup()` — must be silent after a successful Produce.
 	s3 := claimcheck.NewFakeS3Client()
 	w := claimcheck.NewTestWriter(&captureKW{}, &jsonSerializer{},
 		claimcheck.WithWriterS3Client(s3),
@@ -256,10 +256,10 @@ func TestBatch_AbortAfterCommitIsNoop(t *testing.T) {
 
 	batch, err := w.NewBatch(context.Background(), "noop-abort")
 	require.NoError(t, err)
-	defer batch.Abort()
+	defer batch.Cleanup()
 
 	require.NoError(t, batch.Write(map[string]any{"v": int32(1)}))
-	require.NoError(t, batch.Commit(context.Background()))
+	require.NoError(t, batch.Produce(context.Background()))
 }
 
 // TestPayloadReader_ReadAtDoesNotMoveSequentialPosition verifies that
@@ -283,7 +283,7 @@ func TestPayloadReader_ReadAtDoesNotMoveSequentialPosition(t *testing.T) {
 	for i := range 5 {
 		require.NoError(t, batch.Write(map[string]any{"id": int32(i)}))
 	}
-	require.NoError(t, batch.Commit(context.Background()))
+	require.NoError(t, batch.Produce(context.Background()))
 
 	env := unmarshalEnvelope(t, kw.last.Value)
 	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})

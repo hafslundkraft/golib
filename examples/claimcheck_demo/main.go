@@ -101,10 +101,10 @@ func writeRecords(
 	s3 claimcheck.S3Client,
 	logger *slog.Logger,
 ) error {
-	w, err := claimcheck.NewWriter(conn, 
+	w, err := claimcheck.NewWriter(conn,
 		claimcheck.WithWriterS3Client(s3),
 	)
-	
+
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
 	}
@@ -114,7 +114,7 @@ func writeRecords(
 	if err != nil {
 		return fmt.Errorf("open batch: %w", err)
 	}
-	defer batch.Abort() // no-op after a successful Commit
+	defer batch.Cleanup() // no-op after a successful Commit
 
 	now := time.Now().UnixMilli()
 	readings := []SensorReading{
@@ -131,7 +131,7 @@ func writeRecords(
 		}
 	}
 
-	if err := batch.Commit(ctx); err != nil {
+	if err := batch.Produce(ctx); err != nil {
 		return fmt.Errorf("commit batch: %w", err)
 	}
 

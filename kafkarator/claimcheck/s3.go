@@ -34,6 +34,10 @@ type S3Writer interface {
 	// PutObject stores body as a single object. Used for small payloads that
 	// do not require multipart upload.
 	PutObject(ctx context.Context, bucket, key string, body io.Reader) error
+
+	// DeleteObject deletes the object at key from bucket. Implementations must
+	// not return an error if the object does not exist.
+	DeleteObject(ctx context.Context, bucket, key string) error
 }
 
 // S3Reader is the read-side object-storage interface required by the claim-check

@@ -103,8 +103,8 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: create kafka writer: %w", err)
 	}
-	// Inject the connection's tracer as the default; callers can override with WithWriterTracer.
-	cfg.stagerOpts = append([]stagerOption{withTracer(conn.Tracer())}, cfg.stagerOpts...)
+	// Inject the connection's tracer and logger as defaults; callers can override with WithWriterTracer.
+	cfg.stagerOpts = append([]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger())}, cfg.stagerOpts...)
 	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, cfg.stagerOpts...)
 	return &Writer{kw: kw, ser: conn.Serializer(), stager: stager}, nil
 }
@@ -133,8 +133,8 @@ func WithBatchHeaders(headers map[string][]byte) BatchOption {
 }
 
 // Batch is an open write session returned by [Writer.NewBatch]. Write records
-// into it, then call Commit to flush to S3 and produce the envelope to Kafka,
-// or Abort to discard.
+// into it, then call Produce to finalise the S3 upload and produce the envelope
+// to Kafka, or Cleanup to discard without producing.
 //
 // Records can be any Go value whose fields map to the Avro schema registered
 // in Schema Registry — either a concrete struct with parquet field tags, or a
@@ -175,9 +175,9 @@ func (b *Batch) flushRowGroup() error {
 	return nil
 }
 
-// Commit finalises the Parquet upload and produces the envelope to Kafka.
-// Returns an error if the batch was already committed or aborted.
-func (b *Batch) Commit(ctx context.Context) error {
+// Produce finalises the Parquet upload and produces the envelope to Kafka.
+// Returns an error if called on a closed batch.
+func (b *Batch) Produce(ctx context.Context) error {
 	if b.done {
 		return fmt.Errorf("claimcheck: batch already closed")
 	}
@@ -201,16 +201,22 @@ func (b *Batch) Commit(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("claimcheck: serialize envelope: %w", err)
 	}
-	return b.writer.kw.Write(ctx, &kafkarator.Message{
+	if err := b.writer.kw.Write(ctx, &kafkarator.Message{
 		Topic:   b.topic,
 		Key:     b.cfg.key,
 		Headers: b.cfg.headers,
 		Value:   value,
-	})
+	}); err != nil {
+		b.sess.abort()
+		return fmt.Errorf("claimcheck: write kafka message: %w", err)
+	}
+	return nil
 }
 
-// Abort discards the batch. Safe to call after a successful Commit (no-op).
-func (b *Batch) Abort() {
+// Cleanup aborts the S3 upload and discards the batch without producing to Kafka.
+// Safe to call after a successful Commit — no-op if the batch is already closed.
+// Intended for use with defer to ensure resources are released on error paths.
+func (b *Batch) Cleanup() {
 	if b.done {
 		return
 	}
@@ -228,11 +234,11 @@ func (b *Batch) Abort() {
 //
 //	batch, err := w.NewBatch(ctx, topic)
 //	if err != nil { ... }
-//	defer batch.Abort()
+//	defer batch.Cleanup()
 //	for _, r := range readings {
 //	    if err := batch.Write(r); err != nil { return err }
 //	}
-//	return batch.Commit(ctx)
+//	return batch.Produce(ctx)
 //
 // Options:
 //   - [WithBatchKey] — set the Kafka message key on the envelope
