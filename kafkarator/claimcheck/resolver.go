@@ -54,7 +54,7 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 // calls are safe and there is no sequential read position to disturb. Close
 // is a no-op because no persistent connection is held between calls.
 type PayloadReader struct {
-	ctx    context.Context //nolint:containedctx — stored to satisfy io.ReaderAt which has no ctx parameter
+	ctx    context.Context //nolint:containedctx // stored to satisfy io.ReaderAt which has no ctx parameter
 	s3     S3Reader
 	bucket string
 	key    string
@@ -80,7 +80,7 @@ func (p *PayloadReader) ReadAt(b []byte, off int64) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("claimcheck: ReadAt range-GET %s: %w", rangeHdr, err)
 	}
-	defer body.Close() //nolint:errcheck
+	defer body.Close() //nolint:errcheck // body is a bounded range-GET response; close error is non-actionable
 	n, err := io.ReadFull(body, b[:end-off+1])
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		err = io.EOF

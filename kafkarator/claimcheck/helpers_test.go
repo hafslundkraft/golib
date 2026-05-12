@@ -68,7 +68,7 @@ func (c *captureKW) Close(_ context.Context) error { return nil }
 type jsonSerializer struct{}
 
 func (j *jsonSerializer) Serialize(_ context.Context, _ string, value any) ([]byte, error) {
-	return json.Marshal(value) //nolint:wrapcheck — test helper, wrapping adds no value
+	return json.Marshal(value) //nolint:wrapcheck // test helper, wrapping adds no value
 }
 
 // unmarshalEnvelope decodes a JSON-serialized envelope captured from a test KafkaWriter.

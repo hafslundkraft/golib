@@ -27,7 +27,7 @@ const (
 // parts whenever the buffer reaches partSize. The full Parquet file is never
 // held entirely in memory.
 type multipartWriter struct {
-	ctx        context.Context //nolint:containedctx — stored to satisfy io.Writer (no ctx param)
+	ctx        context.Context //nolint:containedctx // stored to satisfy io.Writer which has no ctx parameter
 	s3         S3Writer
 	bucket     string
 	key        string
