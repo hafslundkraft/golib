@@ -185,11 +185,19 @@ func (l LineMetricExporter) Shutdown(ctx context.Context) error {
 
 var _ metricsdk.Exporter = (*LineMetricExporter)(nil)
 
+// stdoutViaMarker is the attribute appended to log lines emitted to stdout
+// alongside the OTLP path. The otel collector's stdout-scraping pipeline can
+// filter on this to drop duplicates of records already delivered via OTLP.
+const stdoutViaMarker = `happi.via="stdout"`
+
 // LineLogExporter is an OpenTelemetry log exporter that prints log lines to
 // STDOUT. Useful for local testing.
 type LineLogExporter struct {
 	Colors bool
-	w      io.Writer
+	// IncludeViaMarker appends happi.via="stdout" to every line. Set when the
+	// exporter runs alongside an OTLP exporter so the collector can dedup.
+	IncludeViaMarker bool
+	w                io.Writer
 }
 
 // Export takes a slice of log records and prints them to STDOUT
@@ -216,6 +224,9 @@ func (l *LineLogExporter) Export(ctx context.Context, records []logsdk.Record) e
 			line = fmt.Sprintf("%s %s=%q", line, kv.Key, kv.Value)
 			return true
 		})
+		if l.IncludeViaMarker {
+			line = line + " " + stdoutViaMarker
+		}
 		fmt.Fprintln(l.w, line)
 	}
 	return nil
