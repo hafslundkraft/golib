@@ -18,10 +18,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/hafslundkraft/golib/examples/internal/demohelpers"
 	"github.com/hafslundkraft/golib/kafkarator"
 	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 	"github.com/hafslundkraft/golib/telemetry"
+
+	"github.com/hafslundkraft/golib/examples/internal/demohelpers"
 )
 
 // payloadSchema is the Avro schema for the records we write as the payload.

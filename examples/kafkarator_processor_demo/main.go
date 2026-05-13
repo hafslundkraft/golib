@@ -16,9 +16,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/hafslundkraft/golib/examples/internal/demohelpers"
 	"github.com/hafslundkraft/golib/kafkarator"
 	"github.com/hafslundkraft/golib/telemetry"
+
+	"github.com/hafslundkraft/golib/examples/internal/demohelpers"
 )
 
 const (
