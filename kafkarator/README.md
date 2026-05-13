@@ -177,9 +177,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-tel, _ := telemetry.New(
-    ctx, "my-service"
-    )
+tel, _ := telemetry.New(ctx)
 
 conn, err := kafkarator.NewConnection(config, telemetryProvider)
 if err != nil {

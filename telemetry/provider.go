@@ -12,6 +12,7 @@ import (
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/processors/minsev"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -30,8 +31,7 @@ const happiTelemetryName = "happi-telemetry"
 // Provider is the telemetry provider. Contains handles for logging, metrics and
 // traces.
 type Provider struct {
-	propagator  propagation.TextMapPropagator
-	serviceName string
+	propagator propagation.TextMapPropagator
 
 	tracer         trace.Tracer
 	meter          metric.Meter
@@ -47,6 +47,7 @@ type config struct {
 	localColors bool
 	attributes  map[string]string
 	testIDGen   bool
+	minSeverity minsev.Severitier
 }
 
 func (c config) localWriter() io.Writer {
@@ -60,11 +61,7 @@ func (c config) localWriter() io.Writer {
 //
 // The caller should call the returned shutdown function to make sure remaining
 // data is flushed and resources are freed.
-func New(
-	ctx context.Context,
-	serviceName string,
-	opts ...OptionFunc,
-) (provider *Provider, shutdown func(ctx context.Context) error) {
+func New(ctx context.Context, opts ...OptionFunc) (provider *Provider, shutdown func(ctx context.Context) error) {
 	cfg := config{localColors: true}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -90,7 +87,7 @@ func New(
 
 	propagator := newPropagator()
 
-	logger := otelslog.NewLogger(serviceName, otelslog.WithLoggerProvider(lp))
+	logger := otelslog.NewLogger("github.com/hafslundkraft/golib/telemetry", otelslog.WithLoggerProvider(lp))
 
 	// Sort attribute keys for deterministic ordering
 	keys := make([]string, 0, len(cfg.attributes))
@@ -104,8 +101,7 @@ func New(
 	}
 
 	return &Provider{
-		propagator:  propagator,
-		serviceName: serviceName,
+		propagator: propagator,
 
 		tracerProvider: tp,
 		meterProvider:  mp,
@@ -233,23 +229,32 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 }
 
 func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
-	opts := make([]logsdk.LoggerProviderOption, 0, 2)
+	var processors []logsdk.Processor
 	if cfg.local {
-		opts = append(
-			opts,
-			logsdk.WithProcessor(
-				logsdk.NewBatchProcessor(&LineLogExporter{Colors: cfg.localColors, w: cfg.localWriter()}),
-			),
-		)
+		processors = append(processors, logsdk.NewBatchProcessor(&LineLogExporter{
+			Colors: cfg.localColors,
+			w:      cfg.localWriter(),
+		}))
 	} else {
 		otlpLogExporter, err := otlploghttp.New(ctx)
 		if err != nil {
 			panic(err)
 		}
-		opts = append(opts,
-			logsdk.WithProcessor(logsdk.NewBatchProcessor(otlpLogExporter)),
+		processors = append(processors,
+			logsdk.NewBatchProcessor(otlpLogExporter),
+			logsdk.NewBatchProcessor(&LineLogExporter{
+				IncludeViaMarker: true,
+				w:                cfg.localWriter(),
+			}),
 		)
 	}
 
+	opts := make([]logsdk.LoggerProviderOption, 0, len(processors))
+	for _, p := range processors {
+		if cfg.minSeverity != nil {
+			p = minsev.NewLogProcessor(p, cfg.minSeverity)
+		}
+		opts = append(opts, logsdk.WithProcessor(p))
+	}
 	return logsdk.NewLoggerProvider(opts...)
 }

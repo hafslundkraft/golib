@@ -1,6 +1,10 @@
 package telemetry
 
-import "io"
+import (
+	"io"
+
+	"go.opentelemetry.io/contrib/processors/minsev"
+)
 
 // OptionFunc is a function that configures the telemetry provider.
 type OptionFunc func(*config)
@@ -43,5 +47,14 @@ func WithAttributes(attrs map[string]string) OptionFunc {
 func WithTestIDGenerator() OptionFunc {
 	return func(c *config) {
 		c.testIDGen = true
+	}
+}
+
+// WithMinSeverity drops log records below the given severity. Pass a
+// [minsev.Severity] for a static threshold, or a *[minsev.SeverityVar] to
+// adjust it at runtime. If unset, no filtering is applied.
+func WithMinSeverity(s minsev.Severitier) OptionFunc {
+	return func(c *config) {
+		c.minSeverity = s
 	}
 }

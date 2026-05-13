@@ -93,7 +93,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	provider, shutdown := telemetry.New(ctx, "my-service")
+	provider, shutdown := telemetry.New(ctx)
 	defer shutdown(ctx)
 
 	cred, err := identity.NewWorkloadCredential()

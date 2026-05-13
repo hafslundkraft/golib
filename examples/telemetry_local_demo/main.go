@@ -29,11 +29,7 @@ func main() {
 	// SETUP: Create telemetry provider
 	// ========================================
 	// WithLocal(true) prints all telemetry to console instead of sending to a backend
-	tp, shutdown := telemetry.New(
-		ctx,
-		"telemetry-demo",
-		telemetry.WithLocal(true),
-	)
+	tp, shutdown := telemetry.New(ctx, telemetry.WithLocal(true))
 	defer func() {
 		if err := shutdown(ctx); err != nil {
 			log.Printf("Failed to shutdown telemetry: %v\n", err)
