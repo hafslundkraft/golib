@@ -218,7 +218,7 @@ func (b *Batch) Produce(ctx context.Context) error {
 }
 
 // Cleanup aborts the S3 upload and discards the batch without producing to Kafka.
-// Safe to call after a successful Commit — no-op if the batch is already closed.
+// Safe to call after a successful Produce — no-op if the batch is already closed.
 // Intended for use with defer to ensure resources are released on error paths.
 func (b *Batch) Cleanup() {
 	if b.done {
