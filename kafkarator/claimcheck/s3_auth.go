@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -539,12 +540,5 @@ func defaultS3ReaderFor(topic string) (S3Reader, error) {
 
 // isError is a helper to check for AWS SDK typed errors.
 func isError[T error](err error, target T) bool {
-	// errors.As-style check via interface
-	type asInterface interface {
-		As(target any) bool
-	}
-	if a, ok := any(err).(asInterface); ok {
-		return a.As(&target)
-	}
-	return false
+	return errors.As(err, &target)
 }

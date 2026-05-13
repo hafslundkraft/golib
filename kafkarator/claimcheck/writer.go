@@ -180,7 +180,8 @@ func (b *Batch) flushRowGroup() error {
 }
 
 // Produce finalizes the Parquet upload and produces the envelope to Kafka.
-// Returns an error if called on a closed batch.
+// On any error the batch is permanently closed and cannot be retried; obtain a
+// new batch via [Writer.NewBatch]. Calling Produce more than once returns an error.
 func (b *Batch) Produce(ctx context.Context) error {
 	if b.done {
 		return fmt.Errorf("claimcheck: batch already closed")
@@ -197,14 +198,19 @@ func (b *Batch) Produce(ctx context.Context) error {
 	if err := b.sess.complete(ctx, b.recordCount); err != nil {
 		return err
 	}
+
 	env, err := b.sess.getEnvelope()
 	if err != nil {
+		b.sess.abort()
 		return err
 	}
+
 	value, err := b.writer.ser.Serialize(ctx, b.topic, env)
 	if err != nil {
+		b.sess.abort()
 		return fmt.Errorf("claimcheck: serialize envelope: %w", err)
 	}
+
 	if err := b.writer.kw.Write(ctx, &kafkarator.Message{
 		Topic:   b.topic,
 		Key:     b.cfg.key,

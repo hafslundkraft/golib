@@ -8,7 +8,7 @@
 // S3 is replaced by an in-memory FakeS3Client so the demo runs without any
 // object-storage infrastructure. Kafka is provided by a Redpanda testcontainer.
 //
-// The setup code (container start, schema registration) is in helpers.go.
+// Shared setup helpers (container and schema setup) are in internal/demohelpers.
 package main
 
 import (
@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/hafslundkraft/golib/examples/internal/demohelpers"
 	"github.com/hafslundkraft/golib/kafkarator"
 	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 	"github.com/hafslundkraft/golib/telemetry"
@@ -38,6 +39,10 @@ const payloadSchema = `{
 
 const topic = "sensor-readings"
 
+const timeout = 30 * time.Second
+
+const redpandaImage = "docker.redpanda.com/redpandadata/redpanda:v23.3.3"
+
 // SensorReading is the typed representation of a record in the payload.
 // Field names must match the Avro field names in payloadSchema.
 type SensorReading struct {
@@ -49,15 +54,15 @@ type SensorReading struct {
 func main() {
 	ctx := context.Background()
 	log.Println("Starting Redpanda container...")
-	container := startRedpandaContainer(ctx)
+	container := demohelpers.StartRedpandaContainer(ctx, redpandaImage)
 	defer func() {
 		if err := container.Terminate(ctx); err != nil {
 			log.Printf("container terminate: %v", err)
 		}
 	}()
 
-	broker := getRedpandaBrokerAddress(ctx, container)
-	srURL := getRedpandaSchemaRegistryAddress(ctx, container)
+	broker := demohelpers.GetRedpandaBrokerAddress(ctx, container)
+	srURL := demohelpers.GetRedpandaSchemaRegistryAddress(ctx, container)
 	log.Printf("broker=%s  schema-registry=%s", broker, srURL)
 
 	tp, shutdown := telemetry.New(ctx, "claimcheck-demo", telemetry.WithLocal(true))
@@ -68,10 +73,18 @@ func main() {
 	}()
 
 	// Register the payload schema so the Stager can look it up.
-	registerPayloadSchema(srURL, payloadSchema)
+	demohelpers.RegisterSchema(srURL, demohelpers.ClaimCheckPayloadSubject(topic), payloadSchema)
 
 	// Register the envelope schema and create the kafkarator connection.
-	conn := setupKafkaConnection(broker, srURL, claimcheck.EnvelopeAvroSchema, tp)
+	conn := demohelpers.SetupKafkaConnection(
+		broker,
+		srURL,
+		topic,
+		claimcheck.EnvelopeAvroSchema,
+		"claimcheck",
+		"claimcheck-demo",
+		tp,
+	)
 
 	// Shared in-memory S3 used by both writer and processor.
 	s3 := claimcheck.NewFakeS3Client()
@@ -134,7 +147,7 @@ func writeRecords(
 		return fmt.Errorf("commit batch: %w", err)
 	}
 
-	logger.InfoContext(ctx, "Batch committed", "records", len(readings), "topic", topic)
+	logger.InfoContext(ctx, "Batch produced", "records", len(readings), "topic", topic)
 	return nil
 }
 
@@ -151,16 +164,22 @@ func processMessages(
 	}
 	proc, err := claimcheck.NewProcessor(conn, topic, handler.HandleMessage,
 		claimcheck.WithProcessorS3Client(s3),
+		claimcheck.WithProcessorReadTimeout(10*time.Second),
 	)
 	if err != nil {
 		return fmt.Errorf("create processor: %w", err)
 	}
 	defer proc.Close(ctx) //nolint:errcheck // close error in defer is intentionally discarded
 
-	n, err := proc.ProcessNext(ctx)
-	logger.InfoContext(ctx, "ProcessNext done", "envelopes", n)
-	if err != nil {
-		return fmt.Errorf("process next: %w", err)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		n, err := proc.ProcessNext(ctx)
+		if err != nil {
+			return fmt.Errorf("process next: %w", err)
+		}
+
+		logger.InfoContext(ctx, "ProcessNext completed", "messages-processed", n)
 	}
+
 	return nil
 }

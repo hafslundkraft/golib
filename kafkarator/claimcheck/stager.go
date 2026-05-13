@@ -104,13 +104,22 @@ func (w *multipartWriter) Abort() {
 // shared infrastructure layer used by both BatchWriter (map[string]any) and
 // typedBatch[T] (typed structs).
 type stageSession struct {
-	topic   string
-	batchID string
-	s3Key   string
-	pipe    *multipartWriter
-	env     *Envelope
-	span    trace.Span   // may be a no-op span
-	logger  *slog.Logger // never nil
+	topic     string
+	batchID   string
+	s3Key     string
+	pipe      *multipartWriter
+	env       *Envelope
+	span      trace.Span // may be a no-op span
+	spanEnded bool
+	logger    *slog.Logger // never nil
+}
+
+// endSpan ends the session span exactly once; safe to call multiple times.
+func (s *stageSession) endSpan() {
+	if !s.spanEnded {
+		s.spanEnded = true
+		s.span.End()
+	}
 }
 
 func newStageSession(
@@ -159,7 +168,7 @@ func (s *stageSession) complete(ctx context.Context, recordCount int64) error {
 		s.pipe.Abort()
 		s.span.RecordError(err)
 		s.span.SetStatus(codes.Error, err.Error())
-		s.span.End()
+		s.endSpan()
 		return err
 	}
 	s.env = &Envelope{
@@ -174,7 +183,7 @@ func (s *stageSession) complete(ctx context.Context, recordCount int64) error {
 		attribute.Int64("claim_check.record_count", recordCount),
 		attribute.Int64("claim_check.byte_size", byteSize),
 	))
-	s.span.End()
+	s.endSpan()
 	return nil
 }
 
@@ -193,13 +202,15 @@ func (s *stageSession) abort() {
 	} else {
 		s.pipe.Abort()
 	}
-	s.span.SetStatus(codes.Error, "batch aborted")
-	s.span.End()
+	if !s.spanEnded {
+		s.span.SetStatus(codes.Error, "batch aborted")
+		s.endSpan()
+	}
 }
 
 func (s *stageSession) getEnvelope() (*Envelope, error) {
 	if s.env == nil {
-		return nil, fmt.Errorf("claimcheck: Envelope() called before successful Commit")
+		return nil, fmt.Errorf("claimcheck: getEnvelope called before successful Produce")
 	}
 	return s.env, nil
 }
