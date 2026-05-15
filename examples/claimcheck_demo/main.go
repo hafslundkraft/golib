@@ -65,8 +65,7 @@ func main() {
 	broker := demohelpers.GetRedpandaBrokerAddress(ctx, container)
 	srURL := demohelpers.GetRedpandaSchemaRegistryAddress(ctx, container)
 	log.Printf("broker=%s  schema-registry=%s", broker, srURL)
-
-	tp, shutdown := telemetry.New(ctx, "claimcheck-demo", telemetry.WithLocal(true))
+	tp, shutdown := telemetry.New(ctx, telemetry.WithLocal(true))
 	defer func() {
 		if err := shutdown(ctx); err != nil {
 			log.Printf("telemetry shutdown: %v", err)
