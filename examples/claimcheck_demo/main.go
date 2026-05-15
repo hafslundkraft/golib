@@ -37,6 +37,19 @@ const payloadSchema = `{
 		{"name": "ts_ms",     "type": "long"}
 	]
 }`
+const claimCheckenvelopechema = `{
+	"type": "record",
+	"name": "ClaimCheckEnvelope",
+	"namespace": "happi.kafkarator.claimcheck",
+	"fields": [
+		{"name": "batch_id",     "type": "string"},
+		{"name": "storage_uri",  "type": "string"},
+		{"name": "topic",        "type": "string"},
+		{"name": "record_count", "type": "long"},
+		{"name": "byte_size",    "type": "long"},
+		{"name": "created_at",   "type": "long"}
+	]
+}`
 
 const topic = "sensor-readings"
 
@@ -54,6 +67,8 @@ type SensorReading struct {
 
 func main() {
 	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, time.Minute) // stop the demo after 1 minute
+	defer cancel()
 	log.Println("Starting Redpanda container...")
 	container := demohelpers.StartRedpandaContainer(ctx, redpandaImage)
 	defer func() {
@@ -80,7 +95,7 @@ func main() {
 		broker,
 		srURL,
 		topic,
-		claimcheck.EnvelopeAvroSchema,
+		claimCheckenvelopechema,
 		"claimcheck",
 		"claimcheck-demo",
 		tp,
@@ -164,21 +179,28 @@ func processMessages(
 	}
 	proc, err := claimcheck.NewProcessor(conn, topic, handler.HandleMessage,
 		claimcheck.WithProcessorS3Client(s3),
-		claimcheck.WithProcessorReadTimeout(10*time.Second),
+		claimcheck.WithProcessorReadTimeout(1*time.Minute),
 	)
 	if err != nil {
 		return fmt.Errorf("create processor: %w", err)
 	}
 	defer proc.Close(ctx) //nolint:errcheck // close error in defer is intentionally discarded
 
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	for {
 		n, err := proc.ProcessNext(ctx)
 		if err != nil {
 			return fmt.Errorf("process next: %w", err)
 		}
 
 		logger.InfoContext(ctx, "ProcessNext completed", "messages-processed", n)
+
+		if n > 0 {
+			break // exit after processing one batch, in production you'd typically keep processing indefinitely
+		}
+
+		if err := ctx.Err(); err != nil {
+			break // context canceled, exit gracefully
+		}
 	}
 
 	return nil

@@ -1,22 +1,5 @@
 package claimcheck
 
-// EnvelopeAvroSchema is the Avro schema for the Envelope type. Register it
-// under the "{topic}-value" subject in Schema Registry so that
-// kafkarator.AvroSerializer/AvroDeserializer can encode and decode envelopes.
-const EnvelopeAvroSchema = `{
-	"type": "record",
-	"name": "ClaimCheckEnvelope",
-	"namespace": "happi.kafkarator.claimcheck",
-	"fields": [
-		{"name": "batch_id",     "type": "string"},
-		{"name": "storage_uri",  "type": "string"},
-		{"name": "topic",        "type": "string"},
-		{"name": "record_count", "type": "long"},
-		{"name": "byte_size",    "type": "long"},
-		{"name": "created_at",   "type": "long"}
-	]
-}`
-
 // Envelope is the small message placed on the Kafka topic. It carries enough
 // information to locate and stream the payload from object storage without
 // fetching the payload itself.
