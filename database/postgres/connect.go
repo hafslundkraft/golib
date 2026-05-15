@@ -29,11 +29,16 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 	if roHost == "" {
 		return nil, fmt.Errorf("missing POSTGRES_HOST_RO environment variable")
 	}
+	resourceID := env("POSTGRES_RESOURCE_ID")
+	if resourceID == "" {
+		return nil, fmt.Errorf("missing POSTGRES_RESOURCE_ID environment variable")
+	}
 	cfg := &Config{
 		User:       user,
 		Database:   db,
 		RWHost:     rwHost,
 		ROHost:     roHost,
+		ResourceID: resourceID,
 		Credential: cred,
 	}
 	for _, opt := range opts {
@@ -58,6 +63,7 @@ type Config struct {
 	Database   string
 	RWHost     string
 	ROHost     string
+	ResourceID string
 	Credential identity.Credential
 	tracer     pgx.QueryTracer
 }
@@ -95,7 +101,7 @@ func newConnection(ctx context.Context, cfg *Config, host string) (*pgx.Conn, er
 		return nil, fmt.Errorf("create config: %w", err)
 	}
 
-	pgCfg.OAuthTokenProvider = tokenProvider(ctx, cfg.Credential)
+	pgCfg.OAuthTokenProvider = tokenProvider(ctx, cfg.Credential, cfg.ResourceID)
 	pgCfg.Tracer = cfg.tracer
 
 	db, err := pgx.ConnectConfig(ctx, pgCfg)
@@ -116,7 +122,7 @@ func newPool(ctx context.Context, cfg *Config, host string) (*pgxpool.Pool, erro
 		return nil, fmt.Errorf("create config: %w", err)
 	}
 
-	pgCfg.ConnConfig.OAuthTokenProvider = tokenProvider(ctx, cfg.Credential)
+	pgCfg.ConnConfig.OAuthTokenProvider = tokenProvider(ctx, cfg.Credential, cfg.ResourceID)
 	pgCfg.ConnConfig.Tracer = cfg.tracer
 
 	pool, err := pgxpool.NewWithConfig(ctx, pgCfg)
@@ -135,8 +141,15 @@ func connectionString(cfg *Config, host string) string {
 	return fmt.Sprintf("postgres://%s@%s:5432/%s?sslmode=disable", cfg.User, host, cfg.Database)
 }
 
-func tokenProvider(ctx context.Context, cred identity.Credential) func(context.Context) (string, error) {
-	tokenSource := cred.TokenSource(ctx, identity.WithScopes(writeScope))
+func tokenProvider(
+	ctx context.Context,
+	cred identity.Credential,
+	resourceID string,
+) func(context.Context) (string, error) {
+	tokenSource := cred.TokenSource(ctx,
+		identity.WithScopes(writeScope),
+		identity.WithResource(resourceID),
+	)
 
 	return func(_ context.Context) (string, error) {
 		token, err := tokenSource.Token()
