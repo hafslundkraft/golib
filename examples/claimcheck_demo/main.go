@@ -53,8 +53,6 @@ const claimCheckenvelopechema = `{
 
 const topic = "sensor-readings"
 
-const timeout = 30 * time.Second
-
 const redpandaImage = "docker.redpanda.com/redpandadata/redpanda:v23.3.3"
 
 // SensorReading is the typed representation of a record in the payload.
