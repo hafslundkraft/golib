@@ -37,6 +37,7 @@ const payloadSchema = `{
 		{"name": "ts_ms",     "type": "long"}
 	]
 }`
+
 const claimCheckenvelopechema = `{
 	"type": "record",
 	"name": "ClaimCheckEnvelope",
