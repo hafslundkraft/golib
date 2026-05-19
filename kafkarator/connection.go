@@ -210,6 +210,11 @@ func (c *Connection) Logger() *slog.Logger {
 	return c.tel.Logger()
 }
 
+// Config returns a copy of the connection's configuration.
+func (c *Connection) Config() Config {
+	return c.config
+}
+
 // ReaderOption for options to pass to the Reader() function
 type ReaderOption func(*readerOptions) error
 

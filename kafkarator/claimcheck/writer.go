@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	parquet "github.com/parquet-go/parquet-go"
 	"go.opentelemetry.io/otel/trace"
 
 	kafkarator "github.com/hafslundkraft/golib/kafkarator"
@@ -76,6 +75,24 @@ func WithWriterTracer(t trace.Tracer) WriterOption {
 	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withTracer(t)) }
 }
 
+// BatchOption configures a single [Batch] call.
+type BatchOption func(*batchConfig)
+
+type batchConfig struct {
+	key     []byte
+	headers map[string][]byte
+}
+
+// WithBatchKey sets the Kafka message key on the envelope message.
+func WithBatchKey(key []byte) BatchOption {
+	return func(c *batchConfig) { c.key = key }
+}
+
+// WithBatchHeaders sets additional Kafka headers on the envelope message.
+func WithBatchHeaders(headers map[string][]byte) BatchOption {
+	return func(c *batchConfig) { c.headers = headers }
+}
+
 // NewWriter creates a Writer from a kafkarator.Connection.
 //
 // By default the schema fetcher is backed by the connection's Schema Registry
@@ -95,7 +112,8 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 		o(cfg)
 	}
 	if cfg.s3Factory == nil {
-		cfg.s3Factory = defaultS3WriterFactory()
+		connCfg := conn.Config()
+		cfg.s3Factory = defaultS3WriterFactory(connCfg.SystemName, connCfg.Env)
 	}
 	if cfg.fetcher == nil {
 		cfg.fetcher = newSRSchemaFetcher(conn.SchemaRegistryClient())
@@ -116,123 +134,6 @@ func (w *Writer) Close(ctx context.Context) error {
 		return fmt.Errorf("claimcheck: close kafka writer: %w", err)
 	}
 	return nil
-}
-
-// BatchOption configures a single Batch call.
-type BatchOption func(*batchConfig)
-
-type batchConfig struct {
-	key     []byte
-	headers map[string][]byte
-}
-
-// WithBatchKey sets the Kafka message key on the envelope message.
-func WithBatchKey(key []byte) BatchOption {
-	return func(c *batchConfig) { c.key = key }
-}
-
-// WithBatchHeaders sets additional Kafka headers on the envelope message.
-func WithBatchHeaders(headers map[string][]byte) BatchOption {
-	return func(c *batchConfig) { c.headers = headers }
-}
-
-// Batch is an open write session returned by [Writer.NewBatch]. Write records
-// into it, then call Produce to finalize the S3 upload and produce the envelope
-// to Kafka, or Cleanup to discard without producing.
-//
-// Records can be any Go value whose fields map to the Avro schema registered
-// in Schema Registry — either a concrete struct with parquet field tags, or a
-// map[string]any keyed by field name.
-type Batch struct {
-	sess        *stageSession
-	pw          *parquet.GenericWriter[any]
-	pending     []any
-	rowGroup    int
-	recordCount int64
-	writer      *Writer
-	topic       string
-	cfg         batchConfig
-	done        bool
-}
-
-// Write buffers one record into the batch.
-func (b *Batch) Write(record any) error {
-	b.pending = append(b.pending, record)
-	if len(b.pending) >= b.rowGroup {
-		return b.flushRowGroup()
-	}
-	return nil
-}
-
-func (b *Batch) flushRowGroup() error {
-	if len(b.pending) == 0 {
-		return nil
-	}
-	if _, err := b.pw.Write(b.pending); err != nil {
-		return fmt.Errorf("claimcheck: write parquet row group: %w", err)
-	}
-	if err := b.pw.Flush(); err != nil {
-		return fmt.Errorf("claimcheck: flush parquet writer: %w", err)
-	}
-	b.recordCount += int64(len(b.pending))
-	b.pending = b.pending[:0]
-	return nil
-}
-
-// Produce finalizes the Parquet upload and produces the envelope to Kafka.
-// On any error the batch is permanently closed and cannot be retried; obtain a
-// new batch via [Writer.NewBatch]. Calling Produce more than once returns an error.
-func (b *Batch) Produce(ctx context.Context) error {
-	if b.done {
-		return fmt.Errorf("claimcheck: batch already closed")
-	}
-	b.done = true
-	if err := b.flushRowGroup(); err != nil {
-		b.sess.abort()
-		return err
-	}
-	if err := b.pw.Close(); err != nil {
-		b.sess.abort()
-		return fmt.Errorf("claimcheck: close parquet writer: %w", err)
-	}
-	if err := b.sess.complete(ctx, b.recordCount); err != nil {
-		return err
-	}
-
-	env, err := b.sess.getEnvelope()
-	if err != nil {
-		b.sess.abort()
-		return err
-	}
-
-	value, err := b.writer.ser.Serialize(ctx, b.topic, env)
-	if err != nil {
-		b.sess.abort()
-		return fmt.Errorf("claimcheck: serialize envelope: %w", err)
-	}
-
-	if err := b.writer.kw.Write(ctx, &kafkarator.Message{
-		Topic:   b.topic,
-		Key:     b.cfg.key,
-		Headers: b.cfg.headers,
-		Value:   value,
-	}); err != nil {
-		b.sess.abort()
-		return fmt.Errorf("claimcheck: write kafka message: %w", err)
-	}
-	return nil
-}
-
-// Cleanup aborts the S3 upload and discards the batch without producing to Kafka.
-// Safe to call after a successful Produce — no-op if the batch is already closed.
-// Intended for use with defer to ensure resources are released on error paths.
-func (b *Batch) Cleanup() {
-	if b.done {
-		return
-	}
-	b.done = true
-	_ = b.pw.Close()
-	b.sess.abort()
 }
 
 // NewBatch opens a write session for topic. The Parquet schema is derived from
@@ -258,18 +159,41 @@ func (w *Writer) NewBatch(ctx context.Context, topic string, opts ...BatchOption
 	for _, o := range opts {
 		o(cfg)
 	}
-	sess, pw, err := w.stager.stage(ctx, topic)
+	batch, err := w.stager.stage(ctx, topic)
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: stage batch: %w", err)
 	}
-	return &Batch{
-		sess:     sess,
-		pw:       pw,
-		rowGroup: w.stager.rowGroupSize,
-		writer:   w,
-		topic:    topic,
-		cfg:      *cfg,
-	}, nil
+	batch.produce = func(ctx context.Context) error {
+		if err := batch.finalize(ctx); err != nil {
+			return err
+		}
+		// Upload complete — unstage on any downstream failure to avoid orphaned S3 objects.
+		doUnstage := func() {
+			if unstageErr := w.stager.unstage(ctx, batch); unstageErr != nil {
+				w.stager.logger.WarnContext(ctx, "claimcheck: failed to delete orphaned S3 object",
+					"bucket", batch.pipe.bucket,
+					"key", batch.pipe.key,
+					"err", unstageErr,
+				)
+			}
+		}
+		value, err := w.ser.Serialize(ctx, topic, batch.env)
+		if err != nil {
+			doUnstage()
+			return fmt.Errorf("claimcheck: serialize envelope: %w", err)
+		}
+		if err := w.kw.Write(ctx, &kafkarator.Message{
+			Topic:   topic,
+			Key:     cfg.key,
+			Headers: cfg.headers,
+			Value:   value,
+		}); err != nil {
+			doUnstage()
+			return fmt.Errorf("claimcheck: write kafka message: %w", err)
+		}
+		return nil
+	}
+	return batch, nil
 }
 
 type srSchemaFetcher struct {

@@ -32,9 +32,10 @@ type ProcessorOption func(*processorConfig)
 
 // processorConfig holds configuration for NewProcessor.
 type processorConfig struct {
-	s3        S3Reader
-	tracer    trace.Tracer
-	kafkaOpts []kafkarator.ProcessorOption
+	s3             S3Reader
+	bucketResolver BucketResolver
+	tracer         trace.Tracer
+	kafkaOpts      []kafkarator.ProcessorOption
 }
 
 // WithProcessorS3Client sets a fixed S3 reader client for the processor. Use this
@@ -43,6 +44,13 @@ type processorConfig struct {
 // HAPPI_SYSTEM_NAME, HAPPI_ENV, and HAPPI_IDP_ISSUER_URL.
 func WithProcessorS3Client(s3 S3Reader) ProcessorOption {
 	return func(c *processorConfig) { c.s3 = s3 }
+}
+
+// WithProcessorBucketResolver overrides the default topic→bucket naming convention
+// used when constructing a production S3 client. Must match the [WithWriterBucketResolver]
+// used on the corresponding writer; mismatches result in the wrong IAM role being assumed.
+func WithProcessorBucketResolver(fn BucketResolver) ProcessorOption {
+	return func(c *processorConfig) { c.bucketResolver = fn }
 }
 
 // WithProcessorMaxMessages sets the maximum number of Kafka messages received
@@ -98,8 +106,13 @@ func NewProcessor(
 
 	s3Reader := cfg.s3
 	if s3Reader == nil {
+		bucketResolver := cfg.bucketResolver
+		if bucketResolver == nil {
+			bucketResolver = DefaultBucketResolver
+		}
 		var err error
-		s3Reader, err = defaultS3ReaderFor(topic)
+		connCfg := conn.Config()
+		s3Reader, err = defaultS3ReaderFor(bucketResolver(topic), connCfg.SystemName, connCfg.Env)
 		if err != nil {
 			return nil, fmt.Errorf("claimcheck: create S3 reader: %w", err)
 		}

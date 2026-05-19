@@ -1,10 +1,8 @@
 package claimcheck
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,31 +12,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
-	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
-	envHappiSystemName = "HAPPI_SYSTEM_NAME"
-	envHappiEnv        = "HAPPI_ENV"
-	envIDPIssuerURL    = "HAPPI_IDP_ISSUER_URL"
-	envIDPTokenFile    = "HAPPI_IDP_TOKEN_FILE"        //nolint:gosec // environment variable name, not a credential
-	envAWSTokenFile    = "AWS_WEB_IDENTITY_TOKEN_FILE" //nolint:gosec // environment variable name, not a credential
-	// envS3Endpoint and envSTSEndpoint are the standard AWS SDK environment
-	// variables injected by the Happi operator to point clients at the
-	// cluster-local Ceph RadosGW endpoint. boto3/botocore reads them
-	// automatically; we do the same here.
-	envS3Endpoint       = "AWS_ENDPOINT_URL_S3"
-	envSTSEndpoint      = "AWS_ENDPOINT_URL_STS"
-	defaultIDPTokenFile = "/happi/idp-token" //nolint:gosec // well-known path on Happi pods, not a hardcoded credential
-	defaultAWSTokenFile = "/tmp/ceph_token"  // #nosec G108 — well-known path on Happi pods
+	envIDPIssuerURL     = "HAPPI_IDP_ISSUER_URL"
+	envIDPTokenFile     = "HAPPI_IDP_TOKEN_FILE"        //nolint:gosec // environment variable name, not a credential
+	envAWSTokenFile     = "AWS_WEB_IDENTITY_TOKEN_FILE" //nolint:gosec // environment variable name, not a credential
+	defaultIDPTokenFile = "/happi/idp-token"            //nolint:gosec // well-known path on Happi pods, not a hardcoded credential
+	defaultAWSTokenFile = "/tmp/ceph_token"             // #nosec G108 — well-known path on Happi pods
 	defaultIDPS3Scope   = "ceph_rgw"
 
 	tokenExpiryMargin      = 60 * time.Second
@@ -71,105 +55,37 @@ func claimCheckRoleARN(system, env, bucket, access string) (string, error) {
 		system, env, bucket, system, env, bucket, access), nil
 }
 
-// s3ClientOptions configures newS3Client.
-type s3ClientOptions struct {
-	// IDPIssuerURL overrides HAPPI_IDP_ISSUER_URL.
-	IDPIssuerURL string
-	// IDPTokenFile overrides HAPPI_IDP_TOKEN_FILE (source token).
-	IDPTokenFile string
-	// AWSTokenFile overrides AWS_WEB_IDENTITY_TOKEN_FILE (exchanged token).
-	AWSTokenFile string
-	// IDPScope is the OAuth scope for the token exchange. Defaults to "ceph_rgw".
-	IDPScope string
-	// S3Endpoint overrides AWS_ENDPOINT_URL_S3. When set (or when the env
-	// var is present), path-style addressing is enabled automatically.
-	S3Endpoint string
-	// STSEndpoint overrides AWS_ENDPOINT_URL_STS.
-	STSEndpoint string
-	// Tracer is used to instrument the IDP token exchange. Defaults to a no-op tracer.
-	Tracer trace.Tracer
-}
-
-// newS3Client creates an S3Client for use on Happi. It:
-//  1. Reads HAPPI_SYSTEM_NAME and HAPPI_ENV to build the role ARN.
-//  2. Reads HAPPI_IDP_ISSUER_URL (or opts.IDPIssuerURL) to find the IDP.
-//  3. On first use, exchanges the Happi IDP token for a short-lived S3 token
-//     and writes it to AWS_WEB_IDENTITY_TOKEN_FILE (or opts.AWSTokenFile).
-//  4. Assumes the role via AssumeRoleWithWebIdentity, refreshing as needed.
-//
-// access should be "rw" for writers or "r" for readers.
-func newS3Client(bucket, access string, opts *s3ClientOptions) (S3Client, error) {
-	system := os.Getenv(envHappiSystemName)
-	env := os.Getenv(envHappiEnv)
-	if strings.TrimSpace(system) == "" {
-		return nil, fmt.Errorf("claimcheck: %s env var is not set", envHappiSystemName)
-	}
-	if strings.TrimSpace(env) == "" {
-		return nil, fmt.Errorf("claimcheck: %s env var is not set", envHappiEnv)
-	}
-
-	roleARN, err := claimCheckRoleARN(system, env, bucket, access)
-	if err != nil {
-		return nil, err
-	}
-
-	idpIssuerURL := opts.IDPIssuerURL
-	if idpIssuerURL == "" {
-		idpIssuerURL = os.Getenv(envIDPIssuerURL)
-	}
+// newTokenExchanger creates a tokenExchanger from environment variables.
+// The exchanger is independent of bucket and role — it can be shared across
+// multiple S3 clients to avoid concurrent token exchanges racing on the same
+// awsTokenFile.
+func newTokenExchanger() (*tokenExchanger, error) {
+	idpIssuerURL := os.Getenv(envIDPIssuerURL)
 	if strings.TrimSpace(idpIssuerURL) == "" {
 		return nil, fmt.Errorf("claimcheck: %s env var is not set", envIDPIssuerURL)
 	}
 
-	idpTokenFile := opts.IDPTokenFile
-	if idpTokenFile == "" {
-		if v := os.Getenv(envIDPTokenFile); v != "" {
-			idpTokenFile = v
-		} else {
-			idpTokenFile = defaultIDPTokenFile
-		}
+	idpTokenFile := defaultIDPTokenFile
+	if v := os.Getenv(envIDPTokenFile); v != "" {
+		idpTokenFile = v
 	}
 
-	awsTokenFile := opts.AWSTokenFile
-	if awsTokenFile == "" {
-		if v := os.Getenv(envAWSTokenFile); v != "" {
-			awsTokenFile = v
-		} else {
-			awsTokenFile = defaultAWSTokenFile
-		}
+	awsTokenFile := defaultAWSTokenFile
+	if v := os.Getenv(envAWSTokenFile); v != "" {
+		awsTokenFile = v
 	}
 
-	idpScope := opts.IDPScope
-	if idpScope == "" {
-		idpScope = defaultIDPS3Scope
+	idpScope := defaultIDPS3Scope
+	if v := os.Getenv("HAPPI_IDP_S3_SCOPE"); v != "" {
+		idpScope = v
 	}
 
-	exchanger := &tokenExchanger{
+	return &tokenExchanger{
 		idpIssuerURL: idpIssuerURL,
 		idpTokenFile: idpTokenFile,
 		awsTokenFile: awsTokenFile,
 		idpScope:     idpScope,
-		tracer:       opts.Tracer,
-	}
-	if exchanger.tracer == nil {
-		exchanger.tracer = nooptrace.NewTracerProvider().Tracer("")
-	}
-
-	s3Endpoint := opts.S3Endpoint
-	if s3Endpoint == "" {
-		s3Endpoint = os.Getenv(envS3Endpoint)
-	}
-	stsEndpoint := opts.STSEndpoint
-	if stsEndpoint == "" {
-		stsEndpoint = os.Getenv(envSTSEndpoint)
-	}
-
-	return &s3Client{
-		exchanger:    exchanger,
-		roleARN:      roleARN,
-		awsTokenFile: awsTokenFile,
-		s3Endpoint:   s3Endpoint,
-		stsEndpoint:  stsEndpoint,
+		tracer:       nooptrace.NewTracerProvider().Tracer(""),
 	}, nil
 }
 
@@ -302,243 +218,4 @@ func (e *tokenExchanger) exchangeToken(ctx context.Context) (_ time.Duration, re
 		lifetime = tokenExpiryFallback
 	}
 	return lifetime, nil
-}
-
-// s3Client wraps the AWS SDK S3 client and implements S3Client.
-// It exchanges the Happi IDP token before each operation.
-type s3Client struct {
-	exchanger    *tokenExchanger
-	roleARN      string
-	awsTokenFile string
-	s3Endpoint   string
-	stsEndpoint  string
-
-	mu     sync.Mutex
-	client *awss3.Client
-}
-
-func (p *s3Client) awsClient(ctx context.Context) (*awss3.Client, error) {
-	if err := p.exchanger.ensureFreshToken(ctx); err != nil {
-		return nil, err
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.client != nil {
-		return p.client, nil
-	}
-
-	// Build STS client options. AWS_ENDPOINT_URL_STS (or opts.STSEndpoint) is
-	// respected here so that the AssumeRoleWithWebIdentity call is directed at
-	// the cluster-local Ceph RadosGW STS endpoint rather than AWS STS.
-	var stsOpts []func(*sts.Options)
-	if p.stsEndpoint != "" {
-		ep := p.stsEndpoint
-		stsOpts = append(stsOpts, func(o *sts.Options) {
-			o.BaseEndpoint = &ep
-		})
-	}
-	stsClient := sts.New(sts.Options{}, stsOpts...)
-	provider := stscreds.NewWebIdentityRoleProvider(
-		stsClient,
-		p.roleARN,
-		stscreds.IdentityTokenFile(p.awsTokenFile),
-	)
-
-	cfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithCredentialsProvider(provider),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("claimcheck: load AWS config: %w", err)
-	}
-
-	// Apply S3 endpoint override. AWS_ENDPOINT_URL_S3 (or opts.S3Endpoint) is
-	// read at construction time and stored in p.s3Endpoint. Path-style
-	// addressing is required for Ceph RadosGW and any non-AWS S3 endpoint.
-	var s3Opts []func(*awss3.Options)
-	if p.s3Endpoint != "" {
-		ep := p.s3Endpoint
-		s3Opts = append(s3Opts, func(o *awss3.Options) {
-			o.BaseEndpoint = &ep
-			o.UsePathStyle = true
-		})
-	}
-	p.client = awss3.NewFromConfig(cfg, s3Opts...)
-	return p.client, nil
-}
-
-func (p *s3Client) CreateMultipartUpload(ctx context.Context, bucket, key string) (string, error) {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return "", err
-	}
-	out, err := c.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
-		Bucket: &bucket,
-		Key:    &key,
-	})
-	if err != nil {
-		return "", fmt.Errorf("claimcheck: CreateMultipartUpload: %w", err)
-	}
-	return aws.ToString(out.UploadId), nil
-}
-
-func (p *s3Client) UploadPart(
-	ctx context.Context,
-	bucket, key, uploadID string,
-	partNumber int,
-	body io.Reader,
-) (string, error) {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return "", err
-	}
-	num := int32(partNumber) // #nosec G115 — part numbers are small positive ints
-	out, err := c.UploadPart(ctx, &awss3.UploadPartInput{
-		Bucket:     &bucket,
-		Key:        &key,
-		UploadId:   &uploadID,
-		PartNumber: &num,
-		Body:       body,
-	})
-	if err != nil {
-		return "", fmt.Errorf("claimcheck: UploadPart: %w", err)
-	}
-	return aws.ToString(out.ETag), nil
-}
-
-func (p *s3Client) CompleteMultipartUpload(
-	ctx context.Context,
-	bucket, key, uploadID string,
-	parts []CompletedPart,
-) error {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return err
-	}
-	awsParts := make([]types.CompletedPart, len(parts))
-	for i, pt := range parts {
-		n := int32(pt.PartNumber) // #nosec G115
-		etag := pt.ETag
-		awsParts[i] = types.CompletedPart{PartNumber: &n, ETag: &etag}
-	}
-	_, err = c.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
-		Bucket:   &bucket,
-		Key:      &key,
-		UploadId: &uploadID,
-		MultipartUpload: &types.CompletedMultipartUpload{
-			Parts: awsParts,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("claimcheck: CompleteMultipartUpload: %w", err)
-	}
-	return nil
-}
-
-func (p *s3Client) AbortMultipartUpload(ctx context.Context, bucket, key, uploadID string) error {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = c.AbortMultipartUpload(ctx, &awss3.AbortMultipartUploadInput{
-		Bucket:   &bucket,
-		Key:      &key,
-		UploadId: &uploadID,
-	})
-	// Ignore NoSuchUpload — best-effort cleanup
-	if err != nil {
-		var noUpload *types.NoSuchUpload
-		if isError(err, noUpload) {
-			return nil
-		}
-		return fmt.Errorf("claimcheck: AbortMultipartUpload: %w", err)
-	}
-	return nil
-}
-
-func (p *s3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader) error {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return err
-	}
-	bodyBytes, err := io.ReadAll(body)
-	if err != nil {
-		return fmt.Errorf("claimcheck: PutObject read body: %w", err)
-	}
-	_, err = c.PutObject(ctx, &awss3.PutObjectInput{
-		Bucket:        &bucket,
-		Key:           &key,
-		Body:          bytes.NewReader(bodyBytes),
-		ContentLength: aws.Int64(int64(len(bodyBytes))),
-	})
-	if err != nil {
-		return fmt.Errorf("claimcheck: PutObject: %w", err)
-	}
-	return nil
-}
-
-func (p *s3Client) GetObject(ctx context.Context, bucket, key string, byteRange *string) (io.ReadCloser, int64, error) {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	input := &awss3.GetObjectInput{
-		Bucket: &bucket,
-		Key:    &key,
-	}
-	if byteRange != nil {
-		input.Range = byteRange
-	}
-	out, err := c.GetObject(ctx, input)
-	if err != nil {
-		return nil, 0, fmt.Errorf("claimcheck: GetObject: %w", err)
-	}
-	return out.Body, aws.ToInt64(out.ContentLength), nil
-}
-
-func (p *s3Client) DeleteObject(ctx context.Context, bucket, key string) error {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = c.DeleteObject(ctx, &awss3.DeleteObjectInput{
-		Bucket: &bucket,
-		Key:    &key,
-	})
-	if err != nil && !isError(err, &types.NoSuchKey{}) {
-		return fmt.Errorf("claimcheck: DeleteObject: %w", err)
-	}
-	return nil
-}
-
-// defaultS3WriterFactory returns a caching factory that creates a production
-// S3Writer for each unique bucket on first use. Called when no WithWriterS3Client
-// option is provided to NewWriter.
-func defaultS3WriterFactory() func(bucket string) (S3Writer, error) {
-	var mu sync.Mutex
-	cache := map[string]S3Writer{}
-	return func(bucket string) (S3Writer, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if c, ok := cache[bucket]; ok {
-			return c, nil
-		}
-		c, err := newS3Client(bucket, "rw", &s3ClientOptions{})
-		if err != nil {
-			return nil, err
-		}
-		cache[bucket] = c
-		return c, nil
-	}
-}
-
-// defaultS3ReaderFor creates a production S3Reader for the given topic's
-// default bucket. Called when no WithProcessorS3Client option is provided to NewProcessor.
-func defaultS3ReaderFor(topic string) (S3Reader, error) {
-	return newS3Client(DefaultBucketResolver(topic), "r", &s3ClientOptions{})
-}
-
-// isError is a helper to check for AWS SDK typed errors.
-func isError[T error](err error, target T) bool {
-	return errors.As(err, &target)
 }
