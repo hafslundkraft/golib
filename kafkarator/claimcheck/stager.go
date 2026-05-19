@@ -193,13 +193,13 @@ func (s *stager) unstage(ctx context.Context, b *Batch) error {
 type Batch struct {
 	// produce is set by writer.go's NewBatch; it handles Kafka serialization,
 	// write, and best-effort unstage on delivery failure.
-	produce   func(ctx context.Context) error
-	topic     string
-	batchID   string
-	pipe      *multipartWriter
-	env       *Envelope
-	span      trace.Span
-	logger    *slog.Logger
+	produce func(ctx context.Context) error
+	topic   string
+	batchID string
+	pipe    *multipartWriter
+	env     *Envelope
+	span    trace.Span
+	logger  *slog.Logger
 	// Parquet write state
 	pw          *parquet.GenericWriter[any]
 	pending     []any

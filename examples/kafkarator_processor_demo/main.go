@@ -5,7 +5,7 @@
 //   - Reading messages from Kafka with Avro deserialization
 //   - Processing messages with a handler
 //
-// Shared setup helpers (testcontainers and schema setup) are in 
+// Shared setup helpers (testcontainers and schema setup) are in
 // internal/demohelpers and can be ignored when learning the basic kafkarator patterns.
 package main
 
