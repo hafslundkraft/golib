@@ -9,12 +9,6 @@ import (
 	kafkarator "github.com/hafslundkraft/golib/kafkarator"
 )
 
-// serializer serializes a value to Confluent Avro wire-format bytes.
-// Satisfied by *kafkarator.AvroSerializer (via Connection.Serializer()).
-type serializer interface {
-	Serialize(ctx context.Context, topic string, value any) ([]byte, error)
-}
-
 // kafkaWriter sends a single message to Kafka.
 // Satisfied by *kafkarator.Writer (via Connection.Writer()).
 type kafkaWriter interface {
@@ -26,7 +20,6 @@ type kafkaWriter interface {
 // Kafka. Obtain one via NewWriter.
 type Writer struct {
 	kw     kafkaWriter
-	ser    serializer
 	stager *stager
 }
 
@@ -113,7 +106,11 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	}
 	if cfg.s3Factory == nil {
 		connCfg := conn.Config()
-		cfg.s3Factory = defaultS3WriterFactory(connCfg.SystemName, connCfg.Env)
+		exchanger, err := newTokenExchanger()
+		if err != nil {
+			return nil, fmt.Errorf("claimcheck: init token exchanger: %w", err)
+		}
+		cfg.s3Factory = defaultS3WriterFactory(exchanger, connCfg.SystemName, connCfg.Env)
 	}
 	if cfg.fetcher == nil {
 		cfg.fetcher = newSRSchemaFetcher(conn.SchemaRegistryClient())
@@ -124,8 +121,8 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	}
 	// Inject the connection's tracer and logger as defaults; callers can override with WithWriterTracer.
 	cfg.stagerOpts = append([]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger())}, cfg.stagerOpts...)
-	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, cfg.stagerOpts...)
-	return &Writer{kw: kw, ser: conn.Serializer(), stager: stager}, nil
+	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, conn.Serializer(), cfg.stagerOpts...)
+	return &Writer{kw: kw, stager: stager}, nil
 }
 
 // Close closes the underlying Kafka writer.
@@ -163,32 +160,16 @@ func (w *Writer) NewBatch(ctx context.Context, topic string, opts ...BatchOption
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: stage batch: %w", err)
 	}
-	batch.produce = func(ctx context.Context) error {
-		if err := batch.finalize(ctx); err != nil {
-			return err
-		}
-		// Upload complete — unstage on any downstream failure to avoid orphaned S3 objects.
-		doUnstage := func() {
-			if unstageErr := w.stager.unstage(ctx, batch); unstageErr != nil {
-				w.stager.logger.WarnContext(ctx, "claimcheck: failed to delete orphaned S3 object",
-					"bucket", batch.pipe.bucket,
-					"key", batch.pipe.key,
-					"err", unstageErr,
-				)
-			}
-		}
-		value, err := w.ser.Serialize(ctx, topic, batch.env)
-		if err != nil {
-			doUnstage()
-			return fmt.Errorf("claimcheck: serialize envelope: %w", err)
-		}
+	batch.produce = func(ctx context.Context, value []byte) error {
 		if err := w.kw.Write(ctx, &kafkarator.Message{
 			Topic:   topic,
 			Key:     cfg.key,
 			Headers: cfg.headers,
 			Value:   value,
 		}); err != nil {
-			doUnstage()
+			// Do NOT delete the S3 object on Kafka write failure. The broker may
+			// have already committed the message; the error could be a lost ack.
+			// Orphaned objects are swept by bucket lifecycle rules.
 			return fmt.Errorf("claimcheck: write kafka message: %w", err)
 		}
 		return nil

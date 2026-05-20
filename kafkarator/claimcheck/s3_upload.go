@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -24,9 +25,10 @@ type multipartWriter struct {
 	parts      []CompletedPart
 	buf        []byte
 	totalBytes int64
+	logger     *slog.Logger
 }
 
-func newMultipartWriter(ctx context.Context, s3 S3Writer, bucket, key string, partSize int) (*multipartWriter, error) {
+func newMultipartWriter(ctx context.Context, s3 S3Writer, bucket, key string, partSize int, logger *slog.Logger) (*multipartWriter, error) {
 	if partSize < minPartSize {
 		return nil, fmt.Errorf("claimcheck: partSize %d is below the S3 minimum of %d bytes", partSize, minPartSize)
 	}
@@ -41,6 +43,7 @@ func newMultipartWriter(ctx context.Context, s3 S3Writer, bucket, key string, pa
 		key:      key,
 		partSize: partSize,
 		uploadID: uploadID,
+		logger:   logger,
 	}, nil
 }
 
@@ -53,6 +56,12 @@ func (w *multipartWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// Size returns the total number of bytes written so far, including bytes
+// buffered but not yet uploaded as a part.
+func (w *multipartWriter) Size() int64 {
+	return w.totalBytes + int64(len(w.buf))
 }
 
 func (w *multipartWriter) flushPart() error {
@@ -70,20 +79,26 @@ func (w *multipartWriter) flushPart() error {
 	return nil
 }
 
-// Complete flushes any remaining buffered bytes and finalizes the multipart
-// upload. Returns the total number of bytes uploaded.
-func (w *multipartWriter) Complete(ctx context.Context) (int64, error) {
+// Complete flushes any remaining buffered bytes and finalizes the multipart upload.
+func (w *multipartWriter) Complete(ctx context.Context) error {
 	if err := w.flushPart(); err != nil {
-		return 0, err
+		return err
 	}
 	if err := w.s3.CompleteMultipartUpload(ctx, w.bucket, w.key, w.uploadID, w.parts); err != nil {
-		return 0, fmt.Errorf("claimcheck: complete multipart upload: %w", err)
+		return fmt.Errorf("claimcheck: complete multipart upload: %w", err)
 	}
-	return w.totalBytes, nil
+	return nil
 }
 
-// Abort discards all uploaded parts. Best-effort: errors are silently ignored
-// so that the original error context is preserved by the caller.
+// Abort discards all uploaded parts. Best-effort: errors are logged as
+// warnings so that the original error context is preserved by the caller.
 func (w *multipartWriter) Abort() {
-	_ = w.s3.AbortMultipartUpload(context.Background(), w.bucket, w.key, w.uploadID)
+	if err := w.s3.AbortMultipartUpload(context.Background(), w.bucket, w.key, w.uploadID); err != nil {
+		w.logger.Warn("claimcheck: abort multipart upload failed; orphaned parts may accumulate",
+			slog.String("bucket", w.bucket),
+			slog.String("key", w.key),
+			slog.String("upload_id", w.uploadID),
+			slog.Any("error", err),
+		)
+	}
 }

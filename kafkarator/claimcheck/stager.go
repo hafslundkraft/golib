@@ -17,6 +17,12 @@ import (
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
 )
 
+// serializer serializes a value to Confluent Avro wire-format bytes.
+// Satisfied by *kafkarator.AvroSerializer (via Connection.Serializer()).
+type serializer interface {
+	Serialize(ctx context.Context, topic string, value any) ([]byte, error)
+}
+
 // BucketResolver maps a topic name to an S3 bucket name.
 type BucketResolver func(topic string) string
 
@@ -39,6 +45,7 @@ type SchemaFetcher interface {
 type stager struct {
 	s3Factory      func(bucket string) (S3Writer, error)
 	schemaFetcher  SchemaFetcher
+	ser            serializer
 	bucketResolver BucketResolver
 	rowGroupSize   int
 	partSize       int
@@ -89,11 +96,13 @@ func withLogger(l *slog.Logger) stagerOption {
 func newStagerWithFactory(
 	factory func(bucket string) (S3Writer, error),
 	fetcher SchemaFetcher,
+	ser serializer,
 	opts ...stagerOption,
 ) *stager {
 	st := &stager{
 		s3Factory:      factory,
 		schemaFetcher:  fetcher,
+		ser:            ser,
 		bucketResolver: DefaultBucketResolver,
 		rowGroupSize:   defaultRowGroupSize,
 		partSize:       minPartSize,
@@ -110,6 +119,9 @@ func newStagerWithFactory(
 // an S3 multipart upload, and returns a [Batch] ready to receive records.
 // The payload schema subject is "{topic}-claim-check-payload".
 func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
+	if strings.ContainsRune(topic, '/') {
+		return nil, fmt.Errorf("claimcheck: topic name must not contain '/': %q", topic)
+	}
 	subject := topic + "-claim-check-payload"
 	schemaStr, version, id, err := s.schemaFetcher.GetLatestSchema(ctx, subject)
 	if err != nil {
@@ -142,7 +154,7 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 		),
 	)
 
-	pipe, err := newMultipartWriter(spanCtx, s3Client, bucket, s3Key, s.partSize)
+	pipe, err := newMultipartWriter(spanCtx, s3Client, bucket, s3Key, s.partSize, s.logger)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -165,22 +177,10 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 		pipe:     pipe,
 		span:     span,
 		logger:   s.logger,
+		ser:      s.ser,
 		pw:       parquet.NewGenericWriter[any](pipe, writerOpts...),
 		rowGroup: s.rowGroupSize,
 	}, nil
-}
-
-// unstage deletes the uploaded S3 object for b, reversing the staging.
-// Best-effort: the caller is responsible for logging any error.
-func (s *stager) unstage(ctx context.Context, b *Batch) error {
-	s3, err := s.s3Factory(b.pipe.bucket)
-	if err != nil {
-		return fmt.Errorf("claimcheck: unstage: get s3 client for bucket %q: %w", b.pipe.bucket, err)
-	}
-	if err := s3.DeleteObject(ctx, b.pipe.bucket, b.pipe.key); err != nil {
-		return fmt.Errorf("claimcheck: unstage: delete S3 object %q: %w", b.pipe.key, err)
-	}
-	return nil
 }
 
 // Batch is an open write session returned by [Writer.NewBatch]. Write records
@@ -190,16 +190,20 @@ func (s *stager) unstage(ctx context.Context, b *Batch) error {
 // Records can be any Go value whose fields map to the Avro schema registered
 // in Schema Registry — either a concrete struct with parquet field tags, or a
 // map[string]any keyed by field name.
+//
+// Batch is not safe for concurrent use. All Write, Produce, and Cleanup calls
+// must be made from the same goroutine.
+//
+// Producing an empty batch (zero Write calls) is an error.
 type Batch struct {
-	// produce is set by writer.go's NewBatch; it handles Kafka serialization,
-	// write, and best-effort unstage on delivery failure.
-	produce func(ctx context.Context) error
+	// produce is set by writer.go's NewBatch; it handles the Kafka write.
+	produce func(ctx context.Context, value []byte) error
 	topic   string
 	batchID string
 	pipe    *multipartWriter
-	env     *Envelope
 	span    trace.Span
 	logger  *slog.Logger
+	ser     serializer
 	// Parquet write state
 	pw          *parquet.GenericWriter[any]
 	pending     []any
@@ -208,32 +212,29 @@ type Batch struct {
 	done        bool
 }
 
-// finalize flushes and closes the Parquet writer, completes the S3 multipart
-// upload, and stores the resulting [Envelope] on b. On any error the upload is
-// aborted and the span is ended with an error status.
-func (b *Batch) finalize(ctx context.Context) error {
+// finalizeUpload flushes and closes the Parquet writer, serializes the envelope,
+// and completes the S3 multipart upload. Serialization happens before
+// CompleteMultipartUpload: any failure can abort the still-in-progress upload
+// rather than needing to delete a completed object.
+// On any error the upload is aborted and the span ended with an error status.
+func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 	if err := b.flushRowGroup(); err != nil {
 		_ = b.pw.Close()
-		b.pipe.Abort()
-		b.span.SetStatus(codes.Error, err.Error())
-		b.span.End()
-		return err
-	}
-	if err := b.pw.Close(); err != nil {
-		b.pipe.Abort()
-		b.span.SetStatus(codes.Error, err.Error())
-		b.span.End()
-		return fmt.Errorf("claimcheck: close parquet writer: %w", err)
-	}
-	byteSize, err := b.pipe.Complete(ctx)
-	if err != nil {
 		b.pipe.Abort()
 		b.span.RecordError(err)
 		b.span.SetStatus(codes.Error, err.Error())
 		b.span.End()
-		return err
+		return nil, err
 	}
-	b.env = &Envelope{
+	if err := b.pw.Close(); err != nil {
+		b.pipe.Abort()
+		b.span.RecordError(err)
+		b.span.SetStatus(codes.Error, err.Error())
+		b.span.End()
+		return nil, fmt.Errorf("claimcheck: close parquet writer: %w", err)
+	}
+	byteSize := b.pipe.Size()
+	env := &Envelope{
 		BatchID:     b.batchID,
 		StorageURI:  "s3://" + b.pipe.bucket + "/" + b.pipe.key,
 		Topic:       b.topic,
@@ -241,12 +242,27 @@ func (b *Batch) finalize(ctx context.Context) error {
 		ByteSize:    byteSize,
 		CreatedAt:   time.Now().UTC().UnixMilli(),
 	}
+	value, err := b.ser.Serialize(ctx, b.topic, env)
+	if err != nil {
+		b.pipe.Abort()
+		b.span.RecordError(err)
+		b.span.SetStatus(codes.Error, err.Error())
+		b.span.End()
+		return nil, fmt.Errorf("claimcheck: serialize envelope: %w", err)
+	}
+	if err := b.pipe.Complete(ctx); err != nil {
+		b.pipe.Abort()
+		b.span.RecordError(err)
+		b.span.SetStatus(codes.Error, err.Error())
+		b.span.End()
+		return nil, err
+	}
 	b.span.AddEvent("upload complete", trace.WithAttributes(
 		attribute.Int64("claim_check.record_count", b.recordCount),
 		attribute.Int64("claim_check.byte_size", byteSize),
 	))
 	b.span.End()
-	return nil
+	return value, nil
 }
 
 // Write buffers one record into the batch.
@@ -281,7 +297,11 @@ func (b *Batch) Produce(ctx context.Context) error {
 		return fmt.Errorf("claimcheck: batch already closed")
 	}
 	b.done = true
-	return b.produce(ctx)
+	value, err := b.finalizeUpload(ctx)
+	if err != nil {
+		return err
+	}
+	return b.produce(ctx, value)
 }
 
 // Cleanup aborts the S3 upload and discards the batch without producing to Kafka.

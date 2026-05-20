@@ -267,23 +267,14 @@ func (p *s3Client) DeleteObject(ctx context.Context, bucket, key string) error {
 // S3Writer for each unique bucket on first use. Called when no WithWriterS3Client
 // option is provided to NewWriter.
 //
-// A single tokenExchanger is created on first use and shared across all bucket
-// clients to avoid concurrent token exchanges racing on the same awsTokenFile.
-func defaultS3WriterFactory(system, env string) func(bucket string) (S3Writer, error) {
+// The provided exchanger is shared across all bucket clients to avoid
+// concurrent token exchanges racing on the same awsTokenFile.
+func defaultS3WriterFactory(exchanger *tokenExchanger, system, env string) func(bucket string) (S3Writer, error) {
 	var (
-		mu        sync.Mutex
-		cache     = map[string]S3Writer{}
-		exchanger *tokenExchanger
-		initOnce  sync.Once
-		initErr   error
+		mu    sync.Mutex
+		cache = map[string]S3Writer{}
 	)
 	return func(bucket string) (S3Writer, error) {
-		initOnce.Do(func() {
-			exchanger, initErr = newTokenExchanger()
-		})
-		if initErr != nil {
-			return nil, initErr
-		}
 		mu.Lock()
 		defer mu.Unlock()
 		if c, ok := cache[bucket]; ok {

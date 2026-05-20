@@ -25,10 +25,11 @@ const (
 	defaultAWSTokenFile = "/tmp/ceph_token"             // #nosec G108 — well-known path on Happi pods
 	defaultIDPS3Scope   = "ceph_rgw"
 
-	tokenExpiryMargin      = 60 * time.Second
-	tokenExpiryFallback    = 3600 * time.Second
-	tokenRequestTimeout    = 10 * time.Second
-	tokenExpiresInFallback = 3600
+	envIDPS3Scope = "HAPPI_IDP_S3_SCOPE"
+
+	tokenExpiryMargin   = 60 * time.Second
+	tokenExpiryFallback = 3600 * time.Second
+	tokenRequestTimeout = 10 * time.Second
 )
 
 // ClaimCheckRoleARN computes the Ceph IAM role ARN for a claim-check bucket.
@@ -76,7 +77,7 @@ func newTokenExchanger() (*tokenExchanger, error) {
 	}
 
 	idpScope := defaultIDPS3Scope
-	if v := os.Getenv("HAPPI_IDP_S3_SCOPE"); v != "" {
+	if v := os.Getenv(envIDPS3Scope); v != "" {
 		idpScope = v
 	}
 
@@ -86,6 +87,7 @@ func newTokenExchanger() (*tokenExchanger, error) {
 		awsTokenFile: awsTokenFile,
 		idpScope:     idpScope,
 		tracer:       nooptrace.NewTracerProvider().Tracer(""),
+		httpClient:   &http.Client{Timeout: tokenRequestTimeout},
 	}, nil
 }
 
@@ -95,6 +97,7 @@ type tokenExchanger struct {
 	awsTokenFile string
 	idpScope     string
 	tracer       trace.Tracer
+	httpClient   *http.Client
 
 	mu        sync.Mutex
 	expiresAt time.Time
@@ -156,7 +159,7 @@ func (e *tokenExchanger) exchangeToken(ctx context.Context) (_ time.Duration, re
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("claimcheck: token exchange request to %s: %w", tokenURL, err)
 	}

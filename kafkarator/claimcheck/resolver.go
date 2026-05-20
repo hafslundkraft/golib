@@ -16,13 +16,17 @@ type envelopeDeserializer interface {
 
 // resolver decodes claim-check envelopes and fetches payloads from S3.
 type resolver struct {
-	s3           S3Reader
-	deserializer envelopeDeserializer
-	tracer       trace.Tracer
+	s3             S3Reader
+	deserializer   envelopeDeserializer
+	tracer         trace.Tracer
+	bucketResolver BucketResolver
 }
 
-func newResolver(s3 S3Reader, deserializer envelopeDeserializer, tracer trace.Tracer) *resolver {
-	return &resolver{s3: s3, deserializer: deserializer, tracer: tracer}
+func newResolver(s3 S3Reader, deserializer envelopeDeserializer, tracer trace.Tracer, bucketResolver BucketResolver) *resolver {
+	if bucketResolver == nil {
+		bucketResolver = DefaultBucketResolver
+	}
+	return &resolver{s3: s3, deserializer: deserializer, tracer: tracer, bucketResolver: bucketResolver}
 }
 
 func (r *resolver) peekEnvelope(ctx context.Context, topic string, data []byte) (*Envelope, error) {
@@ -41,6 +45,12 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 	bucket, key, err := s3URIParts(env.StorageURI)
 	if err != nil {
 		return nil, err
+	}
+	if expected := r.bucketResolver(topic); bucket != expected {
+		return nil, fmt.Errorf(
+			"claimcheck: envelope StorageURI bucket %q does not match expected bucket %q for topic %q; possible misconfiguration or tampered envelope",
+			bucket, expected, topic,
+		)
 	}
 	return &PayloadReader{ctx: ctx, s3: r.s3, bucket: bucket, key: key, size: env.ByteSize}, nil
 }

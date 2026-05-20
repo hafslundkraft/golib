@@ -34,7 +34,7 @@ func NewMessage(
 		Key:      key,
 		Value:    value,
 		Headers:  headers,
-		resolver: newResolver(s3, de, nooptrace.NewTracerProvider().Tracer("")),
+		resolver: newResolver(s3, de, nooptrace.NewTracerProvider().Tracer(""), DefaultBucketResolver),
 	}
 }
 
@@ -46,8 +46,8 @@ func NewTestWriter(kw kafkaWriter, ser serializer, opts ...WriterOption) *Writer
 	for _, o := range opts {
 		o(cfg)
 	}
-	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, cfg.stagerOpts...)
-	return &Writer{kw: kw, ser: ser, stager: stager}
+	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, ser, cfg.stagerOpts...)
+	return &Writer{kw: kw, stager: stager}
 }
 
 // NewBytesReaderAt wraps a byte slice in a *bytes.Reader which implements

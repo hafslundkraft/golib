@@ -105,11 +105,11 @@ func NewProcessor(
 	}
 
 	s3Reader := cfg.s3
+	bucketResolver := cfg.bucketResolver
+	if bucketResolver == nil {
+		bucketResolver = DefaultBucketResolver
+	}
 	if s3Reader == nil {
-		bucketResolver := cfg.bucketResolver
-		if bucketResolver == nil {
-			bucketResolver = DefaultBucketResolver
-		}
 		var err error
 		connCfg := conn.Config()
 		s3Reader, err = defaultS3ReaderFor(bucketResolver(topic), connCfg.SystemName, connCfg.Env)
@@ -123,7 +123,7 @@ func NewProcessor(
 		tracer = conn.Tracer()
 	}
 
-	res := newResolver(s3Reader, &avroDeserializer{de: conn.Deserializer()}, tracer)
+	res := newResolver(s3Reader, &avroDeserializer{de: conn.Deserializer()}, tracer, bucketResolver)
 
 	// Default to maxMessages=1 — each envelope is a heavyweight S3 fetch.
 	kafkaOpts := append(
