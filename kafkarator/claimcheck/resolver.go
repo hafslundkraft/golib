@@ -22,7 +22,12 @@ type resolver struct {
 	bucketResolver BucketResolver
 }
 
-func newResolver(s3 S3Reader, deserializer envelopeDeserializer, tracer trace.Tracer, bucketResolver BucketResolver) *resolver {
+func newResolver(
+	s3 S3Reader,
+	deserializer envelopeDeserializer,
+	tracer trace.Tracer,
+	bucketResolver BucketResolver,
+) *resolver {
 	if bucketResolver == nil {
 		bucketResolver = DefaultBucketResolver
 	}
@@ -49,7 +54,9 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 	if expected := r.bucketResolver(topic); bucket != expected {
 		return nil, fmt.Errorf(
 			"claimcheck: envelope StorageURI bucket %q does not match expected bucket %q for topic %q; possible misconfiguration or tampered envelope",
-			bucket, expected, topic,
+			bucket,
+			expected,
+			topic,
 		)
 	}
 	return &PayloadReader{ctx: ctx, s3: r.s3, bucket: bucket, key: key, size: env.ByteSize}, nil

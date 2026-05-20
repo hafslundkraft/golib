@@ -28,7 +28,13 @@ type multipartWriter struct {
 	logger     *slog.Logger
 }
 
-func newMultipartWriter(ctx context.Context, s3 S3Writer, bucket, key string, partSize int, logger *slog.Logger) (*multipartWriter, error) {
+func newMultipartWriter(
+	ctx context.Context,
+	s3 S3Writer,
+	bucket, key string,
+	partSize int,
+	logger *slog.Logger,
+) (*multipartWriter, error) {
 	if partSize < minPartSize {
 		return nil, fmt.Errorf("claimcheck: partSize %d is below the S3 minimum of %d bytes", partSize, minPartSize)
 	}
@@ -93,11 +99,12 @@ func (w *multipartWriter) Complete(ctx context.Context) error {
 // Abort discards all uploaded parts. Best-effort: errors are logged as
 // warnings so that the original error context is preserved by the caller.
 func (w *multipartWriter) Abort() {
-	if err := w.s3.AbortMultipartUpload(context.Background(), w.bucket, w.key, w.uploadID); err != nil {
-		w.logger.Warn("claimcheck: abort multipart upload failed; orphaned parts may accumulate",
+	ctx := context.Background()
+	if err := w.s3.AbortMultipartUpload(ctx, w.bucket, w.key, w.uploadID); err != nil {
+		w.logger.WarnContext(ctx, "claimcheck: abort multipart upload failed; orphaned parts may accumulate",
 			slog.String("bucket", w.bucket),
 			slog.String("key", w.key),
-			slog.String("upload_id", w.uploadID),
+			slog.String("upload-id", w.uploadID),
 			slog.Any("error", err),
 		)
 	}
