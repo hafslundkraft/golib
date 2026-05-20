@@ -18,25 +18,25 @@ import (
 type Message struct {
 	Topic     string
 	Key       []byte
-	Value     []byte
+	value     []byte
 	Headers   map[string][]byte
 	Partition int
 	Offset    int64
 	resolver  *resolver
 }
 
-// IsTombstone returns true when the Kafka message has no value (null payload).
-func (m *Message) IsTombstone() bool {
-	return m.Value == nil
+// IsEmpty returns true when the Kafka message has no value (null payload).
+func (m *Message) IsEmpty() bool {
+	return m.value == nil
 }
 
 // PeekEnvelope decodes the envelope without fetching the payload from S3.
-// Returns nil if the message is a tombstone.
+// Returns an error if the message is empty.
 func (m *Message) PeekEnvelope(ctx context.Context) (*Envelope, error) {
-	if m.IsTombstone() {
-		return nil, nil
+	if m.IsEmpty() {
+		return nil, errors.New("claimcheck: PeekEnvelope called on empty message")
 	}
-	return m.resolver.peekEnvelope(ctx, m.Topic, m.Value)
+	return m.resolver.peekEnvelope(ctx, m.Topic, m.value)
 }
 
 // Payload decodes the envelope and returns a PayloadReader backed by the S3
@@ -50,12 +50,12 @@ func (m *Message) PeekEnvelope(ctx context.Context) (*Envelope, error) {
 //	defer pr.Close()
 //	f, err := parquet.OpenFile(pr, pr.Size())
 //
-// Returns nil if the message is a tombstone.
+// Returns an error if the message is empty.
 func (m *Message) Payload(ctx context.Context) (*PayloadReader, error) {
-	if m.IsTombstone() {
-		return nil, nil
+	if m.IsEmpty() {
+		return nil, errors.New("claimcheck: Payload called on empty message")
 	}
-	return m.resolver.fetchPayload(ctx, m.Topic, m.Value)
+	return m.resolver.fetchPayload(ctx, m.Topic, m.value)
 }
 
 // Records yields each record in the payload decoded into a T. T must be a
@@ -66,10 +66,10 @@ func (m *Message) Payload(ctx context.Context) (*PayloadReader, error) {
 //
 //	for row, err := range claimcheck.Records[SensorRow](ctx, msg) { ... }
 //
-// Returns an empty iterator for tombstone messages.
+// Returns an empty iterator if the message is empty.
 func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 	var zero T
-	if m.IsTombstone() {
+	if m.IsEmpty() {
 		return func(yield func(T, error) bool) {}
 	}
 	return func(yield func(T, error) bool) {

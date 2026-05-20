@@ -32,7 +32,7 @@ func NewMessage(
 	return &Message{
 		Topic:    topic,
 		Key:      key,
-		Value:    value,
+		value:    value,
 		Headers:  headers,
 		resolver: newResolver(s3, de, nooptrace.NewTracerProvider().Tracer(""), DefaultBucketResolver),
 	}

@@ -31,7 +31,7 @@ func TestPeekEnvelope_ReturnsMetadataWithoutFetchingPayload(t *testing.T) {
 	assert.Empty(t, s3.Store, "PeekEnvelope must not touch S3")
 }
 
-func TestMessage_TombstoneYieldsNoRecords(t *testing.T) {
+func TestMessage_Empty(t *testing.T) {
 	type R struct {
 		X int32 `parquet:"x"`
 	}
@@ -39,7 +39,13 @@ func TestMessage_TombstoneYieldsNoRecords(t *testing.T) {
 	s3 := claimcheck.NewFakeS3Client()
 	msg := claimcheck.NewMessage("t", nil, nil, nil, s3, &fakeEnvelopeDeserializer{})
 
-	assert.True(t, msg.IsTombstone())
+	assert.True(t, msg.IsEmpty())
+
+	_, err := msg.PeekEnvelope(context.Background())
+	require.Error(t, err)
+
+	_, err = msg.Payload(context.Background())
+	require.Error(t, err)
 
 	var count int
 	for _, err := range claimcheck.Records[R](context.Background(), msg) {
@@ -47,7 +53,7 @@ func TestMessage_TombstoneYieldsNoRecords(t *testing.T) {
 		count++
 	}
 	assert.Zero(t, count)
-	assert.Empty(t, s3.Store, "tombstone must not touch S3")
+	assert.Empty(t, s3.Store, "empty message must not touch S3")
 }
 
 func TestMessage_Payload_RejectsTamperedBucket(t *testing.T) {

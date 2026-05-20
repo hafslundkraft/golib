@@ -135,7 +135,7 @@ func NewProcessor(
 		return handler(ctx, &Message{
 			Topic:     msg.Topic,
 			Key:       msg.Key,
-			Value:     msg.Value,
+			value:     msg.Value,
 			Headers:   msg.Headers,
 			Partition: msg.Partition,
 			Offset:    msg.Offset,
