@@ -36,10 +36,6 @@ type S3Writer interface {
 	// not return an error if the upload ID is unknown (best-effort clean-up).
 	AbortMultipartUpload(ctx context.Context, bucket, key, uploadID string) error
 
-	// PutObject stores body as a single object. Used for small payloads that
-	// do not require multipart upload.
-	PutObject(ctx context.Context, bucket, key string, body io.Reader) error
-
 	// DeleteObject deletes the object at key from bucket. Implementations must
 	// not return an error if the object does not exist.
 	DeleteObject(ctx context.Context, bucket, key string) error
@@ -48,10 +44,11 @@ type S3Writer interface {
 // S3Reader is the read-side object-storage interface required by the claim-check
 // read path. Satisfied by FakeS3Client for testing.
 type S3Reader interface {
-	// GetObject returns the object body and its total size in bytes. If
-	// byteRange is non-nil it must be a valid HTTP Range value (e.g.
-	// "bytes=1024-"); the returned size is always the full object size
-	// regardless of the range.
+	// GetObject returns the object body and the number of bytes available in body.
+	// If byteRange is non-nil it must be a valid HTTP Range value (e.g.
+	// "bytes=1024-"); in that case size reflects the length of the range, not
+	// the full object. Use [PayloadReader.Size] (populated from the envelope)
+	// when the full object size is needed.
 	GetObject(ctx context.Context, bucket, key string, byteRange *string) (body io.ReadCloser, size int64, err error)
 }
 

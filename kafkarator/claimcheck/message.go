@@ -90,7 +90,7 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 		)
 		defer span.End()
 
-		pr, err := m.Payload(ctx)
+		pr, err := m.resolver.fetchPayloadFromEnvelope(ctx, m.Topic, env)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())

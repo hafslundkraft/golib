@@ -1,7 +1,6 @@
 package claimcheck
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -204,27 +203,6 @@ func (p *s3Client) AbortMultipartUpload(ctx context.Context, bucket, key, upload
 			return nil
 		}
 		return fmt.Errorf("claimcheck: AbortMultipartUpload: %w", err)
-	}
-	return nil
-}
-
-func (p *s3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader) error {
-	c, err := p.awsClient(ctx)
-	if err != nil {
-		return err
-	}
-	bodyBytes, err := io.ReadAll(body)
-	if err != nil {
-		return fmt.Errorf("claimcheck: PutObject read body: %w", err)
-	}
-	_, err = c.PutObject(ctx, &awss3.PutObjectInput{
-		Bucket:        &bucket,
-		Key:           &key,
-		Body:          bytes.NewReader(bodyBytes),
-		ContentLength: aws.Int64(int64(len(bodyBytes))),
-	})
-	if err != nil {
-		return fmt.Errorf("claimcheck: PutObject: %w", err)
 	}
 	return nil
 }

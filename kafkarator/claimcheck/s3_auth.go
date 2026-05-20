@@ -32,7 +32,21 @@ const (
 	tokenRequestTimeout = 10 * time.Second
 )
 
-// ClaimCheckRoleARN computes the Ceph IAM role ARN for a claim-check bucket.
+// isValidARNComponent reports whether s contains only characters that are safe
+// to embed in a Ceph IAM role ARN path component (ASCII alphanumeric, '-', '_').
+func isValidARNComponent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// claimCheckRoleARN computes the Ceph IAM role ARN for a claim-check bucket.
 //
 //	arn:aws:iam:::role/happi/{system}/{env}/{bucket}/{system}.{env}.{bucket}.{access}
 //
@@ -52,6 +66,15 @@ func claimCheckRoleARN(system, env, bucket, access string) (string, error) {
 			strings.Join(missing, ", "),
 		)
 	}
+	if !isValidARNComponent(system) {
+		return "", fmt.Errorf(
+			"claimCheckRoleARN: system %q contains characters not allowed in an ARN path component",
+			system,
+		)
+	}
+	if !isValidARNComponent(env) {
+		return "", fmt.Errorf("claimCheckRoleARN: env %q contains characters not allowed in an ARN path component", env)
+	}
 	return fmt.Sprintf("arn:aws:iam:::role/happi/%s/%s/%s/%s.%s.%s.%s",
 		system, env, bucket, system, env, bucket, access), nil
 }
@@ -64,6 +87,10 @@ func newTokenExchanger() (*tokenExchanger, error) {
 	idpIssuerURL := os.Getenv(envIDPIssuerURL)
 	if strings.TrimSpace(idpIssuerURL) == "" {
 		return nil, fmt.Errorf("claimcheck: %s env var is not set", envIDPIssuerURL)
+	}
+	parsed, err := url.Parse(idpIssuerURL)
+	if err != nil || parsed.Scheme != "https" {
+		return nil, fmt.Errorf("claimcheck: %s must be an https:// URL, got %q", envIDPIssuerURL, idpIssuerURL)
 	}
 
 	idpTokenFile := defaultIDPTokenFile
@@ -165,7 +192,7 @@ func (e *tokenExchanger) exchangeToken(ctx context.Context) (_ time.Duration, re
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB ceiling
 	if err != nil {
 		return 0, fmt.Errorf("claimcheck: read token exchange response: %w", err)
 	}

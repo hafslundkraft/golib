@@ -20,3 +20,22 @@ func TestClaimCheckRoleARN_RejectsEmptyArgs(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "system")
 }
+
+func TestClaimCheckRoleARN_RejectsSlashInSystem(t *testing.T) {
+	_, err := claimcheck.ClaimCheckRoleARN("my/app", "prod", "cc-bucket", "rw")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "system")
+}
+
+func TestClaimCheckRoleARN_RejectsSlashInEnv(t *testing.T) {
+	_, err := claimcheck.ClaimCheckRoleARN("myapp", "prod/stage", "cc-bucket", "rw")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "env")
+}
+
+func TestClaimCheckRoleARN_AcceptsHyphensAndUnderscores(t *testing.T) {
+	arn, err := claimcheck.ClaimCheckRoleARN("my-app_1", "prod-eu", "cc-abc123", "r")
+	require.NoError(t, err)
+	assert.Contains(t, arn, "my-app_1")
+	assert.Contains(t, arn, "prod-eu")
+}

@@ -49,3 +49,36 @@ func TestMessage_TombstoneYieldsNoRecords(t *testing.T) {
 	assert.Zero(t, count)
 	assert.Empty(t, s3.Store, "tombstone must not touch S3")
 }
+
+func TestMessage_Payload_RejectsTamperedBucket(t *testing.T) {
+	env := &claimcheck.Envelope{
+		BatchID:     "batch-1",
+		StorageURI:  "s3://cc-wrongbucket/real-topic/batch-1.parquet",
+		Topic:       "real-topic",
+		RecordCount: 1,
+		ByteSize:    100,
+	}
+	s3 := claimcheck.NewFakeS3Client()
+	msg := claimcheck.NewMessage("real-topic", nil, []byte("wire"), nil, s3, &fakeEnvelopeDeserializer{env: env})
+
+	_, err := msg.Payload(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tampered")
+}
+
+func TestMessage_Payload_RejectsTamperedKeyPrefix(t *testing.T) {
+	correctBucket := claimcheck.DefaultBucketResolver("real-topic")
+	env := &claimcheck.Envelope{
+		BatchID:     "batch-1",
+		StorageURI:  "s3://" + correctBucket + "/other-topic/batch-1.parquet",
+		Topic:       "real-topic",
+		RecordCount: 1,
+		ByteSize:    100,
+	}
+	s3 := claimcheck.NewFakeS3Client()
+	msg := claimcheck.NewMessage("real-topic", nil, []byte("wire"), nil, s3, &fakeEnvelopeDeserializer{env: env})
+
+	_, err := msg.Payload(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tampered")
+}

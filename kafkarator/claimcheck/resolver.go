@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 )
@@ -47,6 +48,10 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: fetch payload: %w", err)
 	}
+	return r.fetchPayloadFromEnvelope(ctx, topic, env)
+}
+
+func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, env *Envelope) (*PayloadReader, error) {
 	bucket, key, err := s3URIParts(env.StorageURI)
 	if err != nil {
 		return nil, err
@@ -56,6 +61,14 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 			"claimcheck: envelope StorageURI bucket %q does not match expected bucket %q for topic %q; possible misconfiguration or tampered envelope",
 			bucket,
 			expected,
+			topic,
+		)
+	}
+	if expectedPrefix := topic + "/"; !strings.HasPrefix(key, expectedPrefix) {
+		return nil, fmt.Errorf(
+			"claimcheck: envelope StorageURI key %q does not have expected prefix %q for topic %q; possible misconfiguration or tampered envelope",
+			key,
+			expectedPrefix,
 			topic,
 		)
 	}

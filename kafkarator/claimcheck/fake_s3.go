@@ -104,18 +104,6 @@ func (f *FakeS3Client) AbortMultipartUpload(_ context.Context, bucket, key, uplo
 	return nil
 }
 
-// PutObject implements S3Client.
-func (f *FakeS3Client) PutObject(_ context.Context, bucket, key string, body io.Reader) error {
-	data, err := io.ReadAll(body)
-	if err != nil {
-		return fmt.Errorf("fake s3: read put body: %w", err)
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.Store[f.storeKey(bucket, key)] = data
-	return nil
-}
-
 // DeleteObject implements S3Client.
 func (f *FakeS3Client) DeleteObject(_ context.Context, bucket, key string) error {
 	f.mu.Lock()
@@ -136,7 +124,6 @@ func (f *FakeS3Client) GetObject(
 	if !ok {
 		return nil, 0, fmt.Errorf("fake s3: object not found: %s/%s", bucket, key)
 	}
-	fullSize := int64(len(data))
 	if byteRange != nil {
 		sliced, err := applyByteRange(*byteRange, data)
 		if err != nil {
@@ -144,7 +131,12 @@ func (f *FakeS3Client) GetObject(
 		}
 		data = sliced
 	}
-	return io.NopCloser(bytes.NewReader(data)), fullSize, nil
+	// Copy before releasing the lock so the returned reader does not share the
+	// backing array with Store. Without this, a concurrent DeleteObject or
+	// CompleteMultipartUpload could race on the same memory.
+	result := make([]byte, len(data))
+	copy(result, data)
+	return io.NopCloser(bytes.NewReader(result)), int64(len(result)), nil
 }
 
 // applyByteRange parses an HTTP Range header value such as "bytes=1024-" or

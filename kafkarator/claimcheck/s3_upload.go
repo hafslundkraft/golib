@@ -16,16 +16,16 @@ const (
 // parts whenever the buffer reaches partSize. The full Parquet file is never
 // held entirely in memory.
 type multipartWriter struct {
-	ctx        context.Context //nolint:containedctx // stored to satisfy io.Writer which has no ctx parameter
-	s3         S3Writer
-	bucket     string
-	key        string
-	partSize   int
-	uploadID   string
-	parts      []CompletedPart
-	buf        []byte
-	totalBytes int64
-	logger     *slog.Logger
+	ctx          context.Context //nolint:containedctx // stored to satisfy io.Writer which has no ctx parameter
+	s3           S3Writer
+	bucket       string
+	key          string
+	partSize     int
+	uploadID     string
+	parts        []CompletedPart
+	buf          []byte
+	flushedBytes int64
+	logger       *slog.Logger
 }
 
 func newMultipartWriter(
@@ -67,7 +67,7 @@ func (w *multipartWriter) Write(p []byte) (int, error) {
 // Size returns the total number of bytes written so far, including bytes
 // buffered but not yet uploaded as a part.
 func (w *multipartWriter) Size() int64 {
-	return w.totalBytes + int64(len(w.buf))
+	return w.flushedBytes + int64(len(w.buf))
 }
 
 func (w *multipartWriter) flushPart() error {
@@ -80,7 +80,7 @@ func (w *multipartWriter) flushPart() error {
 		return fmt.Errorf("claimcheck: upload part %d: %w", partNumber, err)
 	}
 	w.parts = append(w.parts, CompletedPart{PartNumber: partNumber, ETag: etag})
-	w.totalBytes += int64(len(w.buf))
+	w.flushedBytes += int64(len(w.buf))
 	w.buf = w.buf[:0]
 	return nil
 }
