@@ -5,8 +5,8 @@
 //   - Reading messages from Kafka with Avro deserialization
 //   - Processing messages with a handler
 //
-// The setup code (testcontainers, telemetry, mock schema registry) is in helpers.go
-// and can be ignored when learning the basic kafkarator patterns.
+// Shared setup helpers (testcontainers and schema setup) are in
+// internal/demohelpers and can be ignored when learning the basic kafkarator patterns.
 package main
 
 import (
@@ -18,6 +18,8 @@ import (
 
 	"github.com/hafslundkraft/golib/kafkarator"
 	"github.com/hafslundkraft/golib/telemetry"
+
+	"github.com/hafslundkraft/golib/examples/internal/demohelpers"
 )
 
 const (
@@ -48,7 +50,7 @@ func main() {
 	// This section starts a local Kafka for testing.
 
 	log.Println("Starting Kafka container...")
-	kafkaContainer := startRedpandaContainer(ctx, redpandaImage)
+	kafkaContainer := demohelpers.StartRedpandaContainer(ctx, redpandaImage)
 	defer func() {
 		log.Println("Cleaning up: terminating Kafka container...")
 		if err := kafkaContainer.Terminate(ctx); err != nil {
@@ -57,9 +59,9 @@ func main() {
 		log.Println("Cleanup complete")
 	}()
 
-	broker := getRedpandaBrokerAddress(ctx, kafkaContainer)
+	broker := demohelpers.GetRedpandaBrokerAddress(ctx, kafkaContainer)
 	log.Printf("Redpanda Kafka broker: %s", broker)
-	schemaRegistryURL := getRedpandaSchemaRegistryAddress(ctx, kafkaContainer)
+	schemaRegistryURL := demohelpers.GetRedpandaSchemaRegistryAddress(ctx, kafkaContainer)
 	log.Printf("Redpanda Schema Registry URL: %s", schemaRegistryURL)
 
 	// Setup telemetry (observability)
@@ -74,7 +76,15 @@ func main() {
 	logger.InfoContext(ctx, "Starting kafkarator demo...")
 
 	// Create kafkarator connection (with Avro schema support)
-	conn := setupKafkaConnection(broker, schemaRegistryURL, schema, tp)
+	conn := demohelpers.SetupKafkaConnection(
+		broker,
+		schemaRegistryURL,
+		topic,
+		schema,
+		"kafkarator",
+		"processor-demo",
+		tp,
+	)
 	logger.InfoContext(ctx, "Connection created")
 
 	// ========================================
