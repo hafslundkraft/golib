@@ -4,15 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel/trace"
-
 	kafkarator "github.com/hafslundkraft/golib/kafkarator"
 )
 
 // kafkaWriter sends a single message to Kafka.
 // Satisfied by *kafkarator.Writer (via Connection.Writer()).
 type kafkaWriter interface {
-	Write(ctx context.Context, message *kafkarator.Message) error
+	Write(ctx context.Context, message *kafkarator.Message, opts ...kafkarator.WriteOption) error
 	Close(ctx context.Context) error
 }
 
@@ -60,12 +58,6 @@ func WithWriterRowGroupSize(n int) WriterOption {
 // WithWriterPartSize sets the S3 multipart part size in bytes. Must be ≥ 5 MiB. Default is 5 MiB.
 func WithWriterPartSize(n int) WriterOption {
 	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withPartSize(n)) }
-}
-
-// WithWriterTracer sets the OpenTelemetry tracer used to instrument S3 and Kafka operations.
-// Defaults to the tracer from the kafkarator.Connection's TelemetryProvider.
-func WithWriterTracer(t trace.Tracer) WriterOption {
-	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withTracer(t)) }
 }
 
 // BatchOption configures a single [Batch] call.
@@ -119,7 +111,7 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: create kafka writer: %w", err)
 	}
-	// Inject the connection's tracer and logger as defaults; callers can override with WithWriterTracer.
+
 	cfg.stagerOpts = append([]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger())}, cfg.stagerOpts...)
 	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, conn.Serializer(), cfg.stagerOpts...)
 	return &Writer{kw: kw, stager: stager}, nil
@@ -160,18 +152,30 @@ func (w *Writer) NewBatch(ctx context.Context, topic string, opts ...BatchOption
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: stage batch: %w", err)
 	}
+	// produce ships the envelope synchronously: kafkarator.Writer.Write is async,
+	// so we register a one-shot delivery channel and block until the broker has
+	// acked (or failed) the message. The S3 object must not be considered
+	// produced until the envelope is durably on the topic.
 	batch.produce = func(ctx context.Context, value []byte) error {
-		if err := w.kw.Write(ctx, &kafkarator.Message{
+		msg := &kafkarator.Message{
 			Topic:   topic,
 			Key:     cfg.key,
 			Headers: cfg.headers,
 			Value:   value,
-		}); err != nil {
-			// Do NOT delete the S3 object on Kafka write failure. The broker may
-			// have already committed the message; the error could be a lost ack.
-			// Orphaned objects are swept by bucket lifecycle rules.
+		}
+
+		deliveryChan := make(chan kafkarator.DeliveryReport, 1)
+		defer close(deliveryChan)
+
+		if err := w.kw.Write(ctx, msg, kafkarator.WithDeliveryChannel(deliveryChan)); err != nil {
 			return fmt.Errorf("claimcheck: write kafka message: %w", err)
 		}
+
+		ev := <-deliveryChan
+		if err := ev.Err; err != nil {
+			return fmt.Errorf("claimcheck: message delivery failed: %w", err)
+		}
+
 		return nil
 	}
 	return batch, nil
