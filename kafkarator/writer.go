@@ -150,7 +150,11 @@ func (w *Writer) Close(ctx context.Context) error {
 //
 //   - One or more messages failed delivery. The error wraps the first
 //     observed broker error and reports the total failure count.
-//   - The deadline elapsed before all deliveries completed.
+//   - The producer queue still had pending messages when the deadline
+//     elapsed.
+//   - All messages reached the broker but some delivery reports were
+//     not processed before the deadline — typically caller-side
+//     back-pressure on a registered DeliveryChannel.
 func (w *Writer) Flush(ctx context.Context) error {
 	if w.closed.Load() {
 		return fmt.Errorf("writer is closed")
@@ -177,13 +181,16 @@ func (w *Writer) Flush(ctx context.Context) error {
 		defer cancel()
 	}
 
+	var waitErr error
 	select {
 	case <-waitDone:
 	case <-waitCtx.Done():
 		// Deadline or cancellation hit — some goroutines may still be running.
-		return fmt.Errorf("wait for delivery reports: %w", waitCtx.Err())
+		waitErr = waitCtx.Err()
 	}
 
+	// Drain accumulated delivery errors regardless of how the wait ended, so
+	// they cannot leak into a later Flush against an unrelated batch.
 	w.deliveryErrsMu.Lock()
 	firstErr := w.firstDeliveryErr
 	errorCount := w.deliveryErrCount
@@ -197,6 +204,10 @@ func (w *Writer) Flush(ctx context.Context) error {
 
 	if stillPending > 0 {
 		return fmt.Errorf("flush timed out with %d messages still pending", stillPending)
+	}
+
+	if waitErr != nil {
+		return fmt.Errorf("wait for delivery reports: %w", waitErr)
 	}
 
 	return nil
@@ -273,18 +284,14 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 
 	deliveryChan := make(chan kafka.Event, 1)
 
-	// Register the pending delivery before Produce so Flush cannot miss it.
-	w.pending.Add(1)
 	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
-		w.pending.Done()
 		setProducerError(span, err)
 		span.End()
 		return fmt.Errorf("produce message: %w", err)
 	}
 
-	go func() {
-		defer w.pending.Done()
+	w.pending.Go(func() {
 		defer close(deliveryChan)
 		defer span.End()
 
@@ -333,7 +340,7 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 		}
 
 		setProducerSuccess(span, partitionID, int64(m.TopicPartition.Offset))
-	}()
+	})
 
 	return nil
 }
