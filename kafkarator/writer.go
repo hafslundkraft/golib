@@ -23,10 +23,13 @@ const (
 var ErrWriterClosed = errors.New("kafkarator: writer closed before delivery report received")
 
 // DeliveryReport describes the outcome of an asynchronous Write. It is sent
-// on the channel registered via [WithDeliveryChannel] exactly once per
-// accepted Write. Err is nil on success, the broker delivery error on
-// failure, or [ErrWriterClosed] if the writer shut down before the broker
-// reported back.
+// on the channel registered via [WithDeliveryChannel] for each accepted
+// Write. Err is nil on success, the broker delivery error on failure, or
+// [ErrWriterClosed] if the writer shut down before the broker reported back.
+//
+// During shutdown, [ErrWriterClosed] reports are best-effort: if the
+// channel has no room when Close fires, the report is dropped rather than
+// stalling Close.
 type DeliveryReport struct {
 	Err error
 }
@@ -34,18 +37,23 @@ type DeliveryReport struct {
 // WriteOptions holds the resolved per-call configuration assembled from
 // [WriteOption] values.
 type WriteOptions struct {
-	// DeliveryChannel, if non-nil, receives one [DeliveryReport] per accepted
-	// Write. The caller owns the channel; the writer never closes it.
+	// DeliveryChannel, if non-nil, receives a [DeliveryReport] per accepted
+	// Write. See [WithDeliveryChannel].
 	DeliveryChannel chan DeliveryReport
 }
 
 // WriteOption configures a single [Writer.Write] call.
 type WriteOption func(*WriteOptions)
 
-// WithDeliveryChannel registers ch to receive the [DeliveryReport] for this
-// Write. The caller owns ch and is responsible for receiving from it. A
-// buffered channel of capacity at least 1 is recommended so the writer's
-// delivery goroutine never blocks on the send.
+// WithDeliveryChannel registers ch to receive a [DeliveryReport] for this
+// Write. The caller owns ch; the writer never closes it.
+//
+// The simplest safe pattern is one buffered channel (capacity 1) per
+// Write. If ch is shared across Writes — e.g., one channel per batch job —
+// size it for the in-flight Write count or drain it promptly: the writer
+// blocks on the send in steady state (undrained → goroutine leak), and
+// during shutdown the send is non-blocking and reports that don't fit are
+// dropped (see [DeliveryReport]).
 func WithDeliveryChannel(ch chan DeliveryReport) WriteOption {
 	return func(opts *WriteOptions) {
 		opts.DeliveryChannel = ch
@@ -76,8 +84,10 @@ func newWriter(
 // [WithDeliveryChannel] or aggregated with [Writer.Flush]. Close shuts the
 // writer down and releases the underlying producer.
 //
-// A Writer is safe for concurrent Write and Flush calls. Close must not be
-// called concurrently with Write or Flush.
+// Concurrent Write calls are safe. Flush is a barrier: don't call it while
+// another goroutine is executing Write. Close must not race with Write or
+// Flush. The intended pattern is to issue Writes (from one or many
+// goroutines), wait for them all to return, then Flush or Close.
 type Writer struct {
 	producedMessagesCounter messagingconv.ClientSentMessages
 	producer                *kafka.Producer
@@ -127,8 +137,10 @@ func (w *Writer) Close(ctx context.Context) error {
 	return nil
 }
 
-// Flush waits for all messages enqueued so far to be delivered to the broker
-// and returns once their delivery reports have been processed.
+// Flush waits for all in-flight messages to be delivered to the broker and
+// returns once their delivery reports have been processed. It must not be
+// called while another goroutine is executing Write — see [Writer] for
+// the intended usage pattern.
 //
 // The wait is bounded by ctx's deadline if one is set, otherwise by a
 // default 5-second timeout. Canceling ctx also unblocks Flush.
@@ -138,13 +150,7 @@ func (w *Writer) Close(ctx context.Context) error {
 //
 //   - One or more messages failed delivery. The error wraps the first
 //     observed broker error and reports the total failure count.
-//   - The timeout elapsed with messages still pending in the producer queue.
-//
-// Delivery errors observed since the previous Flush are drained on return —
-// they are reported exactly once. Reports from goroutines that hadn't
-// completed by the deadline will surface in a later Flush if they finish.
-//
-// Calling Flush on a closed writer returns an error without waiting.
+//   - The deadline elapsed before all deliveries completed.
 func (w *Writer) Flush(ctx context.Context) error {
 	if w.closed.Load() {
 		return fmt.Errorf("writer is closed")
@@ -175,7 +181,7 @@ func (w *Writer) Flush(ctx context.Context) error {
 	case <-waitDone:
 	case <-waitCtx.Done():
 		// Deadline or cancellation hit — some goroutines may still be running.
-		// Their results will simply not be reflected in this Flush call.
+		return fmt.Errorf("wait for delivery reports: %w", waitCtx.Err())
 	}
 
 	w.deliveryErrsMu.Lock()
@@ -214,12 +220,7 @@ func getTimeoutOrDefault(ctx context.Context, defaultTimeout time.Duration) time
 //
 // Delivery results can be observed in two ways:
 //
-//   - Pass [WithDeliveryChannel] to receive a [DeliveryReport] for each
-//     accepted Write — exactly once. The report's Err field is nil on
-//     success, the broker error on failure, or [ErrWriterClosed] if the
-//     writer shut down before a delivery report arrived. The caller owns
-//     the channel; Write never closes it.
-//
+//   - Pass [WithDeliveryChannel] to receive a [DeliveryReport] per Write.
 //   - Call [Writer.Flush] to wait for all pending messages and receive an
 //     aggregated error if any of them failed.
 //
