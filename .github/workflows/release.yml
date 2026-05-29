@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: release
@@ -22,21 +23,42 @@ jobs:
           fetch-depth: 0
 
       - name: Tag changed modules
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           changed_files=$(git diff --name-only ${{ github.event.before }} HEAD)
+
+          labels=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '.[].labels[].name' 2>/dev/null || true)
 
           for gomod in $(find . -name go.mod -not -path ./examples/go.mod); do
             module=$(dirname "$gomod" | sed 's|^\./||')
             if echo "$changed_files" | grep -q "^${module}/"; then
+              if echo "$labels" | grep -qx "no-release:${module}" \
+                || echo "$labels" | grep -qx "no-release"; then
+                echo "Skipping ${module} (no-release label)"
+                continue
+              fi
+
+              bump=patch
+              if echo "$labels" | grep -qx "minor:${module}" \
+                || echo "$labels" | grep -qx "minor"; then
+                bump=minor
+              fi
+
               latest=$(git tag -l "${module}/v*" --sort=-v:refname | head -1)
               if [ -z "$latest" ]; then
                 next="${module}/v0.1.0"
               else
                 version="${latest#${module}/v}"
                 IFS='.' read -r major minor patch <<< "$version"
-                next="${module}/v${major}.${minor}.$((patch + 1))"
+                if [ "$bump" = "minor" ]; then
+                  next="${module}/v${major}.$((minor + 1)).0"
+                else
+                  next="${module}/v${major}.${minor}.$((patch + 1))"
+                fi
               fi
-              echo "Tagging ${next}"
+              echo "Tagging ${next} (${bump})"
               git tag "$next"
             fi
           done
