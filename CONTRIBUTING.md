@@ -122,6 +122,26 @@ duration, status codes, and request counts.
 4. Link any related issues
 5. Wait for review and address any feedback
 
+### Releases
+
+Each module is tagged automatically when the PR merges to `main`. The bump
+level is controlled by labels on the PR:
+
+- No label → patch bump (`v1.2.3` → `v1.2.4`) for every changed module.
+- `minor` → minor bump (`v1.2.3` → `v1.3.0`) for every changed module.
+- `minor:<module>` (e.g. `minor:telemetry`) → minor bump for that module
+  only; other changed modules still get a patch bump. Use this when one PR
+  touches several modules but only some warrant a minor.
+- `no-release` / `no-release:<module>` → skip automatic tagging entirely
+  (for the whole PR, or scoped to one module). Use this for docs-only
+  changes that touched module files, or when you plan to tag manually
+  (e.g. a major bump).
+
+Major bumps are not automated. Tag them manually when needed — for v0→v1
+graduation a plain `git tag <module>/v1.0.0` is enough, and v2+ also
+requires updating the module path in `go.mod`. Pair the breaking-change PR
+with `no-release` so it doesn't get auto-tagged as a patch.
+
 ## Adding New Packages
 
 When adding a new reusable package to this repository:
