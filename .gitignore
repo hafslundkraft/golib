@@ -1,3 +1,6 @@
 /.idea/
 /.vscode/
 telemetry/coverage.out
+go.work
+go.work.sum
+!examples/go.work
