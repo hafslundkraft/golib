@@ -161,6 +161,10 @@ func writeMessages(
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	if err := writer.Flush(ctx); err != nil { // Ensure all messages are sent before exiting
+		return fmt.Errorf("flush writer: %w", err)
+	}
+
 	return nil
 }
 

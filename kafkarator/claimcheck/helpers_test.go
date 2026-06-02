@@ -57,8 +57,18 @@ type captureKW struct {
 	last *kafkarator.Message
 }
 
-func (c *captureKW) Write(_ context.Context, msg *kafkarator.Message) error {
+func (c *captureKW) Write(_ context.Context, msg *kafkarator.Message, opts ...kafkarator.WriteOption) error {
+	o := &kafkarator.WriteOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
 	c.last = msg
+
+	if o.DeliveryChannel != nil {
+		o.DeliveryChannel <- kafkarator.DeliveryReport{}
+	}
+
 	return nil
 }
 

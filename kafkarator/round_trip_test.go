@@ -34,32 +34,6 @@ func generateID() string {
 	return hex.EncodeToString(b)
 }
 
-// deliveryStatus tracks message delivery completion.
-type deliveryStatus struct {
-	mu     sync.Mutex
-	called bool
-	err    error
-}
-
-func (d *deliveryStatus) markDelivered(err error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.called = true
-	d.err = err
-}
-
-func (d *deliveryStatus) isDelivered() bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.called
-}
-
-func (d *deliveryStatus) getError() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.err
-}
-
 // traceContext captures trace information from handler execution.
 type traceContext struct {
 	mu       sync.Mutex
@@ -116,15 +90,6 @@ func waitForConsumerAssignment(t *testing.T, reader *Reader, timeout time.Durati
 	}, timeout)
 
 	require.True(t, assigned, "consumer did not get partition assignment within timeout")
-}
-
-// assertDelivery waits for delivery and asserts no error occurred.
-func assertDelivery(t *testing.T, status *deliveryStatus, timeout time.Duration) {
-	t.Helper()
-
-	delivered := waitFor(status.isDelivered, timeout)
-	require.True(t, delivered, "message was not delivered within timeout")
-	require.NoError(t, status.getError(), "delivery error occurred")
 }
 
 // retryRead attempts to read messages with retries for topic availability.
@@ -207,13 +172,9 @@ func TestWriterReaderRoundtrip(t *testing.T) {
 		Headers: map[string][]byte{},
 	}
 
-	status := &deliveryStatus{}
 	err = writer.Write(ctx, produced)
 	require.NoError(t, err)
-
-	// Simulate delivery confirmation
-	status.markDelivered(nil)
-	assertDelivery(t, status, testTimeout)
+	require.NoError(t, writer.Flush(ctx))
 
 	// Read message back with retry for topic creation
 	time.Sleep(testTopicCreateDelay)
@@ -298,12 +259,8 @@ func TestWriterReaderRoundtripWithSerde(t *testing.T) {
 		Headers: map[string][]byte{},
 	}
 
-	status := &deliveryStatus{}
 	err = writer.Write(ctx, produced)
 	require.NoError(t, err)
-
-	status.markDelivered(nil)
-	assertDelivery(t, status, testTimeout)
 
 	// Read and deserialize with retry
 	time.Sleep(testTopicCreateDelay)
@@ -385,6 +342,7 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 
 	err = writer.Write(parentCtx, msg)
 	require.NoError(t, err)
+	require.NoError(t, writer.Flush(ctx))
 	parentSpan.End()
 
 	time.Sleep(testTopicCreateDelay)
@@ -453,6 +411,7 @@ func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 	}
 
 	require.NoError(t, writer.Write(ctx, produced))
+	require.NoError(t, writer.Flush(ctx))
 	// Give Kafka time to auto-create the topic and propagate metadata.
 	time.Sleep(testTopicCreateDelay)
 
@@ -486,7 +445,7 @@ func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.
 		Value:   []byte("v1"),
 		Headers: map[string][]byte{},
 	}))
-
+	require.NoError(t, writer.Flush(ctx))
 	// Give Kafka time to auto-create the topic and propagate metadata.
 	time.Sleep(testTopicCreateDelay)
 
@@ -512,7 +471,7 @@ func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.
 		Value:   []byte("v2"),
 		Headers: map[string][]byte{},
 	}))
-
+	require.NoError(t, writer.Flush(ctx))
 	msgs, commit, err = retryRead(ctx, reader, 1, testTimeout)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
@@ -539,6 +498,7 @@ func TestProcessorAutoOffsetResetEarliestProcessesExistingMessage(t *testing.T) 
 		Value:   []byte("v1"),
 		Headers: map[string][]byte{},
 	}))
+	require.NoError(t, writer.Flush(ctx))
 	time.Sleep(testTopicCreateDelay)
 
 	var handled int
@@ -582,6 +542,7 @@ func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *t
 		Value:   []byte("v1"),
 		Headers: map[string][]byte{},
 	}))
+	require.NoError(t, writer.Flush(ctx))
 	time.Sleep(testTopicCreateDelay)
 
 	var handled int
@@ -616,6 +577,7 @@ func TestProcessorAutoOffsetResetLatestSkipsExistingThenProcessesNewMessage(t *t
 		Value:   []byte("v2"),
 		Headers: map[string][]byte{},
 	}))
+	require.NoError(t, writer.Flush(ctx))
 
 	count, err = retryProcess(ctx, processor)
 	require.NoError(t, err)
