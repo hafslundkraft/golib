@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.100.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.0
 	github.com/google/uuid v1.6.0
-	github.com/hafslundkraft/golib/kafkarator v0.1.2
+	github.com/hafslundkraft/golib/kafkarator v0.2.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.44.0
@@ -67,5 +67,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/hafslundkraft/golib/kafkarator => ../
