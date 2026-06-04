@@ -35,14 +35,14 @@ jobs:
             module=$(dirname "$gomod" | sed 's|^\./||')
             if echo "$changed_files" | grep -q "^${module}/"; then
               if echo "$labels" | grep -qx "no-release:${module}" \
-                || echo "$labels" | grep -qx "no-release"; then
+                || echo "$labels" | grep -qx "no-release:all"; then
                 echo "Skipping ${module} (no-release label)"
                 continue
               fi
 
               bump=patch
               if echo "$labels" | grep -qx "minor:${module}" \
-                || echo "$labels" | grep -qx "minor"; then
+                || echo "$labels" | grep -qx "minor:all"; then
                 bump=minor
               fi
 
