@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"io"
+	"net/http"
 
 	"go.opentelemetry.io/contrib/processors/minsev"
 )
@@ -57,6 +58,16 @@ func WithTestIDGenerator() OptionFunc {
 func WithEndpoint(endpoint string) OptionFunc {
 	return func(c *config) {
 		c.endpoint = endpoint
+	}
+}
+
+// WithHTTPClient sets the HTTP client used by the OTLP exporters to send
+// telemetry data. This is useful for customizing transport behavior, e.g.
+// injecting authentication, proxies or custom TLS configuration. This has no
+// effect in local mode.
+func WithHTTPClient(client *http.Client) OptionFunc {
+	return func(c *config) {
+		c.httpClient = client
 	}
 }
 

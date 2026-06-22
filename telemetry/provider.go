@@ -49,6 +49,7 @@ type config struct {
 	testIDGen   bool
 	minSeverity minsev.Severitier
 	endpoint    string
+	httpClient  *http.Client
 }
 
 func (c config) localWriter() io.Writer {
@@ -201,6 +202,9 @@ func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider
 	if cfg.endpoint != "" {
 		otlpOpts = append(otlpOpts, otlptracehttp.WithEndpointURL(cfg.endpoint))
 	}
+	if cfg.httpClient != nil {
+		otlpOpts = append(otlpOpts, otlptracehttp.WithHTTPClient(cfg.httpClient))
+	}
 	otlpExporter, err := otlptracehttp.New(ctx, otlpOpts...)
 	if err != nil {
 		panic(err)
@@ -223,6 +227,9 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 	var otlpOpts []otlpmetrichttp.Option
 	if cfg.endpoint != "" {
 		otlpOpts = append(otlpOpts, otlpmetrichttp.WithEndpointURL(cfg.endpoint))
+	}
+	if cfg.httpClient != nil {
+		otlpOpts = append(otlpOpts, otlpmetrichttp.WithHTTPClient(cfg.httpClient))
 	}
 	otlpExporter, err := otlpmetrichttp.New(ctx, otlpOpts...)
 	if err != nil {
@@ -248,6 +255,9 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 		var otlpOpts []otlploghttp.Option
 		if cfg.endpoint != "" {
 			otlpOpts = append(otlpOpts, otlploghttp.WithEndpointURL(cfg.endpoint))
+		}
+		if cfg.httpClient != nil {
+			otlpOpts = append(otlpOpts, otlploghttp.WithHTTPClient(cfg.httpClient))
 		}
 		otlpLogExporter, err := otlploghttp.New(ctx, otlpOpts...)
 		if err != nil {
