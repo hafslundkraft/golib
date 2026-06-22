@@ -52,7 +52,7 @@ type config struct {
 	httpClient  *http.Client
 }
 
-func (c config) localWriter() io.Writer {
+func (c *config) localWriter() io.Writer {
 	if c.localW != nil {
 		return c.localW
 	}
@@ -80,11 +80,11 @@ func New(ctx context.Context, opts ...OptionFunc) (provider *Provider, shutdown 
 		return err
 	}
 
-	lp := newLoggerProvider(ctx, cfg)
+	lp := newLoggerProvider(ctx, &cfg)
 	shutdownFuncs = append(shutdownFuncs, lp.Shutdown)
-	tp := newTracerProvider(ctx, cfg)
+	tp := newTracerProvider(ctx, &cfg)
 	shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
-	mp := newMeterProvider(ctx, cfg)
+	mp := newMeterProvider(ctx, &cfg)
 	shutdownFuncs = append(shutdownFuncs, mp.Shutdown)
 
 	propagator := newPropagator()
@@ -197,7 +197,7 @@ func newPropagator() propagation.TextMapPropagator {
 	)
 }
 
-func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider {
+func newTracerProvider(ctx context.Context, cfg *config) *tracesdk.TracerProvider {
 	var otlpOpts []otlptracehttp.Option
 	if cfg.endpoint != "" {
 		otlpOpts = append(otlpOpts, otlptracehttp.WithEndpointURL(cfg.endpoint))
@@ -223,7 +223,7 @@ func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider
 	return tracesdk.NewTracerProvider(opts...)
 }
 
-func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider {
+func newMeterProvider(ctx context.Context, cfg *config) *metricsdk.MeterProvider {
 	var otlpOpts []otlpmetrichttp.Option
 	if cfg.endpoint != "" {
 		otlpOpts = append(otlpOpts, otlpmetrichttp.WithEndpointURL(cfg.endpoint))
@@ -244,7 +244,7 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 	return metricsdk.NewMeterProvider(metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter)))
 }
 
-func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
+func newLoggerProvider(ctx context.Context, cfg *config) *logsdk.LoggerProvider {
 	var processors []logsdk.Processor
 	if cfg.local {
 		processors = append(processors, logsdk.NewBatchProcessor(&LineLogExporter{

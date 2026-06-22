@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -177,7 +178,11 @@ type countingRoundTripper struct {
 
 func (rt *countingRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	rt.calls.Add(1)
-	return rt.next.RoundTrip(r)
+	resp, err := rt.next.RoundTrip(r)
+	if err != nil {
+		return nil, fmt.Errorf("counting round tripper: %w", err)
+	}
+	return resp, nil
 }
 
 func TestProvider_withMinSeverity(t *testing.T) {
