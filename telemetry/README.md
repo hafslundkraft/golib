@@ -60,6 +60,8 @@ The exact behavior of the provider can be configured using options passed to the
 * **WithLocalWriter**: Allows you to specify a custom io.Writer for local terminal output. It also enables local mode.
 * **WithLocalColors**: If set to true, the local output will include ANSI color codes for better readability in terminals that support colors. This option is only effective when local mode is enabled.
 * **WithAttributes**: Adds extra attributes/fields to the underlying telemetry providers. Currently only works for logs.
+* **WithEndpoint**: Overrides the OTLP endpoint that telemetry data is exported to. By default the endpoint is read from the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable. The value must be a full URL, e.g. `https://otel.example.com:4318`. This has no effect in local mode.
+* **WithHTTPClient**: Sets the HTTP client used by the OTLP exporters to send telemetry data. Useful for customizing transport behavior, e.g. injecting authentication, proxies or custom TLS configuration. This has no effect in local mode.
 * **WithMinSeverity**: Drops log records below the given severity. Pass a `minsev.Severity` for a static threshold, or a `*minsev.SeverityVar` to adjust at runtime.
 * **WithTestIDGenerator**: Enables deterministic trace and span ID generation for testing. This should only be used in tests.
 

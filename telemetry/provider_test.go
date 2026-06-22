@@ -2,10 +2,12 @@ package telemetry
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 
@@ -136,6 +138,51 @@ func TestProvider_withEndpoint(t *testing.T) {
 	mp, found := gotPaths.Load("/v1/metrics")
 	require.True(t, found, "expected /v1/metrics to be a key in the map")
 	require.True(t, mp.(bool), "expected metric export to hit the overridden endpoint")
+}
+
+func TestProvider_withHTTPClient(t *testing.T) {
+	ctx := t.Context()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// An empty 200 body is a valid (empty) OTLP export response.
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// A custom client whose RoundTripper records that it was invoked, proving
+	// the OTLP exporters export through the provided client.
+	rt := &countingRoundTripper{next: http.DefaultTransport}
+	client := &http.Client{Transport: rt}
+
+	tel, shutdown := New(ctx, WithEndpoint(srv.URL), WithHTTPClient(client))
+	require.NotNil(t, tel)
+
+	_, span := tel.Tracer().Start(ctx, "test")
+	span.End()
+
+	counter, err := tel.Meter().Int64Counter("test-counter")
+	require.NoError(t, err)
+	counter.Add(ctx, 42)
+
+	// Shutdown flushes the batched span processor and the periodic metric
+	// reader, forcing the exports through the custom client.
+	require.NoError(t, shutdown(ctx))
+
+	require.Positive(t, rt.calls.Load(), "expected exports to go through the custom HTTP client")
+}
+
+type countingRoundTripper struct {
+	next  http.RoundTripper
+	calls atomic.Int64
+}
+
+func (rt *countingRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	rt.calls.Add(1)
+	resp, err := rt.next.RoundTrip(r)
+	if err != nil {
+		return nil, fmt.Errorf("counting round tripper: %w", err)
+	}
+	return resp, nil
 }
 
 func TestProvider_withMinSeverity(t *testing.T) {

@@ -49,9 +49,10 @@ type config struct {
 	testIDGen   bool
 	minSeverity minsev.Severitier
 	endpoint    string
+	httpClient  *http.Client
 }
 
-func (c config) localWriter() io.Writer {
+func (c *config) localWriter() io.Writer {
 	if c.localW != nil {
 		return c.localW
 	}
@@ -79,11 +80,11 @@ func New(ctx context.Context, opts ...OptionFunc) (provider *Provider, shutdown 
 		return err
 	}
 
-	lp := newLoggerProvider(ctx, cfg)
+	lp := newLoggerProvider(ctx, &cfg)
 	shutdownFuncs = append(shutdownFuncs, lp.Shutdown)
-	tp := newTracerProvider(ctx, cfg)
+	tp := newTracerProvider(ctx, &cfg)
 	shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
-	mp := newMeterProvider(ctx, cfg)
+	mp := newMeterProvider(ctx, &cfg)
 	shutdownFuncs = append(shutdownFuncs, mp.Shutdown)
 
 	propagator := newPropagator()
@@ -196,10 +197,13 @@ func newPropagator() propagation.TextMapPropagator {
 	)
 }
 
-func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider {
+func newTracerProvider(ctx context.Context, cfg *config) *tracesdk.TracerProvider {
 	var otlpOpts []otlptracehttp.Option
 	if cfg.endpoint != "" {
 		otlpOpts = append(otlpOpts, otlptracehttp.WithEndpointURL(cfg.endpoint))
+	}
+	if cfg.httpClient != nil {
+		otlpOpts = append(otlpOpts, otlptracehttp.WithHTTPClient(cfg.httpClient))
 	}
 	otlpExporter, err := otlptracehttp.New(ctx, otlpOpts...)
 	if err != nil {
@@ -219,10 +223,13 @@ func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider
 	return tracesdk.NewTracerProvider(opts...)
 }
 
-func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider {
+func newMeterProvider(ctx context.Context, cfg *config) *metricsdk.MeterProvider {
 	var otlpOpts []otlpmetrichttp.Option
 	if cfg.endpoint != "" {
 		otlpOpts = append(otlpOpts, otlpmetrichttp.WithEndpointURL(cfg.endpoint))
+	}
+	if cfg.httpClient != nil {
+		otlpOpts = append(otlpOpts, otlpmetrichttp.WithHTTPClient(cfg.httpClient))
 	}
 	otlpExporter, err := otlpmetrichttp.New(ctx, otlpOpts...)
 	if err != nil {
@@ -237,7 +244,7 @@ func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider 
 	return metricsdk.NewMeterProvider(metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter)))
 }
 
-func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
+func newLoggerProvider(ctx context.Context, cfg *config) *logsdk.LoggerProvider {
 	var processors []logsdk.Processor
 	if cfg.local {
 		processors = append(processors, logsdk.NewBatchProcessor(&LineLogExporter{
@@ -248,6 +255,9 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 		var otlpOpts []otlploghttp.Option
 		if cfg.endpoint != "" {
 			otlpOpts = append(otlpOpts, otlploghttp.WithEndpointURL(cfg.endpoint))
+		}
+		if cfg.httpClient != nil {
+			otlpOpts = append(otlpOpts, otlploghttp.WithHTTPClient(cfg.httpClient))
 		}
 		otlpLogExporter, err := otlploghttp.New(ctx, otlpOpts...)
 		if err != nil {
