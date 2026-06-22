@@ -105,12 +105,9 @@ func TestProvider_withLocalWriter(t *testing.T) {
 func TestProvider_withEndpoint(t *testing.T) {
 	ctx := t.Context()
 
-	var mu sync.Mutex
-	gotPaths := map[string]bool{}
+	gotPaths := sync.Map{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		gotPaths[r.URL.Path] = true
-		mu.Unlock()
+		gotPaths.Store(r.URL.Path, true)
 		// An empty 200 body is a valid (empty) OTLP export response.
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -133,10 +130,12 @@ func TestProvider_withEndpoint(t *testing.T) {
 	// reader, forcing the exports to the overridden endpoint.
 	require.NoError(t, shutdown(ctx))
 
-	mu.Lock()
-	defer mu.Unlock()
-	require.True(t, gotPaths["/v1/traces"], "expected trace export to hit the overridden endpoint")
-	require.True(t, gotPaths["/v1/metrics"], "expected metric export to hit the overridden endpoint")
+	tp, found := gotPaths.Load("/v1/traces")
+	require.True(t, found, "expected /v1/traces to be a key in the map")
+	require.True(t, tp.(bool), "expected trace export to hit the overridden endpoint")
+	mp, found := gotPaths.Load("/v1/metrics")
+	require.True(t, found, "expected /v1/metrics to be a key in the map")
+	require.True(t, mp.(bool), "expected metric export to hit the overridden endpoint")
 }
 
 func TestProvider_withMinSeverity(t *testing.T) {
