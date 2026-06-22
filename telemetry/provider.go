@@ -48,6 +48,7 @@ type config struct {
 	attributes  map[string]string
 	testIDGen   bool
 	minSeverity minsev.Severitier
+	endpoint    string
 }
 
 func (c config) localWriter() io.Writer {
@@ -196,7 +197,11 @@ func newPropagator() propagation.TextMapPropagator {
 }
 
 func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider {
-	otlpExporter, err := otlptracehttp.New(ctx)
+	var otlpOpts []otlptracehttp.Option
+	if cfg.endpoint != "" {
+		otlpOpts = append(otlpOpts, otlptracehttp.WithEndpointURL(cfg.endpoint))
+	}
+	otlpExporter, err := otlptracehttp.New(ctx, otlpOpts...)
 	if err != nil {
 		panic(err)
 	}
@@ -215,7 +220,11 @@ func newTracerProvider(ctx context.Context, cfg config) *tracesdk.TracerProvider
 }
 
 func newMeterProvider(ctx context.Context, cfg config) *metricsdk.MeterProvider {
-	otlpExporter, err := otlpmetrichttp.New(ctx)
+	var otlpOpts []otlpmetrichttp.Option
+	if cfg.endpoint != "" {
+		otlpOpts = append(otlpOpts, otlpmetrichttp.WithEndpointURL(cfg.endpoint))
+	}
+	otlpExporter, err := otlpmetrichttp.New(ctx, otlpOpts...)
 	if err != nil {
 		panic(err)
 	}
@@ -236,7 +245,11 @@ func newLoggerProvider(ctx context.Context, cfg config) *logsdk.LoggerProvider {
 			w:      cfg.localWriter(),
 		}))
 	} else {
-		otlpLogExporter, err := otlploghttp.New(ctx)
+		var otlpOpts []otlploghttp.Option
+		if cfg.endpoint != "" {
+			otlpOpts = append(otlpOpts, otlploghttp.WithEndpointURL(cfg.endpoint))
+		}
+		otlpLogExporter, err := otlploghttp.New(ctx, otlpOpts...)
 		if err != nil {
 			panic(err)
 		}

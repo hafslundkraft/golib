@@ -2,7 +2,10 @@ package telemetry
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"testing/synctest"
 
@@ -97,6 +100,43 @@ func TestProvider_withLocalWriter(t *testing.T) {
 		require.NotContains(t, string(loggedContent), "happi.via",
 			"local mode should not emit the stdout dedup marker")
 	})
+}
+
+func TestProvider_withEndpoint(t *testing.T) {
+	ctx := t.Context()
+
+	var mu sync.Mutex
+	gotPaths := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPaths[r.URL.Path] = true
+		mu.Unlock()
+		// An empty 200 body is a valid (empty) OTLP export response.
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// WithEndpoint overrides the OTLP endpoint for all signals, so the OTLP
+	// exporters should send to the test server rather than the default one
+	// derived from OTEL_EXPORTER_OTLP_ENDPOINT.
+	tel, shutdown := New(ctx, WithEndpoint(srv.URL))
+	require.NotNil(t, tel)
+
+	_, span := tel.Tracer().Start(ctx, "test")
+	span.End()
+
+	counter, err := tel.Meter().Int64Counter("test-counter")
+	require.NoError(t, err)
+	counter.Add(ctx, 42)
+
+	// Shutdown flushes the batched span processor and the periodic metric
+	// reader, forcing the exports to the overridden endpoint.
+	require.NoError(t, shutdown(ctx))
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.True(t, gotPaths["/v1/traces"], "expected trace export to hit the overridden endpoint")
+	require.True(t, gotPaths["/v1/metrics"], "expected metric export to hit the overridden endpoint")
 }
 
 func TestProvider_withMinSeverity(t *testing.T) {
