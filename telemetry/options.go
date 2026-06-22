@@ -50,6 +50,16 @@ func WithTestIDGenerator() OptionFunc {
 	}
 }
 
+// WithEndpoint overrides the OTLP endpoint that telemetry data is exported to.
+// By default the endpoint is read from the OTEL_EXPORTER_OTLP_ENDPOINT
+// environment variable (and the per-signal variants). The value must be a full
+// URL, e.g. "https://otel.example.com:4318". This has no effect in local mode.
+func WithEndpoint(endpoint string) OptionFunc {
+	return func(c *config) {
+		c.endpoint = endpoint
+	}
+}
+
 // WithMinSeverity drops log records below the given severity. Pass a
 // [minsev.Severity] for a static threshold, or a *[minsev.SeverityVar] to
 // adjust it at runtime. If unset, no filtering is applied.
