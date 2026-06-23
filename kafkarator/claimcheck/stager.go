@@ -46,6 +46,7 @@ type stager struct {
 	s3Factory      func(bucket string) (S3Writer, error)
 	schemaFetcher  SchemaFetcher
 	ser            serializer
+	system         string
 	bucketResolver BucketResolver
 	rowGroupSize   int
 	partSize       int
@@ -57,6 +58,12 @@ type stagerOption func(*stager)
 
 func withBucketResolver(fn BucketResolver) stagerOption {
 	return func(s *stager) { s.bucketResolver = fn }
+}
+
+// withSystem sets the producing system name stamped onto each envelope so that
+// readers can assume the producer's Ceph IAM role.
+func withSystem(system string) stagerOption {
+	return func(s *stager) { s.system = system }
 }
 
 func withRowGroupSize(n int) stagerOption {
@@ -174,6 +181,7 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 	return &Batch{
 		topic:    topic,
 		batchID:  batchID,
+		system:   s.system,
 		pipe:     pipe,
 		span:     span,
 		logger:   s.logger,
@@ -200,6 +208,7 @@ type Batch struct {
 	produce func(ctx context.Context, value []byte) error
 	topic   string
 	batchID string
+	system  string
 	pipe    *multipartWriter
 	span    trace.Span
 	logger  *slog.Logger
@@ -238,6 +247,7 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 		BatchID:     b.batchID,
 		StorageURI:  "s3://" + b.pipe.bucket + "/" + b.pipe.key,
 		Topic:       b.topic,
+		System:      b.system,
 		RecordCount: b.recordCount,
 		ByteSize:    byteSize,
 		CreatedAt:   time.Now().UTC().UnixMilli(),

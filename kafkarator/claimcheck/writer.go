@@ -96,8 +96,8 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	for _, o := range opts {
 		o(cfg)
 	}
+	connCfg := conn.Config()
 	if cfg.s3Factory == nil {
-		connCfg := conn.Config()
 		exchanger, err := newTokenExchanger()
 		if err != nil {
 			return nil, fmt.Errorf("claimcheck: init token exchanger: %w", err)
@@ -112,7 +112,10 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 		return nil, fmt.Errorf("claimcheck: create kafka writer: %w", err)
 	}
 
-	cfg.stagerOpts = append([]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger())}, cfg.stagerOpts...)
+	cfg.stagerOpts = append(
+		[]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger()), withSystem(connCfg.SystemName)},
+		cfg.stagerOpts...,
+	)
 	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, conn.Serializer(), cfg.stagerOpts...)
 	return &Writer{kw: kw, stager: stager}, nil
 }

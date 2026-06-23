@@ -267,10 +267,33 @@ func defaultS3WriterFactory(exchanger *tokenExchanger, system, env string) func(
 	}
 }
 
-// defaultS3ReaderFor creates a production S3Reader for the given bucket.
-// Called when no WithProcessorS3Client option is provided to NewProcessor.
-func defaultS3ReaderFor(bucket, system, env string) (S3Reader, error) {
-	return newS3Client(bucket, "r", system, env, nil)
+// defaultS3ReaderFactory returns a caching factory that creates a production
+// S3Reader for each unique (system, bucket) pair on first use. Called when no
+// WithProcessorS3Client option is provided to NewProcessor.
+//
+// The system is the producer named in the claim-check envelope: the bucket is
+// owned by that system, so the assumed IAM role must be scoped to it. The
+// provided exchanger is shared across all clients to avoid concurrent token
+// exchanges racing on the same awsTokenFile.
+func defaultS3ReaderFactory(exchanger *tokenExchanger, env string) s3ReaderFactory {
+	var (
+		mu    sync.Mutex
+		cache = map[string]S3Reader{}
+	)
+	return func(system, bucket string) (S3Reader, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		key := system + "\x00" + bucket
+		if c, ok := cache[key]; ok {
+			return c, nil
+		}
+		c, err := newS3Client(bucket, "r", system, env, exchanger)
+		if err != nil {
+			return nil, err
+		}
+		cache[key] = c
+		return c, nil
+	}
 }
 
 // isError is a helper to check for AWS SDK typed errors.

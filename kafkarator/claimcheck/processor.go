@@ -104,18 +104,27 @@ func NewProcessor(
 		o(cfg)
 	}
 
-	s3Reader := cfg.s3
 	bucketResolver := cfg.bucketResolver
 	if bucketResolver == nil {
 		bucketResolver = DefaultBucketResolver
 	}
-	if s3Reader == nil {
-		var err error
-		connCfg := conn.Config()
-		s3Reader, err = defaultS3ReaderFor(bucketResolver(topic), connCfg.SystemName, connCfg.Env)
+
+	connCfg := conn.Config()
+
+	// The S3 reader is resolved per-envelope, keyed by the producing system named
+	// in the envelope, because the bucket is owned by that system and the assumed
+	// IAM role must be scoped to it. defaultSystem is the consumer's own system,
+	// used as a fallback for legacy envelopes that predate the system field.
+	var s3Factory s3ReaderFactory
+	if cfg.s3 != nil {
+		fixed := cfg.s3
+		s3Factory = func(_, _ string) (S3Reader, error) { return fixed, nil }
+	} else {
+		exchanger, err := newTokenExchanger()
 		if err != nil {
-			return nil, fmt.Errorf("claimcheck: create S3 reader: %w", err)
+			return nil, fmt.Errorf("claimcheck: init token exchanger: %w", err)
 		}
+		s3Factory = defaultS3ReaderFactory(exchanger, connCfg.Env)
 	}
 
 	tracer := cfg.tracer
@@ -123,7 +132,7 @@ func NewProcessor(
 		tracer = conn.Tracer()
 	}
 
-	res := newResolver(s3Reader, &avroDeserializer{de: conn.Deserializer()}, tracer, bucketResolver)
+	res := newResolver(s3Factory, connCfg.SystemName, &avroDeserializer{de: conn.Deserializer()}, tracer, bucketResolver)
 
 	// Default to maxMessages=1 — each envelope is a heavyweight S3 fetch.
 	kafkaOpts := append(

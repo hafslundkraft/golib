@@ -15,6 +15,13 @@ type Envelope struct {
 	// Topic is the Kafka topic this envelope was produced to.
 	Topic string `avro:"topic"`
 
+	// System is the Happi system name that produced this envelope. Because a
+	// claim-check bucket is owned by the producing system, readers use System to
+	// assume the producer's Ceph IAM role when fetching the payload. Legacy
+	// envelopes written before this field existed decode with System == "", in
+	// which case the reader falls back to its own system name.
+	System string `avro:"system"`
+
 	// RecordCount is the number of logical records in the Parquet file.
 	RecordCount int64 `avro:"record_count"`
 

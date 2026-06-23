@@ -15,16 +15,24 @@ type envelopeDeserializer interface {
 	DeserializeEnvelope(ctx context.Context, topic string, data []byte) (*Envelope, error)
 }
 
+// s3ReaderFactory builds an S3Reader scoped to a producing system and bucket.
+// The system determines which Ceph IAM role is assumed, so it must be the
+// system that owns the bucket (the producer named in the envelope), not the
+// consumer's own system.
+type s3ReaderFactory func(system, bucket string) (S3Reader, error)
+
 // resolver decodes claim-check envelopes and fetches payloads from S3.
 type resolver struct {
-	s3             S3Reader
+	s3Factory      s3ReaderFactory
+	defaultSystem  string
 	deserializer   envelopeDeserializer
 	tracer         trace.Tracer
 	bucketResolver BucketResolver
 }
 
 func newResolver(
-	s3 S3Reader,
+	s3Factory s3ReaderFactory,
+	defaultSystem string,
 	deserializer envelopeDeserializer,
 	tracer trace.Tracer,
 	bucketResolver BucketResolver,
@@ -32,7 +40,13 @@ func newResolver(
 	if bucketResolver == nil {
 		bucketResolver = DefaultBucketResolver
 	}
-	return &resolver{s3: s3, deserializer: deserializer, tracer: tracer, bucketResolver: bucketResolver}
+	return &resolver{
+		s3Factory:      s3Factory,
+		defaultSystem:  defaultSystem,
+		deserializer:   deserializer,
+		tracer:         tracer,
+		bucketResolver: bucketResolver,
+	}
 }
 
 func (r *resolver) peekEnvelope(ctx context.Context, topic string, data []byte) (*Envelope, error) {
@@ -72,7 +86,18 @@ func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, e
 			topic,
 		)
 	}
-	return &PayloadReader{ctx: ctx, s3: r.s3, bucket: bucket, key: key, size: env.ByteSize}, nil
+	// The bucket is owned by the producing system named in the envelope; assume
+	// that system's role. Legacy envelopes without a system fall back to the
+	// consumer's own system.
+	system := env.System
+	if system == "" {
+		system = r.defaultSystem
+	}
+	s3, err := r.s3Factory(system, bucket)
+	if err != nil {
+		return nil, fmt.Errorf("claimcheck: create S3 reader for system %q bucket %q: %w", system, bucket, err)
+	}
+	return &PayloadReader{ctx: ctx, s3: s3, bucket: bucket, key: key, size: env.ByteSize}, nil
 }
 
 // PayloadReader provides read access to the raw Parquet bytes of a
