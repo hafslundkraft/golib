@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	kafkarator "github.com/hafslundkraft/golib/kafkarator"
+
 	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 )
 

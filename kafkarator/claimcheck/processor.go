@@ -132,7 +132,13 @@ func NewProcessor(
 		tracer = conn.Tracer()
 	}
 
-	res := newResolver(s3Factory, connCfg.SystemName, &avroDeserializer{de: conn.Deserializer()}, tracer, bucketResolver)
+	res := newResolver(
+		s3Factory,
+		connCfg.SystemName,
+		&avroDeserializer{de: conn.Deserializer()},
+		tracer,
+		bucketResolver,
+	)
 
 	// Default to maxMessages=1 — each envelope is a heavyweight S3 fetch.
 	kafkaOpts := append(

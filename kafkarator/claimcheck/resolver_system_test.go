@@ -36,7 +36,7 @@ func TestResolver_UsesEnvelopeSystem(t *testing.T) {
 		return claimcheck.NewFakeS3Client(), nil
 	}
 
-	// Consumer's own system is "analytics" — must be ignored in favour of the issuer.
+	// Consumer's own system is "analytics" — must be ignored in favor of the issuer.
 	err := claimcheck.ResolveForTest(factory, "analytics", &fakeEnvelopeDeserializer{env: env}, topic, []byte("wire"))
 	require.NoError(t, err)
 

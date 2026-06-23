@@ -64,10 +64,10 @@ func NewMessage(
 	de EnvelopeDeserializer,
 ) *Message {
 	return &Message{
-		Topic:    topic,
-		Key:      key,
-		value:    value,
-		Headers:  headers,
+		Topic:   topic,
+		Key:     key,
+		value:   value,
+		Headers: headers,
 		resolver: newResolver(
 			func(_, _ string) (S3Reader, error) { return s3, nil },
 			"",
@@ -76,6 +76,12 @@ func NewMessage(
 			DefaultBucketResolver,
 		),
 	}
+}
+
+// WithWriterSystemForTest stamps the producing system name onto each envelope.
+// For use in tests only.
+func WithWriterSystemForTest(system string) WriterOption {
+	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystem(system)) }
 }
 
 // NewTestWriter creates a Writer for use in tests, bypassing kafkarator.Connection.
@@ -88,13 +94,6 @@ func NewTestWriter(kw kafkaWriter, ser serializer, opts ...WriterOption) *Writer
 	}
 	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, ser, cfg.stagerOpts...)
 	return &Writer{kw: kw, stager: stager}
-}
-
-// WithWriterSystemForTest sets the producing system name stamped onto envelopes.
-// In production this is taken from the connection config; tests use this to
-// exercise the system field. For use in tests only.
-func WithWriterSystemForTest(system string) WriterOption {
-	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystem(system)) }
 }
 
 // NewBytesReaderAt wraps a byte slice in a *bytes.Reader which implements
