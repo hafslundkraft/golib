@@ -15,6 +15,30 @@ import (
 	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 )
 
+func TestWriter_StampsProducerSystemOnEnvelope(t *testing.T) {
+	s3 := claimcheck.NewFakeS3Client()
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSystemForTest("billing"),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{
+			schemaStr: simpleSchema("id"),
+			version:   1,
+			id:        42,
+		}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), "billing.test.invoices")
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	env := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "billing", env.System, "envelope must record the producing system for readers' ARN construction")
+}
+
 func TestMultipartWriter_CompleteFlushesSmallPayload(t *testing.T) {
 	// Write < minPartSize bytes; Complete must still upload them.
 	s3 := claimcheck.NewFakeS3Client()
