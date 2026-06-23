@@ -33,7 +33,7 @@ enable = [
     "govet",
     "staticcheck",
     "errcheck",
-    "gomodguard_v2",
+    "gomodguard",
     "forbidigo",
     "rowserrcheck",
     "sqlclosecheck",
