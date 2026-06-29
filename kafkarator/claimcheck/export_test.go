@@ -84,6 +84,12 @@ func WithWriterSystemForTest(system string) WriterOption {
 	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystem(system)) }
 }
 
+// WithWriterS3FactoryForTest injects a (system, bucket) writer factory so tests
+// can assert which system the write client is built for. For use in tests only.
+func WithWriterS3FactoryForTest(fn func(system, bucket string) (S3Writer, error)) WriterOption {
+	return func(c *writerConfig) { c.s3Factory = fn }
+}
+
 // NewTestWriter creates a Writer for use in tests, bypassing kafkarator.Connection.
 // Inject a test S3 store and schema via [WithWriterS3Client] and [WithWriterSchemaFetcher].
 // Additional write options ([WithWriterBucketResolver], [WithWriterRowGroupSize], [WithWriterPartSize]) are also accepted.

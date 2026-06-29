@@ -43,10 +43,12 @@ type SchemaFetcher interface {
 // stager fetches the payload Avro schema from Schema Registry, converts it to
 // a Parquet schema, and opens write sessions to S3.
 type stager struct {
-	s3Factory      func(bucket string) (S3Writer, error)
+	s3Factory      func(system, bucket string) (S3Writer, error)
 	schemaFetcher  SchemaFetcher
 	ser            serializer
-	system         string
+	defaultSystem  string
+	systemResolver SystemResolver
+	systemOverride string
 	bucketResolver BucketResolver
 	rowGroupSize   int
 	partSize       int
@@ -60,10 +62,26 @@ func withBucketResolver(fn BucketResolver) stagerOption {
 	return func(s *stager) { s.bucketResolver = fn }
 }
 
-// withSystem sets the producing system name stamped onto each envelope so that
-// readers can assume the producer's Ceph IAM role.
+// withSystem sets the fallback system used when the resolver cannot derive one
+// from the topic (the producer's own system). The resolved/overridden system is
+// both stamped onto the envelope and used to build the write client's role.
 func withSystem(system string) stagerOption {
-	return func(s *stager) { s.system = system }
+	return func(s *stager) { s.defaultSystem = system }
+}
+
+// withSystemResolver overrides the default topic→system derivation.
+func withSystemResolver(fn SystemResolver) stagerOption {
+	return func(s *stager) {
+		if fn != nil {
+			s.systemResolver = fn
+		}
+	}
+}
+
+// withSystemOverride forces the owning system, bypassing the resolver entirely.
+// It sets both the write role and the stamped envelope system.
+func withSystemOverride(system string) stagerOption {
+	return func(s *stager) { s.systemOverride = system }
 }
 
 func withRowGroupSize(n int) stagerOption {
@@ -98,10 +116,10 @@ func withLogger(l *slog.Logger) stagerOption {
 	}
 }
 
-// newStagerWithFactory creates a stager that calls factory(bucket) to obtain
-// the S3Writer for each unique bucket.
+// newStagerWithFactory creates a stager that calls factory(system, bucket) to obtain
+// the S3Writer for each unique (system, bucket) pair.
 func newStagerWithFactory(
-	factory func(bucket string) (S3Writer, error),
+	factory func(system, bucket string) (S3Writer, error),
 	fetcher SchemaFetcher,
 	ser serializer,
 	opts ...stagerOption,
@@ -111,6 +129,7 @@ func newStagerWithFactory(
 		schemaFetcher:  fetcher,
 		ser:            ser,
 		bucketResolver: DefaultBucketResolver,
+		systemResolver: DefaultSystemResolver,
 		rowGroupSize:   defaultRowGroupSize,
 		partSize:       minPartSize,
 		tracer:         nooptrace.NewTracerProvider().Tracer(""),
@@ -145,9 +164,11 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 		return nil, fmt.Errorf("claimcheck: bucket resolver returned empty string for topic %q", topic)
 	}
 
-	s3Client, err := s.s3Factory(bucket)
+	system := s.resolveSystem(topic)
+
+	s3Client, err := s.s3Factory(system, bucket)
 	if err != nil {
-		return nil, fmt.Errorf("claimcheck: create S3 writer for bucket %q: %w", bucket, err)
+		return nil, fmt.Errorf("claimcheck: create S3 writer for system %q bucket %q: %w", system, bucket, err)
 	}
 
 	batchID := uuid.New().String()
@@ -181,7 +202,7 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 	return &Batch{
 		topic:    topic,
 		batchID:  batchID,
-		system:   s.system,
+		system:   system,
 		pipe:     pipe,
 		span:     span,
 		logger:   s.logger,
@@ -189,6 +210,20 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 		pw:       parquet.NewGenericWriter[any](pipe, writerOpts...),
 		rowGroup: s.rowGroupSize,
 	}, nil
+}
+
+// resolveSystem determines the system that owns topic's bucket. An explicit
+// override wins; otherwise the resolver decides; otherwise the producer's own
+// system (defaultSystem) is the fallback for non-conventional topics. The result
+// is used for both the write role and the stamped envelope system.
+func (s *stager) resolveSystem(topic string) string {
+	if s.systemOverride != "" {
+		return s.systemOverride
+	}
+	if sys := s.systemResolver(topic); sys != "" {
+		return sys
+	}
+	return s.defaultSystem
 }
 
 // Batch is an open write session returned by [Writer.NewBatch]. Write records
