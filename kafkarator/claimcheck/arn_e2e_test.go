@@ -122,3 +122,48 @@ func TestClaimCheckARN_ProducerAndConsumerAgree_E2E(t *testing.T) {
 		"producer and consumer must resolve to the same role, differing only in access",
 	)
 }
+
+// TestClaimCheckARN_SharedProduct_E2E proves that for a shared data-product
+// neither the producer nor the consumer owns the bucket: both derive
+// "data-definitions" from the topic and resolve to the same role.
+func TestClaimCheckARN_SharedProduct_E2E(t *testing.T) {
+	const (
+		consumerSystem = "analytics"
+		env            = "test"
+		topic          = "test.water--obs.measurements--v1"
+	)
+
+	owner := claimcheck.DefaultSystemResolver(topic)
+	require.Equal(t, "data-definitions", owner)
+
+	bucket := claimcheck.DefaultBucketResolver(topic)
+
+	// Producer side: the writer assumes the owner's rw role.
+	producerARN, err := claimcheck.ClaimCheckRoleARN(owner, env, bucket, "rw")
+	require.NoError(t, err)
+
+	// Consumer side: the writer stamped the resolved owner onto the envelope.
+	envelope := envelopeForTopic(topic, owner)
+	var usedSystem, usedBucket string
+	factory := func(system, b string) (claimcheck.S3Reader, error) {
+		usedSystem, usedBucket = system, b
+		return claimcheck.NewFakeS3Client(), nil
+	}
+	require.NoError(t, claimcheck.ResolveForTest(
+		factory, consumerSystem, &fakeEnvelopeDeserializer{env: envelope}, topic, []byte("wire"),
+	))
+	require.Equal(t, owner, usedSystem)
+	require.NotEqual(t, consumerSystem, usedSystem)
+
+	consumerARN, err := claimcheck.ClaimCheckRoleARN(usedSystem, env, usedBucket, "r")
+	require.NoError(t, err)
+
+	wantBase := fmt.Sprintf("arn:aws:iam:::role/happi/data-definitions/test/%s/data-definitions.test.%s", bucket, bucket)
+	assert.Equal(t, wantBase+".rw", producerARN)
+	assert.Equal(t, wantBase+".r", consumerARN)
+	assert.Equal(t,
+		strings.TrimSuffix(producerARN, ".rw"),
+		strings.TrimSuffix(consumerARN, ".r"),
+		"producer and consumer must resolve to the same data-definitions role",
+	)
+}
