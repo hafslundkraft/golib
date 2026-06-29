@@ -49,7 +49,7 @@ func ResolveForTest(
 	topic string,
 	value []byte,
 ) error {
-	r := newResolver(factory, defaultSystem, de, nooptrace.NewTracerProvider().Tracer(""), DefaultBucketResolver)
+	r := newResolver(factory, defaultSystem, de, nooptrace.NewTracerProvider().Tracer(""), DefaultBucketResolver, DefaultSystemResolver, nil)
 	_, err := r.fetchPayload(context.Background(), topic, value)
 	return err
 }
@@ -74,6 +74,8 @@ func NewMessage(
 			de,
 			nooptrace.NewTracerProvider().Tracer(""),
 			DefaultBucketResolver,
+			DefaultSystemResolver,
+			nil,
 		),
 	}
 }
