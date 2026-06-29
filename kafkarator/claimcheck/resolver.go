@@ -117,8 +117,8 @@ func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, e
 	case derived != "" && derived != system:
 		r.logger.WarnContext(ctx,
 			"claimcheck: envelope system disagrees with topic-derived system; trusting envelope",
-			"envelope_system", system,
-			"derived_system", derived,
+			"envelope-system", system,
+			"derived-system", derived,
 			"topic", topic,
 		)
 	}

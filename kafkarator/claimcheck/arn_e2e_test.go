@@ -158,7 +158,11 @@ func TestClaimCheckARN_SharedProduct_E2E(t *testing.T) {
 	consumerARN, err := claimcheck.ClaimCheckRoleARN(usedSystem, env, usedBucket, "r")
 	require.NoError(t, err)
 
-	wantBase := fmt.Sprintf("arn:aws:iam:::role/happi/data-definitions/test/%s/data-definitions.test.%s", bucket, bucket)
+	wantBase := fmt.Sprintf(
+		"arn:aws:iam:::role/happi/data-definitions/test/%s/data-definitions.test.%s",
+		bucket,
+		bucket,
+	)
 	assert.Equal(t, wantBase+".rw", producerARN)
 	assert.Equal(t, wantBase+".r", consumerARN)
 	assert.Equal(t,
