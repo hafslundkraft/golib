@@ -394,7 +394,7 @@ func TestWriter_InternalTopicStampsOwnSystem(t *testing.T) {
 }
 
 func TestWriter_NonConventionalTopicErrors(t *testing.T) {
-	const topic = "billing.test" // no "--" in domain segment -> no derivable system
+	const topic = "billing.test" // no name segment -> no derivable system
 
 	kw := &captureKW{}
 	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
