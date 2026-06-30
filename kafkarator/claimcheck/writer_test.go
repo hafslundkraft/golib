@@ -36,7 +36,12 @@ func TestWriter_StampsProducerSystemOnEnvelope(t *testing.T) {
 	require.NoError(t, batch.Produce(context.Background()))
 
 	envelope := unmarshalEnvelope(t, kw.last.Value)
-	assert.Equal(t, "billing", envelope.System, "envelope must record the producing system for readers' ARN construction")
+	assert.Equal(
+		t,
+		"billing",
+		envelope.System,
+		"envelope must record the producing system for readers' ARN construction",
+	)
 }
 
 func TestMultipartWriter_CompleteFlushesSmallPayload(t *testing.T) {

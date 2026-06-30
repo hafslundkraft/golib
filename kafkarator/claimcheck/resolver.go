@@ -78,7 +78,11 @@ func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) 
 	return r.fetchPayloadFromEnvelope(ctx, topic, envelope)
 }
 
-func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, envelope *Envelope) (*PayloadReader, error) {
+func (r *resolver) fetchPayloadFromEnvelope(
+	ctx context.Context,
+	topic string,
+	envelope *Envelope,
+) (*PayloadReader, error) {
 	bucket, key, err := s3URIParts(envelope.StorageURI)
 	if err != nil {
 		return nil, err

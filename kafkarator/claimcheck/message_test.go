@@ -20,7 +20,14 @@ func TestPeekEnvelope_ReturnsMetadataWithoutFetchingPayload(t *testing.T) {
 		CreatedAt:   1_700_000_000_000,
 	}
 	s3 := claimcheck.NewFakeS3Client()
-	msg := claimcheck.NewMessage("peek-topic", nil, []byte("wire"), nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+	msg := claimcheck.NewMessage(
+		"peek-topic",
+		nil,
+		[]byte("wire"),
+		nil,
+		s3,
+		&fakeEnvelopeDeserializer{envelope: envelope},
+	)
 
 	meta, err := msg.PeekEnvelope(context.Background())
 	require.NoError(t, err)
@@ -65,7 +72,14 @@ func TestMessage_Payload_RejectsTamperedBucket(t *testing.T) {
 		ByteSize:    100,
 	}
 	s3 := claimcheck.NewFakeS3Client()
-	msg := claimcheck.NewMessage("real-topic", nil, []byte("wire"), nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+	msg := claimcheck.NewMessage(
+		"real-topic",
+		nil,
+		[]byte("wire"),
+		nil,
+		s3,
+		&fakeEnvelopeDeserializer{envelope: envelope},
+	)
 
 	_, err := msg.Payload(context.Background())
 	require.Error(t, err)
@@ -82,7 +96,14 @@ func TestMessage_Payload_RejectsTamperedKeyPrefix(t *testing.T) {
 		ByteSize:    100,
 	}
 	s3 := claimcheck.NewFakeS3Client()
-	msg := claimcheck.NewMessage("real-topic", nil, []byte("wire"), nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+	msg := claimcheck.NewMessage(
+		"real-topic",
+		nil,
+		[]byte("wire"),
+		nil,
+		s3,
+		&fakeEnvelopeDeserializer{envelope: envelope},
+	)
 
 	_, err := msg.Payload(context.Background())
 	require.Error(t, err)
