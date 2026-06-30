@@ -339,6 +339,82 @@ func TestPayloadReader_ReadAtDoesNotMoveSequentialPosition(t *testing.T) {
 	_ = f
 }
 
+func TestWriter_SharedTopicStampsAndBuildsForDataDefinitions(t *testing.T) {
+	const topic = "test.water--obs.measurements--v1" // shared product
+
+	var gotSystem, gotBucket string
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3FactoryForTest(func(system, bucket string) (claimcheck.S3Writer, error) {
+			gotSystem, gotBucket = system, bucket
+			return claimcheck.NewFakeS3Client(), nil
+		}),
+		// Producer's own system is "billing" — must be ignored for a shared topic.
+		claimcheck.WithWriterSystemForTest("billing"),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("id"), version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	assert.Equal(t, "data-definitions", gotSystem, "write client must be built for the bucket owner, not the producer")
+	assert.Equal(t, claimcheck.DefaultBucketResolver(topic), gotBucket)
+	env := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "data-definitions", env.System, "stamp must match the write role")
+}
+
+func TestWriter_InternalTopicStampsOwnSystem(t *testing.T) {
+	const topic = "test.sys--billing.invoices--v1" // internal product
+
+	var gotSystem string
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3FactoryForTest(func(system, _ string) (claimcheck.S3Writer, error) {
+			gotSystem = system
+			return claimcheck.NewFakeS3Client(), nil
+		}),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("id"), version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	assert.Equal(t, "billing", gotSystem)
+	env := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "billing", env.System)
+}
+
+func TestWriter_WithWriterSystemOverridesBoth(t *testing.T) {
+	const topic = "test.water--obs.measurements--v1" // resolver would say data-definitions
+
+	var gotSystem string
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3FactoryForTest(func(system, _ string) (claimcheck.S3Writer, error) {
+			gotSystem = system
+			return claimcheck.NewFakeS3Client(), nil
+		}),
+		claimcheck.WithWriterSystem("override-sys"),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("id"), version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	assert.Equal(t, "override-sys", gotSystem, "override must win over the resolver for the write role")
+	env := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "override-sys", env.System, "override must win over the resolver for the stamp")
+}
+
 // parquetKV extracts the Parquet key-value metadata footer as a map.
 func parquetKV(f *parquet.File) map[string]string {
 	m := make(map[string]string, len(f.Metadata().KeyValueMetadata))

@@ -49,7 +49,15 @@ func ResolveForTest(
 	topic string,
 	value []byte,
 ) error {
-	r := newResolver(factory, defaultSystem, de, nooptrace.NewTracerProvider().Tracer(""), DefaultBucketResolver)
+	r := newResolver(
+		factory,
+		defaultSystem,
+		de,
+		nooptrace.NewTracerProvider().Tracer(""),
+		DefaultBucketResolver,
+		DefaultSystemResolver,
+		nil,
+	)
 	_, err := r.fetchPayload(context.Background(), topic, value)
 	return err
 }
@@ -74,6 +82,8 @@ func NewMessage(
 			de,
 			nooptrace.NewTracerProvider().Tracer(""),
 			DefaultBucketResolver,
+			DefaultSystemResolver,
+			nil,
 		),
 	}
 }
@@ -82,6 +92,12 @@ func NewMessage(
 // For use in tests only.
 func WithWriterSystemForTest(system string) WriterOption {
 	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystem(system)) }
+}
+
+// WithWriterS3FactoryForTest injects a (system, bucket) writer factory so tests
+// can assert which system the write client is built for. For use in tests only.
+func WithWriterS3FactoryForTest(fn func(system, bucket string) (S3Writer, error)) WriterOption {
+	return func(c *writerConfig) { c.s3Factory = fn }
 }
 
 // NewTestWriter creates a Writer for use in tests, bypassing kafkarator.Connection.

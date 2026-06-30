@@ -25,7 +25,7 @@ type Writer struct {
 type WriterOption func(*writerConfig)
 
 type writerConfig struct {
-	s3Factory  func(bucket string) (S3Writer, error)
+	s3Factory  func(system, bucket string) (S3Writer, error)
 	fetcher    SchemaFetcher
 	stagerOpts []stagerOption
 }
@@ -36,7 +36,7 @@ type writerConfig struct {
 // HAPPI_SYSTEM_NAME, HAPPI_ENV, and HAPPI_IDP_ISSUER_URL.
 func WithWriterS3Client(s3 S3Writer) WriterOption {
 	return func(c *writerConfig) {
-		c.s3Factory = func(_ string) (S3Writer, error) { return s3, nil }
+		c.s3Factory = func(_, _ string) (S3Writer, error) { return s3, nil }
 	}
 }
 
@@ -48,6 +48,19 @@ func WithWriterSchemaFetcher(f SchemaFetcher) WriterOption {
 // WithWriterBucketResolver overrides the default topic→bucket naming convention used by the writer.
 func WithWriterBucketResolver(fn BucketResolver) WriterOption {
 	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withBucketResolver(fn)) }
+}
+
+// WithWriterSystem forces the owning system for every batch, bypassing topic
+// derivation. It sets both the assumed Ceph write role and the system stamped
+// onto each envelope — the two always agree.
+func WithWriterSystem(system string) WriterOption {
+	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystemOverride(system)) }
+}
+
+// WithWriterSystemResolver overrides the default topic→system derivation used by
+// the writer to choose the bucket owner.
+func WithWriterSystemResolver(fn SystemResolver) WriterOption {
+	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystemResolver(fn)) }
 }
 
 // WithWriterRowGroupSize sets the number of records per Parquet row group. Default is 100 000.
@@ -102,7 +115,7 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 		if err != nil {
 			return nil, fmt.Errorf("claimcheck: init token exchanger: %w", err)
 		}
-		cfg.s3Factory = defaultS3WriterFactory(exchanger, connCfg.SystemName, connCfg.Env)
+		cfg.s3Factory = defaultS3WriterFactory(exchanger, connCfg.Env)
 	}
 	if cfg.fetcher == nil {
 		cfg.fetcher = newSRSchemaFetcher(conn.SchemaRegistryClient())

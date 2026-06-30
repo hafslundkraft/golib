@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"go.opentelemetry.io/otel/trace"
@@ -28,6 +29,8 @@ type resolver struct {
 	deserializer   envelopeDeserializer
 	tracer         trace.Tracer
 	bucketResolver BucketResolver
+	systemResolver SystemResolver
+	logger         *slog.Logger
 }
 
 func newResolver(
@@ -36,9 +39,17 @@ func newResolver(
 	deserializer envelopeDeserializer,
 	tracer trace.Tracer,
 	bucketResolver BucketResolver,
+	systemResolver SystemResolver,
+	logger *slog.Logger,
 ) *resolver {
 	if bucketResolver == nil {
 		bucketResolver = DefaultBucketResolver
+	}
+	if systemResolver == nil {
+		systemResolver = DefaultSystemResolver
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return &resolver{
 		s3Factory:      s3Factory,
@@ -46,6 +57,8 @@ func newResolver(
 		deserializer:   deserializer,
 		tracer:         tracer,
 		bucketResolver: bucketResolver,
+		systemResolver: systemResolver,
+		logger:         logger,
 	}
 }
 
@@ -86,12 +99,28 @@ func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, e
 			topic,
 		)
 	}
-	// The bucket is owned by the producing system named in the envelope; assume
-	// that system's role. Legacy envelopes without a system fall back to the
-	// consumer's own system.
+	// Happy path: trust the producing system stamped in the envelope. For legacy
+	// envelopes without a system, derive the owner from the topic (correct even
+	// for shared products), falling back to the consumer's own system only for
+	// non-conventional topics. If a stamped system and a topic-derived system both
+	// exist and disagree, the stamp is authoritative (it may be a deliberate
+	// override) but we log a warning.
 	system := env.System
-	if system == "" {
-		system = r.defaultSystem
+	derived := r.systemResolver(topic)
+	switch {
+	case system == "":
+		if derived != "" {
+			system = derived
+		} else {
+			system = r.defaultSystem
+		}
+	case derived != "" && derived != system:
+		r.logger.WarnContext(ctx,
+			"claimcheck: envelope system disagrees with topic-derived system; trusting envelope",
+			"envelope-system", system,
+			"derived-system", derived,
+			"topic", topic,
+		)
 	}
 	s3, err := r.s3Factory(system, bucket)
 	if err != nil {
