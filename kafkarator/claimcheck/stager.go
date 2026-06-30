@@ -138,7 +138,7 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 		return nil, fmt.Errorf("claimcheck: bucket resolver returned empty string for topic %q", topic)
 	}
 
-	system := deriveSystemFromTopic(topic)
+	system := owningSystem(topic)
 	if system == "" {
 		return nil, fmt.Errorf(
 			"claimcheck: cannot derive owning system from topic %q; topic must follow the <env>.sys--<system>.<...> or <env>.<domain>--<sub>.<...> convention",

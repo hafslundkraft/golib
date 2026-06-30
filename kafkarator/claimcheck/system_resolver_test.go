@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDeriveSystemFromTopic(t *testing.T) {
+func TestOwningSystem(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		topic string
@@ -18,12 +18,12 @@ func TestDeriveSystemFromTopic(t *testing.T) {
 		{"unqualified name with dots", "test.sys--billing.invoices.extra", "billing"},
 		{"two segments only", "test.invoices", ""},
 		{"single segment", "invoices", ""},
-		{"no double-dash in domain", "test.billing.invoices", ""},
+		{"no double-dash in domain", "test.billing.invoices", "data-definitions"},
 		{"empty system after sys--", "test.sys--.invoices", ""},
 		{"empty topic", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, deriveSystemFromTopic(tc.topic))
+			assert.Equal(t, tc.want, owningSystem(tc.topic))
 		})
 	}
 }

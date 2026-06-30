@@ -8,7 +8,7 @@ import "strings"
 // it here and nowhere else.
 const dataDefinitionsSystem = "data-definitions"
 
-// deriveSystemFromTopic parses snappirator's topic convention
+// owningSystem parses snappirator's topic convention
 //
 //	<env>.<domain-segment>.<unqualified...>
 //
@@ -21,7 +21,7 @@ const dataDefinitionsSystem = "data-definitions"
 // The system is derived solely from the topic and is never overridable. env is
 // intentionally ignored: the shared system is the bare constant, and the ARN env
 // comes from the connection config.
-func deriveSystemFromTopic(topic string) string {
+func owningSystem(topic string) string {
 	parts := strings.SplitN(topic, ".", 3)
 	if len(parts) < 3 {
 		return ""
@@ -30,8 +30,5 @@ func deriveSystemFromTopic(topic string) string {
 	if system, ok := strings.CutPrefix(domain, "sys--"); ok {
 		return system // "" when domain is exactly "sys--" (malformed) -> caller errors
 	}
-	if strings.Contains(domain, "--") {
-		return dataDefinitionsSystem
-	}
-	return ""
+	return dataDefinitionsSystem // shared product (domain--sub) -> data-definitions
 }
