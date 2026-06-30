@@ -63,23 +63,23 @@ func newResolver(
 }
 
 func (r *resolver) peekEnvelope(ctx context.Context, topic string, data []byte) (*Envelope, error) {
-	env, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
+	envelope, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: peek envelope: %w", err)
 	}
-	return env, nil
+	return envelope, nil
 }
 
 func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) (*PayloadReader, error) {
-	env, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
+	envelope, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: fetch payload: %w", err)
 	}
-	return r.fetchPayloadFromEnvelope(ctx, topic, env)
+	return r.fetchPayloadFromEnvelope(ctx, topic, envelope)
 }
 
-func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, env *Envelope) (*PayloadReader, error) {
-	bucket, key, err := s3URIParts(env.StorageURI)
+func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, envelope *Envelope) (*PayloadReader, error) {
+	bucket, key, err := s3URIParts(envelope.StorageURI)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, e
 	// non-conventional topics. If a stamped system and a topic-derived system both
 	// exist and disagree, the stamp is authoritative (it may be a deliberate
 	// override) but we log a warning.
-	system := env.System
+	system := envelope.System
 	derived := r.systemResolver(topic)
 	switch {
 	case system == "":
@@ -126,7 +126,7 @@ func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, e
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: create S3 reader for system %q bucket %q: %w", system, bucket, err)
 	}
-	return &PayloadReader{ctx: ctx, s3: s3, bucket: bucket, key: key, size: env.ByteSize}, nil
+	return &PayloadReader{ctx: ctx, s3: s3, bucket: bucket, key: key, size: envelope.ByteSize}, nil
 }
 
 // PayloadReader provides read access to the raw Parquet bytes of a

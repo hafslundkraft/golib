@@ -278,7 +278,7 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("claimcheck: close parquet writer: %w", err)
 	}
 	byteSize := b.pipe.Size()
-	env := &Envelope{
+	envelope := &Envelope{
 		BatchID:     b.batchID,
 		StorageURI:  "s3://" + b.pipe.bucket + "/" + b.pipe.key,
 		Topic:       b.topic,
@@ -287,7 +287,7 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 		ByteSize:    byteSize,
 		CreatedAt:   time.Now().UTC().UnixMilli(),
 	}
-	value, err := b.ser.Serialize(ctx, b.topic, env)
+	value, err := b.ser.Serialize(ctx, b.topic, envelope)
 	if err != nil {
 		b.pipe.Abort()
 		b.span.RecordError(err)

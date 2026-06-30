@@ -35,8 +35,8 @@ func TestWriter_StampsProducerSystemOnEnvelope(t *testing.T) {
 	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	assert.Equal(t, "billing", env.System, "envelope must record the producing system for readers' ARN construction")
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "billing", envelope.System, "envelope must record the producing system for readers' ARN construction")
 }
 
 func TestMultipartWriter_CompleteFlushesSmallPayload(t *testing.T) {
@@ -59,12 +59,12 @@ func TestMultipartWriter_CompleteFlushesSmallPayload(t *testing.T) {
 	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	assert.Equal(t, "test-topic", env.Topic)
-	assert.Equal(t, int64(1), env.RecordCount)
-	assert.Positive(t, env.ByteSize)
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "test-topic", envelope.Topic)
+	assert.Equal(t, int64(1), envelope.RecordCount)
+	assert.Positive(t, envelope.ByteSize)
 
-	bucket, key := bucketAndKey(t, env.StorageURI)
+	bucket, key := bucketAndKey(t, envelope.StorageURI)
 	assert.NotEmpty(t, s3.Store[bucket+"/"+key])
 }
 
@@ -157,8 +157,8 @@ func TestBatch_WriteProduceAndReadRecords(t *testing.T) {
 	}
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
 
 	var got []Event
 	for r, err := range claimcheck.Records[Event](context.Background(), msg) {
@@ -210,8 +210,8 @@ func TestBatch_FlushesMultipleRowGroups(t *testing.T) {
 	}
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
 	pr, err := msg.Payload(context.Background())
 	require.NoError(t, err)
 	defer pr.Close()
@@ -242,8 +242,8 @@ func TestBatch_ParquetFooterEmbeddsAvroMetadata(t *testing.T) {
 	require.NoError(t, batch.Write(map[string]any{"v": int64(42)}))
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	bucket, key := bucketAndKey(t, env.StorageURI)
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	bucket, key := bucketAndKey(t, envelope.StorageURI)
 	data := s3.Store[bucket+"/"+key]
 	require.NotEmpty(t, data)
 
@@ -310,8 +310,8 @@ func TestPayloadReader_ReadAtDoesNotMoveSequentialPosition(t *testing.T) {
 	}
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
 
 	// Open PayloadReader — parquet.OpenFile will issue ReadAt calls for the footer.
 	pr, err := msg.Payload(context.Background())
@@ -362,8 +362,8 @@ func TestWriter_SharedTopicStampsAndBuildsForDataDefinitions(t *testing.T) {
 
 	assert.Equal(t, "data-definitions", gotSystem, "write client must be built for the bucket owner, not the producer")
 	assert.Equal(t, claimcheck.DefaultBucketResolver(topic), gotBucket)
-	env := unmarshalEnvelope(t, kw.last.Value)
-	assert.Equal(t, "data-definitions", env.System, "stamp must match the write role")
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "data-definitions", envelope.System, "stamp must match the write role")
 }
 
 func TestWriter_InternalTopicStampsOwnSystem(t *testing.T) {
@@ -386,8 +386,8 @@ func TestWriter_InternalTopicStampsOwnSystem(t *testing.T) {
 	require.NoError(t, batch.Produce(context.Background()))
 
 	assert.Equal(t, "billing", gotSystem)
-	env := unmarshalEnvelope(t, kw.last.Value)
-	assert.Equal(t, "billing", env.System)
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "billing", envelope.System)
 }
 
 func TestWriter_WithWriterSystemOverridesBoth(t *testing.T) {
@@ -411,8 +411,8 @@ func TestWriter_WithWriterSystemOverridesBoth(t *testing.T) {
 	require.NoError(t, batch.Produce(context.Background()))
 
 	assert.Equal(t, "override-sys", gotSystem, "override must win over the resolver for the write role")
-	env := unmarshalEnvelope(t, kw.last.Value)
-	assert.Equal(t, "override-sys", env.System, "override must win over the resolver for the stamp")
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "override-sys", envelope.System, "override must win over the resolver for the stamp")
 }
 
 // parquetKV extracts the Parquet key-value metadata footer as a map.

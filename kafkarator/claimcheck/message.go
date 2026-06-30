@@ -73,7 +73,7 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 		return func(yield func(T, error) bool) {}
 	}
 	return func(yield func(T, error) bool) {
-		env, err := m.PeekEnvelope(ctx)
+		envelope, err := m.PeekEnvelope(ctx)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -82,15 +82,15 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(
 				attribute.String("messaging.destination.name", m.Topic),
-				attribute.String("claim_check.batch_id", env.BatchID),
-				attribute.Int64("claim_check.record_count", env.RecordCount),
-				attribute.Int64("claim_check.byte_size", env.ByteSize),
-				attribute.String("claim_check.storage_uri", env.StorageURI),
+				attribute.String("claim_check.batch_id", envelope.BatchID),
+				attribute.Int64("claim_check.record_count", envelope.RecordCount),
+				attribute.Int64("claim_check.byte_size", envelope.ByteSize),
+				attribute.String("claim_check.storage_uri", envelope.StorageURI),
 			),
 		)
 		defer span.End()
 
-		pr, err := m.resolver.fetchPayloadFromEnvelope(ctx, m.Topic, env)
+		pr, err := m.resolver.fetchPayloadFromEnvelope(ctx, m.Topic, envelope)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())

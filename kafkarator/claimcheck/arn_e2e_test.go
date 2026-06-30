@@ -102,7 +102,7 @@ func TestClaimCheckARN_ProducerAndConsumerAgree_E2E(t *testing.T) {
 		return claimcheck.NewFakeS3Client(), nil
 	}
 	require.NoError(t, claimcheck.ResolveForTest(
-		factory, consumerSystem, &fakeEnvelopeDeserializer{env: envelope}, topic, []byte("wire"),
+		factory, consumerSystem, &fakeEnvelopeDeserializer{envelope: envelope}, topic, []byte("wire"),
 	))
 
 	// The consumer used the producer's system, not its own.
@@ -150,7 +150,7 @@ func TestClaimCheckARN_SharedProduct_E2E(t *testing.T) {
 		return claimcheck.NewFakeS3Client(), nil
 	}
 	require.NoError(t, claimcheck.ResolveForTest(
-		factory, consumerSystem, &fakeEnvelopeDeserializer{env: envelope}, topic, []byte("wire"),
+		factory, consumerSystem, &fakeEnvelopeDeserializer{envelope: envelope}, topic, []byte("wire"),
 	))
 	require.Equal(t, owner, usedSystem)
 	require.NotEqual(t, consumerSystem, usedSystem)

@@ -202,9 +202,9 @@ type avroDeserializer struct {
 }
 
 func (a *avroDeserializer) DeserializeEnvelope(ctx context.Context, topic string, data []byte) (*Envelope, error) {
-	var env Envelope
-	if err := a.de.Deserialize(ctx, topic, data, &env); err != nil {
+	var envelope Envelope
+	if err := a.de.Deserialize(ctx, topic, data, &envelope); err != nil {
 		return nil, fmt.Errorf("claimcheck: deserialize envelope: %w", err)
 	}
-	return &env, nil
+	return &envelope, nil
 }
