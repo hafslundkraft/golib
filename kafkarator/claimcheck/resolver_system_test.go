@@ -23,104 +23,71 @@ func envelopeForTopic(topic, system string) *claimcheck.Envelope {
 	}
 }
 
-// TestResolver_UsesEnvelopeSystem verifies that when an envelope carries a
-// producer system name, the reader builds its S3 client (and thus its IAM role
-// ARN) for that issuer system — not the consumer's own system.
+// TestResolver_UsesEnvelopeSystem verifies that the reader builds its S3 client
+// (and thus its IAM role ARN) for the system stamped on the envelope, which the
+// writer derived from the topic — that is the bucket owner whose role must be
+// assumed. It covers both an internal product (sys--<system>) and a shared
+// product (<domain>--<sub>, owned by data-definitions).
 func TestResolver_UsesEnvelopeSystem(t *testing.T) {
-	const topic = "billing.test.invoices"
-	envelope := envelopeForTopic(topic, "billing") // produced by "billing"
+	for _, tc := range []struct {
+		name   string
+		topic  string
+		system string
+	}{
+		{"internal product", "test.sys--billing.invoices--v1", "billing"},
+		{"shared product (data-definitions)", "test.water--obs.measurements--v1", "data-definitions"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			envelope := envelopeForTopic(tc.topic, tc.system)
 
-	var gotSystem, gotBucket string
-	factory := func(system, bucket string) (claimcheck.S3Reader, error) {
-		gotSystem, gotBucket = system, bucket
-		return claimcheck.NewFakeS3Client(), nil
+			var gotSystem, gotBucket string
+			factory := func(system, bucket string) (claimcheck.S3Reader, error) {
+				gotSystem, gotBucket = system, bucket
+				return claimcheck.NewFakeS3Client(), nil
+			}
+
+			err := claimcheck.ResolveForTest(
+				factory,
+				&fakeEnvelopeDeserializer{envelope: envelope},
+				tc.topic,
+				[]byte("wire"),
+			)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.system, gotSystem, "reader must assume the system stamped on the envelope")
+			assert.Equal(t, claimcheck.DefaultBucketResolver(tc.topic), gotBucket)
+		})
 	}
-
-	// Consumer's own system is "analytics" — must be ignored in favor of the issuer.
-	err := claimcheck.ResolveForTest(
-		factory,
-		"analytics",
-		&fakeEnvelopeDeserializer{envelope: envelope},
-		topic,
-		[]byte("wire"),
-	)
-	require.NoError(t, err)
-
-	assert.Equal(t, "billing", gotSystem, "reader must assume the producer's role, not the consumer's")
-	assert.Equal(t, claimcheck.DefaultBucketResolver(topic), gotBucket)
 }
 
-// TestResolver_FallsBackToDefaultSystem verifies that legacy envelopes without a
-// system field fall back to the consumer's own system name.
-func TestResolver_FallsBackToDefaultSystem(t *testing.T) {
-	const topic = "billing.test.invoices"
-	envelope := envelopeForTopic(topic, "") // legacy envelope, no system
+// TestResolver_EmptySystemErrors verifies that an envelope without a system
+// (malformed or pre-system-field) is rejected rather than resolved via any
+// fallback. This holds regardless of whether the topic follows the convention.
+func TestResolver_EmptySystemErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		topic string
+	}{
+		{"conventional shared topic", "test.water--obs.measurements--v1"},
+		{"conventional internal topic", "test.sys--billing.invoices--v1"},
+		{"non-conventional topic", "billing.test.invoices"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			envelope := envelopeForTopic(tc.topic, "") // no system
 
-	var gotSystem string
-	factory := func(system, _ string) (claimcheck.S3Reader, error) {
-		gotSystem = system
-		return claimcheck.NewFakeS3Client(), nil
+			factory := func(string, string) (claimcheck.S3Reader, error) {
+				t.Fatal("factory must not be called for an envelope with no system")
+				return nil, nil
+			}
+
+			err := claimcheck.ResolveForTest(
+				factory,
+				&fakeEnvelopeDeserializer{envelope: envelope},
+				tc.topic,
+				[]byte("wire"),
+			)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "has no system")
+		})
 	}
-
-	err := claimcheck.ResolveForTest(
-		factory,
-		"analytics",
-		&fakeEnvelopeDeserializer{envelope: envelope},
-		topic,
-		[]byte("wire"),
-	)
-	require.NoError(t, err)
-
-	assert.Equal(t, "analytics", gotSystem, "missing system must fall back to the consumer's own system")
-}
-
-// TestResolver_LegacyEnvelopeDerivesSharedSystemFromTopic verifies that a legacy
-// envelope (System == "") on a shared-product topic resolves to data-definitions
-// via topic-derivation, NOT to the consumer's own system.
-func TestResolver_LegacyEnvelopeDerivesSharedSystemFromTopic(t *testing.T) {
-	const topic = "test.water--obs.measurements--v1" // shared product
-	envelope := envelopeForTopic(topic, "")          // legacy: no system
-
-	var gotSystem string
-	factory := func(system, _ string) (claimcheck.S3Reader, error) {
-		gotSystem = system
-		return claimcheck.NewFakeS3Client(), nil
-	}
-
-	err := claimcheck.ResolveForTest(
-		factory,
-		"analytics",
-		&fakeEnvelopeDeserializer{envelope: envelope},
-		topic,
-		[]byte("wire"),
-	)
-	require.NoError(t, err)
-
-	assert.Equal(t, "data-definitions", gotSystem,
-		"legacy envelope on a shared topic must derive data-definitions, not the consumer's system")
-}
-
-// TestResolver_LegacyEnvelopeNonConventionalTopicFallsBack verifies that a legacy
-// envelope on a non-conventional topic (resolver returns "") still falls back to
-// the consumer's own system.
-func TestResolver_LegacyEnvelopeNonConventionalTopicFallsBack(t *testing.T) {
-	const topic = "billing.test.invoices" // no "--" in domain segment -> resolver ""
-	envelope := envelopeForTopic(topic, "")
-
-	var gotSystem string
-	factory := func(system, _ string) (claimcheck.S3Reader, error) {
-		gotSystem = system
-		return claimcheck.NewFakeS3Client(), nil
-	}
-
-	err := claimcheck.ResolveForTest(
-		factory,
-		"analytics",
-		&fakeEnvelopeDeserializer{envelope: envelope},
-		topic,
-		[]byte("wire"),
-	)
-	require.NoError(t, err)
-
-	assert.Equal(t, "analytics", gotSystem)
 }

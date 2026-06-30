@@ -34,7 +34,6 @@ type ProcessorOption func(*processorConfig)
 type processorConfig struct {
 	s3             S3Reader
 	bucketResolver BucketResolver
-	systemResolver SystemResolver
 	tracer         trace.Tracer
 	kafkaOpts      []kafkarator.ProcessorOption
 }
@@ -52,13 +51,6 @@ func WithProcessorS3Client(s3 S3Reader) ProcessorOption {
 // used on the corresponding writer; mismatches result in the wrong IAM role being assumed.
 func WithProcessorBucketResolver(fn BucketResolver) ProcessorOption {
 	return func(c *processorConfig) { c.bucketResolver = fn }
-}
-
-// WithProcessorSystemResolver overrides the default topic→system derivation used
-// as the legacy fallback when an envelope carries no system. Must match the
-// resolver used on the corresponding writer.
-func WithProcessorSystemResolver(fn SystemResolver) ProcessorOption {
-	return func(c *processorConfig) { c.systemResolver = fn }
 }
 
 // WithProcessorMaxMessages sets the maximum number of Kafka messages received
@@ -117,17 +109,12 @@ func NewProcessor(
 		bucketResolver = DefaultBucketResolver
 	}
 
-	systemResolver := cfg.systemResolver
-	if systemResolver == nil {
-		systemResolver = DefaultSystemResolver
-	}
-
 	connCfg := conn.Config()
 
 	// The S3 reader is resolved per-envelope, keyed by the producing system named
 	// in the envelope, because the bucket is owned by that system and the assumed
-	// IAM role must be scoped to it. defaultSystem is the consumer's own system,
-	// used as a fallback for legacy envelopes that predate the system field.
+	// IAM role must be scoped to it. The system is stamped by the writer (derived
+	// from the topic) and is required; envelopes without one are rejected.
 	var s3Factory s3ReaderFactory
 	if cfg.s3 != nil {
 		fixed := cfg.s3
@@ -147,12 +134,9 @@ func NewProcessor(
 
 	res := newResolver(
 		s3Factory,
-		connCfg.SystemName,
 		&avroDeserializer{de: conn.Deserializer()},
 		tracer,
 		bucketResolver,
-		systemResolver,
-		conn.Logger(),
 	)
 
 	// Default to maxMessages=1 — each envelope is a heavyweight S3 fetch.

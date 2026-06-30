@@ -38,25 +38,20 @@ type EnvelopeDeserializer = envelopeDeserializer
 type S3ReaderFactory = func(system, bucket string) (S3Reader, error)
 
 // ResolveForTest decodes the envelope and resolves a PayloadReader through the
-// full resolver path, using the given reader factory and default system name.
-// It returns the (system, bucket) the factory was asked to build a client for,
-// so tests can assert the issuer's system flows into the IAM role construction.
-// For use in tests only.
+// full resolver path, using the given reader factory. The (system, bucket) the
+// factory is asked to build a client for lets tests assert the issuer's system
+// flows into the IAM role construction. For use in tests only.
 func ResolveForTest(
 	factory S3ReaderFactory,
-	defaultSystem string,
 	de EnvelopeDeserializer,
 	topic string,
 	value []byte,
 ) error {
 	r := newResolver(
 		factory,
-		defaultSystem,
 		de,
 		nooptrace.NewTracerProvider().Tracer(""),
 		DefaultBucketResolver,
-		DefaultSystemResolver,
-		nil,
 	)
 	_, err := r.fetchPayload(context.Background(), topic, value)
 	return err
@@ -78,20 +73,11 @@ func NewMessage(
 		Headers: headers,
 		resolver: newResolver(
 			func(_, _ string) (S3Reader, error) { return s3, nil },
-			"",
 			de,
 			nooptrace.NewTracerProvider().Tracer(""),
 			DefaultBucketResolver,
-			DefaultSystemResolver,
-			nil,
 		),
 	}
-}
-
-// WithWriterSystemForTest stamps the producing system name onto each envelope.
-// For use in tests only.
-func WithWriterSystemForTest(system string) WriterOption {
-	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystem(system)) }
 }
 
 // WithWriterS3FactoryForTest injects a (system, bucket) writer factory so tests

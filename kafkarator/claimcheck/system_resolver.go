@@ -8,29 +8,27 @@ import "strings"
 // it here and nowhere else.
 const dataDefinitionsSystem = "data-definitions"
 
-// SystemResolver maps a topic name to the Happi system that owns its
-// claim-check bucket (the system whose Ceph IAM role must be assumed).
-type SystemResolver func(topic string) string
-
-// DefaultSystemResolver parses snappirator's topic convention
+// deriveSystemFromTopic parses snappirator's topic convention
 //
 //	<env>.<domain-segment>.<unqualified...>
 //
-// and returns the owning system:
+// and returns the Happi system that owns the topic's claim-check bucket (the
+// system whose Ceph IAM role must be assumed):
 //   - domain segment "sys--<system>"   -> "<system>"         (internal product)
 //   - domain segment "<domain>--<sub>" -> "data-definitions" (shared product)
-//   - otherwise                        -> ""  (caller falls back to its own system)
+//   - otherwise                        -> ""  (non-conventional topic; the caller errors)
 //
-// env is intentionally ignored: the shared system is the bare constant, and the
-// ARN env comes from the connection config.
-func DefaultSystemResolver(topic string) string {
+// The system is derived solely from the topic and is never overridable. env is
+// intentionally ignored: the shared system is the bare constant, and the ARN env
+// comes from the connection config.
+func deriveSystemFromTopic(topic string) string {
 	parts := strings.SplitN(topic, ".", 3)
 	if len(parts) < 3 {
 		return ""
 	}
 	domain := parts[1]
 	if system, ok := strings.CutPrefix(domain, "sys--"); ok {
-		return system // "" when domain is exactly "sys--" (malformed) -> caller falls back
+		return system // "" when domain is exactly "sys--" (malformed) -> caller errors
 	}
 	if strings.Contains(domain, "--") {
 		return dataDefinitionsSystem

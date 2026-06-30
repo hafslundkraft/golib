@@ -1,14 +1,12 @@
-package claimcheck_test
+package claimcheck
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 )
 
-func TestDefaultSystemResolver(t *testing.T) {
+func TestDeriveSystemFromTopic(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		topic string
@@ -25,7 +23,7 @@ func TestDefaultSystemResolver(t *testing.T) {
 		{"empty topic", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, claimcheck.DefaultSystemResolver(tc.topic))
+			assert.Equal(t, tc.want, deriveSystemFromTopic(tc.topic))
 		})
 	}
 }

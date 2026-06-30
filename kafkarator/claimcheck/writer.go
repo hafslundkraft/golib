@@ -50,19 +50,6 @@ func WithWriterBucketResolver(fn BucketResolver) WriterOption {
 	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withBucketResolver(fn)) }
 }
 
-// WithWriterSystem forces the owning system for every batch, bypassing topic
-// derivation. It sets both the assumed Ceph write role and the system stamped
-// onto each envelope — the two always agree.
-func WithWriterSystem(system string) WriterOption {
-	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystemOverride(system)) }
-}
-
-// WithWriterSystemResolver overrides the default topic→system derivation used by
-// the writer to choose the bucket owner.
-func WithWriterSystemResolver(fn SystemResolver) WriterOption {
-	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withSystemResolver(fn)) }
-}
-
 // WithWriterRowGroupSize sets the number of records per Parquet row group. Default is 100 000.
 func WithWriterRowGroupSize(n int) WriterOption {
 	return func(c *writerConfig) { c.stagerOpts = append(c.stagerOpts, withRowGroupSize(n)) }
@@ -126,7 +113,7 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	}
 
 	cfg.stagerOpts = append(
-		[]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger()), withSystem(connCfg.SystemName)},
+		[]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger())},
 		cfg.stagerOpts...,
 	)
 	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, conn.Serializer(), cfg.stagerOpts...)

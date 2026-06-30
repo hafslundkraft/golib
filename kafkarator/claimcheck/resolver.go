@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"strings"
 
 	"go.opentelemetry.io/otel/trace"
@@ -25,40 +24,25 @@ type s3ReaderFactory func(system, bucket string) (S3Reader, error)
 // resolver decodes claim-check envelopes and fetches payloads from S3.
 type resolver struct {
 	s3Factory      s3ReaderFactory
-	defaultSystem  string
 	deserializer   envelopeDeserializer
 	tracer         trace.Tracer
 	bucketResolver BucketResolver
-	systemResolver SystemResolver
-	logger         *slog.Logger
 }
 
 func newResolver(
 	s3Factory s3ReaderFactory,
-	defaultSystem string,
 	deserializer envelopeDeserializer,
 	tracer trace.Tracer,
 	bucketResolver BucketResolver,
-	systemResolver SystemResolver,
-	logger *slog.Logger,
 ) *resolver {
 	if bucketResolver == nil {
 		bucketResolver = DefaultBucketResolver
 	}
-	if systemResolver == nil {
-		systemResolver = DefaultSystemResolver
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
 	return &resolver{
 		s3Factory:      s3Factory,
-		defaultSystem:  defaultSystem,
 		deserializer:   deserializer,
 		tracer:         tracer,
 		bucketResolver: bucketResolver,
-		systemResolver: systemResolver,
-		logger:         logger,
 	}
 }
 
@@ -103,27 +87,15 @@ func (r *resolver) fetchPayloadFromEnvelope(
 			topic,
 		)
 	}
-	// Happy path: trust the producing system stamped in the envelope. For legacy
-	// envelopes without a system, derive the owner from the topic (correct even
-	// for shared products), falling back to the consumer's own system only for
-	// non-conventional topics. If a stamped system and a topic-derived system both
-	// exist and disagree, the stamp is authoritative (it may be a deliberate
-	// override) but we log a warning.
+	// The producing system is stamped on the envelope by the writer (derived from
+	// the topic, never overridable). It identifies the bucket owner whose Ceph IAM
+	// role must be assumed to read the payload. It must always be set; an empty
+	// system means a malformed or pre-system-field envelope we cannot resolve.
 	system := envelope.System
-	derived := r.systemResolver(topic)
-	switch {
-	case system == "":
-		if derived != "" {
-			system = derived
-		} else {
-			system = r.defaultSystem
-		}
-	case derived != "" && derived != system:
-		r.logger.WarnContext(ctx,
-			"claimcheck: envelope system disagrees with topic-derived system; trusting envelope",
-			"envelope-system", system,
-			"derived-system", derived,
-			"topic", topic,
+	if system == "" {
+		return nil, fmt.Errorf(
+			"claimcheck: envelope for topic %q has no system; cannot determine the bucket owner whose role must be assumed",
+			topic,
 		)
 	}
 	s3, err := r.s3Factory(system, bucket)
