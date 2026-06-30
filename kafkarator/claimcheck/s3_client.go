@@ -242,35 +242,61 @@ func (p *s3Client) DeleteObject(ctx context.Context, bucket, key string) error {
 }
 
 // defaultS3WriterFactory returns a caching factory that creates a production
-// S3Writer for each unique bucket on first use. Called when no WithWriterS3Client
-// option is provided to NewWriter.
+// S3Writer for each unique (system, bucket) pair on first use. Called when no
+// WithWriterS3Client option is provided to NewWriter.
 //
-// The provided exchanger is shared across all bucket clients to avoid
-// concurrent token exchanges racing on the same awsTokenFile.
-func defaultS3WriterFactory(exchanger *tokenExchanger, system, env string) func(bucket string) (S3Writer, error) {
+// The system is the owner of the bucket (resolved from the topic): for a shared
+// data-product the producer must assume the data-definitions role, not its own.
+// The provided exchanger is shared across all clients to avoid concurrent token
+// exchanges racing on the same awsTokenFile.
+func defaultS3WriterFactory(exchanger *tokenExchanger, env string) func(system, bucket string) (S3Writer, error) {
 	var (
 		mu    sync.Mutex
 		cache = map[string]S3Writer{}
 	)
-	return func(bucket string) (S3Writer, error) {
+	return func(system, bucket string) (S3Writer, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if c, ok := cache[bucket]; ok {
+		key := system + "\x00" + bucket
+		if c, ok := cache[key]; ok {
 			return c, nil
 		}
 		c, err := newS3Client(bucket, "rw", system, env, exchanger)
 		if err != nil {
 			return nil, err
 		}
-		cache[bucket] = c
+		cache[key] = c
 		return c, nil
 	}
 }
 
-// defaultS3ReaderFor creates a production S3Reader for the given bucket.
-// Called when no WithProcessorS3Client option is provided to NewProcessor.
-func defaultS3ReaderFor(bucket, system, env string) (S3Reader, error) {
-	return newS3Client(bucket, "r", system, env, nil)
+// defaultS3ReaderFactory returns a caching factory that creates a production
+// S3Reader for each unique (system, bucket) pair on first use. Called when no
+// WithProcessorS3Client option is provided to NewProcessor.
+//
+// The system is the producer named in the claim-check envelope: the bucket is
+// owned by that system, so the assumed IAM role must be scoped to it. The
+// provided exchanger is shared across all clients to avoid concurrent token
+// exchanges racing on the same awsTokenFile.
+func defaultS3ReaderFactory(exchanger *tokenExchanger, env string) s3ReaderFactory {
+	var (
+		mu    sync.Mutex
+		cache = map[string]S3Reader{}
+	)
+	return func(system, bucket string) (S3Reader, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		key := system + "\x00" + bucket
+		if c, ok := cache[key]; ok {
+			return c, nil
+		}
+		c, err := newS3Client(bucket, "r", system, env, exchanger)
+		if err != nil {
+			return nil, err
+		}
+		cache[key] = c
+		return c, nil
+	}
 }
 
 // isError is a helper to check for AWS SDK typed errors.

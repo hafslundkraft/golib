@@ -2,6 +2,7 @@ package claimcheck
 
 import (
 	"bytes"
+	"context"
 
 	parquet "github.com/parquet-go/parquet-go"
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
@@ -17,8 +18,44 @@ func ClaimCheckRoleARN(system, env, bucket, access string) (string, error) {
 	return claimCheckRoleARN(system, env, bucket, access)
 }
 
+// RoleARNForClient builds a production S3 client via the same path used by the
+// writer/processor and returns the role ARN it computed for the given bucket.
+// The token exchanger is constructed from env vars but no network call is made
+// at construction time. For e2e tests only.
+func RoleARNForClient(bucket, access, system, env string) (string, error) {
+	c, err := newS3Client(bucket, access, system, env, nil)
+	if err != nil {
+		return "", err
+	}
+	return c.(*s3Client).roleARN, nil
+}
+
 // EnvelopeDeserializer is re-exported for use in tests only.
 type EnvelopeDeserializer = envelopeDeserializer
+
+// S3ReaderFactory mirrors the per-(system,bucket) reader factory used on the
+// read path. For use in tests only.
+type S3ReaderFactory = func(system, bucket string) (S3Reader, error)
+
+// ResolveForTest decodes the envelope and resolves a PayloadReader through the
+// full resolver path, using the given reader factory. The (system, bucket) the
+// factory is asked to build a client for lets tests assert the issuer's system
+// flows into the IAM role construction. For use in tests only.
+func ResolveForTest(
+	factory S3ReaderFactory,
+	de EnvelopeDeserializer,
+	topic string,
+	value []byte,
+) error {
+	r := newResolver(
+		factory,
+		de,
+		nooptrace.NewTracerProvider().Tracer(""),
+		DefaultBucketResolver,
+	)
+	_, err := r.fetchPayload(context.Background(), topic, value)
+	return err
+}
 
 // NewMessage constructs a Message with an embedded resolver. For use in tests
 // that exercise handler logic without a full [Processor] setup.
@@ -30,12 +67,23 @@ func NewMessage(
 	de EnvelopeDeserializer,
 ) *Message {
 	return &Message{
-		Topic:    topic,
-		Key:      key,
-		value:    value,
-		Headers:  headers,
-		resolver: newResolver(s3, de, nooptrace.NewTracerProvider().Tracer(""), DefaultBucketResolver),
+		Topic:   topic,
+		Key:     key,
+		value:   value,
+		Headers: headers,
+		resolver: newResolver(
+			func(_, _ string) (S3Reader, error) { return s3, nil },
+			de,
+			nooptrace.NewTracerProvider().Tracer(""),
+			DefaultBucketResolver,
+		),
 	}
+}
+
+// WithWriterS3FactoryForTest injects a (system, bucket) writer factory so tests
+// can assert which system the write client is built for. For use in tests only.
+func WithWriterS3FactoryForTest(fn func(system, bucket string) (S3Writer, error)) WriterOption {
+	return func(c *writerConfig) { c.s3Factory = fn }
 }
 
 // NewTestWriter creates a Writer for use in tests, bypassing kafkarator.Connection.

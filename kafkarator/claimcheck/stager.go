@@ -43,7 +43,7 @@ type SchemaFetcher interface {
 // stager fetches the payload Avro schema from Schema Registry, converts it to
 // a Parquet schema, and opens write sessions to S3.
 type stager struct {
-	s3Factory      func(bucket string) (S3Writer, error)
+	s3Factory      func(system, bucket string) (S3Writer, error)
 	schemaFetcher  SchemaFetcher
 	ser            serializer
 	bucketResolver BucketResolver
@@ -91,10 +91,10 @@ func withLogger(l *slog.Logger) stagerOption {
 	}
 }
 
-// newStagerWithFactory creates a stager that calls factory(bucket) to obtain
-// the S3Writer for each unique bucket.
+// newStagerWithFactory creates a stager that calls factory(system, bucket) to obtain
+// the S3Writer for each unique (system, bucket) pair.
 func newStagerWithFactory(
-	factory func(bucket string) (S3Writer, error),
+	factory func(system, bucket string) (S3Writer, error),
 	fetcher SchemaFetcher,
 	ser serializer,
 	opts ...stagerOption,
@@ -138,9 +138,17 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 		return nil, fmt.Errorf("claimcheck: bucket resolver returned empty string for topic %q", topic)
 	}
 
-	s3Client, err := s.s3Factory(bucket)
+	system := owningSystem(topic)
+	if system == "" {
+		return nil, fmt.Errorf(
+			"claimcheck: cannot derive owning system from topic %q; topic must follow the <env>.sys--<system>.<...> or <env>.<domain>--<sub>.<...> convention",
+			topic,
+		)
+	}
+
+	s3Client, err := s.s3Factory(system, bucket)
 	if err != nil {
-		return nil, fmt.Errorf("claimcheck: create S3 writer for bucket %q: %w", bucket, err)
+		return nil, fmt.Errorf("claimcheck: create S3 writer for system %q bucket %q: %w", system, bucket, err)
 	}
 
 	batchID := uuid.New().String()
@@ -174,6 +182,7 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 	return &Batch{
 		topic:    topic,
 		batchID:  batchID,
+		system:   system,
 		pipe:     pipe,
 		span:     span,
 		logger:   s.logger,
@@ -200,6 +209,7 @@ type Batch struct {
 	produce func(ctx context.Context, value []byte) error
 	topic   string
 	batchID string
+	system  string
 	pipe    *multipartWriter
 	span    trace.Span
 	logger  *slog.Logger
@@ -234,15 +244,16 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("claimcheck: close parquet writer: %w", err)
 	}
 	byteSize := b.pipe.Size()
-	env := &Envelope{
+	envelope := &Envelope{
 		BatchID:     b.batchID,
 		StorageURI:  "s3://" + b.pipe.bucket + "/" + b.pipe.key,
 		Topic:       b.topic,
+		System:      b.system,
 		RecordCount: b.recordCount,
 		ByteSize:    byteSize,
 		CreatedAt:   time.Now().UTC().UnixMilli(),
 	}
-	value, err := b.ser.Serialize(ctx, b.topic, env)
+	value, err := b.ser.Serialize(ctx, b.topic, envelope)
 	if err != nil {
 		b.pipe.Abort()
 		b.span.RecordError(err)

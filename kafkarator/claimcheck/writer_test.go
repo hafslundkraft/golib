@@ -15,6 +15,35 @@ import (
 	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 )
 
+func TestWriter_StampsProducerSystemOnEnvelope(t *testing.T) {
+	s3 := claimcheck.NewFakeS3Client()
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{
+			schemaStr: simpleSchema("id"),
+			version:   1,
+			id:        42,
+		}),
+	)
+
+	// Topic derives the owning system "billing"; it is never set by the caller.
+	batch, err := w.NewBatch(context.Background(), "test.sys--billing.invoices--v1")
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(
+		t,
+		"billing",
+		envelope.System,
+		"envelope must record the topic-derived owning system for readers' ARN construction",
+	)
+}
+
 func TestMultipartWriter_CompleteFlushesSmallPayload(t *testing.T) {
 	// Write < minPartSize bytes; Complete must still upload them.
 	s3 := claimcheck.NewFakeS3Client()
@@ -28,19 +57,19 @@ func TestMultipartWriter_CompleteFlushesSmallPayload(t *testing.T) {
 		}),
 	)
 
-	batch, err := w.NewBatch(context.Background(), "test-topic")
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.events--v1")
 	require.NoError(t, err)
 	defer batch.Cleanup()
 
 	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	assert.Equal(t, "test-topic", env.Topic)
-	assert.Equal(t, int64(1), env.RecordCount)
-	assert.Positive(t, env.ByteSize)
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "test.sys--demo.events--v1", envelope.Topic)
+	assert.Equal(t, int64(1), envelope.RecordCount)
+	assert.Positive(t, envelope.ByteSize)
 
-	bucket, key := bucketAndKey(t, env.StorageURI)
+	bucket, key := bucketAndKey(t, envelope.StorageURI)
 	assert.NotEmpty(t, s3.Store[bucket+"/"+key])
 }
 
@@ -55,7 +84,7 @@ func TestMultipartWriter_AbortLeavesNoObject(t *testing.T) {
 		}),
 	)
 
-	batch, err := w.NewBatch(context.Background(), "abort-topic")
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.aborts--v1")
 	require.NoError(t, err)
 	require.NoError(t, batch.Write(map[string]any{"id": int32(99)}))
 	batch.Cleanup()
@@ -79,15 +108,15 @@ func TestStager_UsesPayloadSubject(t *testing.T) {
 		claimcheck.WithWriterSchemaFetcher(fetcher),
 	)
 
-	batch, err := w.NewBatch(context.Background(), "demo-topic")
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.subjects--v1")
 	require.NoError(t, err)
 	batch.Cleanup()
 
-	assert.Equal(t, "demo-topic-claim-check-payload", fetcher.subject)
+	assert.Equal(t, "test.sys--demo.subjects--v1-claim-check-payload", fetcher.subject)
 }
 
 func TestStager_BucketDerivedFromResolver(t *testing.T) {
-	topic := "hash-check-topic"
+	topic := "test.sys--demo.buckets--v1"
 	expected := claimcheck.DefaultBucketResolver(topic)
 
 	var capturedBucket string
@@ -114,7 +143,7 @@ func TestBatch_WriteProduceAndReadRecords(t *testing.T) {
 		Name string `parquet:"name"`
 	}
 
-	const topic = "event-topic"
+	const topic = "test.sys--demo.records--v1"
 	schemaStr := `{"type":"record","name":"Event","fields":[{"name":"id","type":"int"},{"name":"name","type":"string"}]}`
 	s3 := claimcheck.NewFakeS3Client()
 	kw := &captureKW{}
@@ -133,8 +162,8 @@ func TestBatch_WriteProduceAndReadRecords(t *testing.T) {
 	}
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
 
 	var got []Event
 	for r, err := range claimcheck.Records[Event](context.Background(), msg) {
@@ -154,7 +183,7 @@ func TestBatch_KeyAndHeadersPropagated(t *testing.T) {
 		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("v"), version: 1, id: 1}),
 	)
 
-	batch, err := w.NewBatch(context.Background(), "keyed-topic",
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.keyed--v1",
 		claimcheck.WithBatchKey([]byte("my-key")),
 		claimcheck.WithBatchHeaders(map[string][]byte{"x-source": []byte("test")}),
 	)
@@ -169,7 +198,7 @@ func TestBatch_KeyAndHeadersPropagated(t *testing.T) {
 }
 
 func TestBatch_FlushesMultipleRowGroups(t *testing.T) {
-	const topic = "rowgroup-topic"
+	const topic = "test.sys--demo.rowgroups--v1"
 	schemaStr := `{"type":"record","name":"RG","fields":[{"name":"id","type":"int"}]}`
 	s3 := claimcheck.NewFakeS3Client()
 	kw := &captureKW{}
@@ -186,8 +215,8 @@ func TestBatch_FlushesMultipleRowGroups(t *testing.T) {
 	}
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
 	pr, err := msg.Payload(context.Background())
 	require.NoError(t, err)
 	defer pr.Close()
@@ -204,7 +233,7 @@ func TestBatch_FlushesMultipleRowGroups(t *testing.T) {
 }
 
 func TestBatch_ParquetFooterEmbeddsAvroMetadata(t *testing.T) {
-	const topic = "meta-topic"
+	const topic = "test.sys--demo.meta--v1"
 	schemaStr := `{"type":"record","name":"M","fields":[{"name":"v","type":"long"}]}`
 	s3 := claimcheck.NewFakeS3Client()
 	kw := &captureKW{}
@@ -218,8 +247,8 @@ func TestBatch_ParquetFooterEmbeddsAvroMetadata(t *testing.T) {
 	require.NoError(t, batch.Write(map[string]any{"v": int64(42)}))
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	bucket, key := bucketAndKey(t, env.StorageURI)
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	bucket, key := bucketAndKey(t, envelope.StorageURI)
 	data := s3.Store[bucket+"/"+key]
 	require.NotEmpty(t, data)
 
@@ -240,7 +269,7 @@ func TestBatch_ProduceAfterCleanupReturnsError(t *testing.T) {
 		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("id"), version: 1, id: 1}),
 	)
 
-	batch, err := w.NewBatch(context.Background(), "double-close")
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.doubleclose--v1")
 	require.NoError(t, err)
 
 	batch.Cleanup()
@@ -255,7 +284,7 @@ func TestBatch_CleanupAfterProduceIsNoop(t *testing.T) {
 		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("v"), version: 1, id: 1}),
 	)
 
-	batch, err := w.NewBatch(context.Background(), "noop-abort")
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.noopabort--v1")
 	require.NoError(t, err)
 	defer batch.Cleanup()
 
@@ -270,7 +299,7 @@ func TestPayloadReader_ReadAtDoesNotMoveSequentialPosition(t *testing.T) {
 	type R struct {
 		ID int32 `parquet:"id"`
 	}
-	const topic = "readat-independence-topic"
+	const topic = "test.sys--demo.readat--v1"
 	schemaStr := `{"type":"record","name":"R","fields":[{"name":"id","type":"int"}]}`
 	s3 := claimcheck.NewFakeS3Client()
 	kw := &captureKW{}
@@ -286,8 +315,8 @@ func TestPayloadReader_ReadAtDoesNotMoveSequentialPosition(t *testing.T) {
 	}
 	require.NoError(t, batch.Produce(context.Background()))
 
-	env := unmarshalEnvelope(t, kw.last.Value)
-	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{env: env})
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
 
 	// Open PayloadReader — parquet.OpenFile will issue ReadAt calls for the footer.
 	pr, err := msg.Payload(context.Background())
@@ -313,6 +342,72 @@ func TestPayloadReader_ReadAtDoesNotMoveSequentialPosition(t *testing.T) {
 	assert.NoError(t, err)
 
 	_ = f
+}
+
+func TestWriter_SharedTopicStampsAndBuildsForDataDefinitions(t *testing.T) {
+	const topic = "test.water--obs.measurements--v1" // shared product
+
+	var gotSystem, gotBucket string
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3FactoryForTest(func(system, bucket string) (claimcheck.S3Writer, error) {
+			gotSystem, gotBucket = system, bucket
+			return claimcheck.NewFakeS3Client(), nil
+		}),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("id"), version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	assert.Equal(t, "data-definitions", gotSystem, "write client must be built for the bucket owner, not the producer")
+	assert.Equal(t, claimcheck.DefaultBucketResolver(topic), gotBucket)
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "data-definitions", envelope.System, "stamp must match the write role")
+}
+
+func TestWriter_InternalTopicStampsOwnSystem(t *testing.T) {
+	const topic = "test.sys--billing.invoices--v1" // internal product
+
+	var gotSystem string
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3FactoryForTest(func(system, _ string) (claimcheck.S3Writer, error) {
+			gotSystem = system
+			return claimcheck.NewFakeS3Client(), nil
+		}),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("id"), version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	assert.Equal(t, "billing", gotSystem)
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	assert.Equal(t, "billing", envelope.System)
+}
+
+func TestWriter_NonConventionalTopicErrors(t *testing.T) {
+	const topic = "billing.test" // no name segment -> no derivable system
+
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3FactoryForTest(func(string, string) (claimcheck.S3Writer, error) {
+			t.Fatal("S3 writer factory must not be called when the system cannot be derived")
+			return nil, nil
+		}),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: simpleSchema("id"), version: 1, id: 1}),
+	)
+
+	_, err := w.NewBatch(context.Background(), topic)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot derive owning system")
 }
 
 // parquetKV extracts the Parquet key-value metadata footer as a map.

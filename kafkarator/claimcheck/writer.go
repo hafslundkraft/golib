@@ -25,7 +25,7 @@ type Writer struct {
 type WriterOption func(*writerConfig)
 
 type writerConfig struct {
-	s3Factory  func(bucket string) (S3Writer, error)
+	s3Factory  func(system, bucket string) (S3Writer, error)
 	fetcher    SchemaFetcher
 	stagerOpts []stagerOption
 }
@@ -36,7 +36,7 @@ type writerConfig struct {
 // HAPPI_SYSTEM_NAME, HAPPI_ENV, and HAPPI_IDP_ISSUER_URL.
 func WithWriterS3Client(s3 S3Writer) WriterOption {
 	return func(c *writerConfig) {
-		c.s3Factory = func(_ string) (S3Writer, error) { return s3, nil }
+		c.s3Factory = func(_, _ string) (S3Writer, error) { return s3, nil }
 	}
 }
 
@@ -96,13 +96,13 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	for _, o := range opts {
 		o(cfg)
 	}
+	connCfg := conn.Config()
 	if cfg.s3Factory == nil {
-		connCfg := conn.Config()
 		exchanger, err := newTokenExchanger()
 		if err != nil {
 			return nil, fmt.Errorf("claimcheck: init token exchanger: %w", err)
 		}
-		cfg.s3Factory = defaultS3WriterFactory(exchanger, connCfg.SystemName, connCfg.Env)
+		cfg.s3Factory = defaultS3WriterFactory(exchanger, connCfg.Env)
 	}
 	if cfg.fetcher == nil {
 		cfg.fetcher = newSRSchemaFetcher(conn.SchemaRegistryClient())
@@ -112,7 +112,10 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 		return nil, fmt.Errorf("claimcheck: create kafka writer: %w", err)
 	}
 
-	cfg.stagerOpts = append([]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger())}, cfg.stagerOpts...)
+	cfg.stagerOpts = append(
+		[]stagerOption{withTracer(conn.Tracer()), withLogger(conn.Logger())},
+		cfg.stagerOpts...,
+	)
 	stager := newStagerWithFactory(cfg.s3Factory, cfg.fetcher, conn.Serializer(), cfg.stagerOpts...)
 	return &Writer{kw: kw, stager: stager}, nil
 }

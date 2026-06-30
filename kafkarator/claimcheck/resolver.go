@@ -15,16 +15,22 @@ type envelopeDeserializer interface {
 	DeserializeEnvelope(ctx context.Context, topic string, data []byte) (*Envelope, error)
 }
 
+// s3ReaderFactory builds an S3Reader scoped to a producing system and bucket.
+// The system determines which Ceph IAM role is assumed, so it must be the
+// system that owns the bucket (the producer named in the envelope), not the
+// consumer's own system.
+type s3ReaderFactory func(system, bucket string) (S3Reader, error)
+
 // resolver decodes claim-check envelopes and fetches payloads from S3.
 type resolver struct {
-	s3             S3Reader
+	s3Factory      s3ReaderFactory
 	deserializer   envelopeDeserializer
 	tracer         trace.Tracer
 	bucketResolver BucketResolver
 }
 
 func newResolver(
-	s3 S3Reader,
+	s3Factory s3ReaderFactory,
 	deserializer envelopeDeserializer,
 	tracer trace.Tracer,
 	bucketResolver BucketResolver,
@@ -32,27 +38,36 @@ func newResolver(
 	if bucketResolver == nil {
 		bucketResolver = DefaultBucketResolver
 	}
-	return &resolver{s3: s3, deserializer: deserializer, tracer: tracer, bucketResolver: bucketResolver}
+	return &resolver{
+		s3Factory:      s3Factory,
+		deserializer:   deserializer,
+		tracer:         tracer,
+		bucketResolver: bucketResolver,
+	}
 }
 
 func (r *resolver) peekEnvelope(ctx context.Context, topic string, data []byte) (*Envelope, error) {
-	env, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
+	envelope, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: peek envelope: %w", err)
 	}
-	return env, nil
+	return envelope, nil
 }
 
 func (r *resolver) fetchPayload(ctx context.Context, topic string, data []byte) (*PayloadReader, error) {
-	env, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
+	envelope, err := r.deserializer.DeserializeEnvelope(ctx, topic, data)
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: fetch payload: %w", err)
 	}
-	return r.fetchPayloadFromEnvelope(ctx, topic, env)
+	return r.fetchPayloadFromEnvelope(ctx, topic, envelope)
 }
 
-func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, env *Envelope) (*PayloadReader, error) {
-	bucket, key, err := s3URIParts(env.StorageURI)
+func (r *resolver) fetchPayloadFromEnvelope(
+	ctx context.Context,
+	topic string,
+	envelope *Envelope,
+) (*PayloadReader, error) {
+	bucket, key, err := s3URIParts(envelope.StorageURI)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +87,22 @@ func (r *resolver) fetchPayloadFromEnvelope(ctx context.Context, topic string, e
 			topic,
 		)
 	}
-	return &PayloadReader{ctx: ctx, s3: r.s3, bucket: bucket, key: key, size: env.ByteSize}, nil
+	// The producing system is stamped on the envelope by the writer (derived from
+	// the topic, never overridable). It identifies the bucket owner whose Ceph IAM
+	// role must be assumed to read the payload. It must always be set; an empty
+	// system means a malformed or pre-system-field envelope we cannot resolve.
+	system := envelope.System
+	if system == "" {
+		return nil, fmt.Errorf(
+			"claimcheck: envelope for topic %q has no system; cannot determine the bucket owner whose role must be assumed",
+			topic,
+		)
+	}
+	s3, err := r.s3Factory(system, bucket)
+	if err != nil {
+		return nil, fmt.Errorf("claimcheck: create S3 reader for system %q bucket %q: %w", system, bucket, err)
+	}
+	return &PayloadReader{ctx: ctx, s3: s3, bucket: bucket, key: key, size: envelope.ByteSize}, nil
 }
 
 // PayloadReader provides read access to the raw Parquet bytes of a

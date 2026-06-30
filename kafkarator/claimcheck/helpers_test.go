@@ -41,7 +41,7 @@ func simpleSchema(fields ...string) string {
 
 // fakeEnvelopeDeserializer implements EnvelopeDeserializer for tests.
 type fakeEnvelopeDeserializer struct {
-	env *claimcheck.Envelope
+	envelope *claimcheck.Envelope
 }
 
 func (f *fakeEnvelopeDeserializer) DeserializeEnvelope(
@@ -49,7 +49,7 @@ func (f *fakeEnvelopeDeserializer) DeserializeEnvelope(
 	_ string,
 	_ []byte,
 ) (*claimcheck.Envelope, error) {
-	return f.env, nil
+	return f.envelope, nil
 }
 
 // captureKW records the last message written to Kafka.
@@ -84,9 +84,9 @@ func (j *jsonSerializer) Serialize(_ context.Context, _ string, value any) ([]by
 // unmarshalEnvelope decodes a JSON-serialized envelope captured from a test KafkaWriter.
 func unmarshalEnvelope(t *testing.T, data []byte) *claimcheck.Envelope {
 	t.Helper()
-	var env claimcheck.Envelope
-	require.NoError(t, json.Unmarshal(data, &env))
-	return &env
+	var envelope claimcheck.Envelope
+	require.NoError(t, json.Unmarshal(data, &envelope))
+	return &envelope
 }
 
 // bucketAndKey splits an s3://bucket/key URI into its two components.
