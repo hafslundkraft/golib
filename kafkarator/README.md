@@ -287,26 +287,7 @@ if err := conn.Test(ctx); err != nil {
 
 This library automatically propagates OpenTelemetry trace context through Kafka messages when a telemetry provider is configured. This enables distributed tracing across your Kafka-based microservices.
 
-### Prerequisites
-
-Before trace propagation can work, you must configure the global OpenTelemetry text map propagator. This is typically done once at application startup:
-
-```go
-import (
-    "go.opentelemetry.io/otel"
-    "go.opentelemetry.io/otel/propagation"
-)
-
-func init() {
-    // Configure the global propagator for W3C Trace Context
-    otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-        propagation.TraceContext{},
-        propagation.Baggage{},
-    ))
-}
-```
-
-**Note**: The `github.com/hafslundkraft/golib/telemetry` library may already configure this for you. Check your telemetry initialization code to avoid duplicate configuration.
+kafkarator reads and writes this trace context using its own propagator, independent of whatever (if anything) the host application has configured globally via `otel.SetTextMapPropagator` — no setup is required for trace propagation to work.
 
 ### Trace Context Headers
 
@@ -338,13 +319,23 @@ The library creates spans for all Kafka operations:
 - **Name**: `send <topic-name>`
 - **Attributes**: `messaging.system=kafka`, `messaging.operation.type=send`, `messaging.operation.name=send`, `messaging.destination.name` (topic), `messaging.destination.partition.id`, `messaging.kafka.offset`, `messaging.kafka.message.key` (if present)
 
-**Consumer spans** (SpanKind: CLIENT):
+**Poll spans** (SpanKind: CLIENT):
 - **Name**: `poll <topic-name>`
 - **Attributes**: `messaging.system=kafka`, `messaging.operation.type=receive`, `messaging.operation.name=poll`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.batch.message_count` (for multi-message batches), `messaging.destination.partition.id`, `messaging.kafka.offset`
+
+**Process spans** (SpanKind: CONSUMER):
+- **Name**: `process <topic-name>`
+- **Attributes**: `messaging.system=kafka`, `messaging.operation.type=process`, `messaging.operation.name=process`, `messaging.destination.name` (topic), `messaging.consumer.group.name`, `messaging.destination.partition.id`, `messaging.kafka.offset`
 
 **Commit spans** (SpanKind: CLIENT):
 - **Name**: `commit <topic-name>`
 - **Attributes**: `messaging.system=kafka`, `messaging.operation.type=settle`, `messaging.operation.name=commit`, `messaging.destination.name` (topic), `messaging.consumer.group.name`
+
+### How Spans Are Correlated
+
+A process span carries an OpenTelemetry [Link](https://opentelemetry.io/docs/specs/otel/trace/api/#link) back to the producer's send span — it does **not** parent to it, and it starts its own trace rather than extending the producer's.
+
+This is deliberate: Kafka topics are durable and replayable. A message can be reprocessed long after it was produced (consumer group reset, backfill, DLQ retry, or just ordinary lag), and by then the producer's trace may already be closed or evicted from the tracing backend's retention window. Parent-child spans assume a bounded request/response lifetime; grafting a new span onto a trace that may be arbitrarily old — or gone — produces incorrect or unqueryable traces. A link records the relationship without depending on the producer's trace still being "live," and correctly represents fan-out too: several consumer groups can each process the same message, each getting their own trace linked back to the same producer span.
 
 ### Error Handling
 

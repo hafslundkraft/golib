@@ -108,6 +108,9 @@ func (p *Processor) Close(ctx context.Context) error {
 // It reads messages, processes each one with the configured handler,
 // and commits offsets only after all messages are successfully processed.
 //
+// The context passed to the handler carries a trace.Link back to the
+// producer's span rather than sharing its trace ID.
+//
 // The number of messages and read timeout are configured when creating the Processor
 // using WithProcessorMaxMessages and WithProcessorReadTimeout.
 //
@@ -124,17 +127,7 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 		if err := ctx.Err(); err != nil {
 			return processedCount, fmt.Errorf("context canceled: %w", err)
 		}
-		// Extract trace context from message headers to continue the distributed trace
-		msgCtx := msgs[i].ExtractTraceContext(ctx)
-		msgCtx, span := startProcessingSpan(
-			msgCtx,
-			p.tel.Tracer(),
-			p.reader.topic,
-			p.reader.consumerGroup,
-			//nolint:gosec // Partition is a Kafka partition ID, non-negative and defined by Kafka as int32
-			int32(msgs[i].Partition),
-			msgs[i].Offset,
-		)
+		msgCtx, span := startProcessingSpan(ctx, p.tel.Tracer(), p.reader.consumerGroup, &msgs[i])
 
 		// Call user's processing function
 		processErr := p.handler(msgCtx, &msgs[i])
