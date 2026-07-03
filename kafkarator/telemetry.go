@@ -14,11 +14,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// tracePropagator is used to read/write W3C trace context (and baggage) on
-// Kafka message headers. It's a package-local instance rather than
-// otel.GetTextMapPropagator(): that global defaults to a no-op until some
-// caller explicitly registers one via otel.SetTextMapPropagator, and
-// kafkarator shouldn't depend on the host application having done so.
+// tracePropagator writes W3C trace context and baggage onto Kafka message
+// headers at produce time (extraction uses the narrower TraceContext/Baggage
+// propagators directly — see extractSpanContext and extractBaggage). It's a
+// package-local instance rather than otel.GetTextMapPropagator(): that
+// global defaults to a no-op until some caller explicitly registers one via
+// otel.SetTextMapPropagator, and kafkarator shouldn't depend on the host
+// application having done so.
 var tracePropagator = propagation.NewCompositeTextMapPropagator( //nolint:gochecknoglobals // stateless, read-only propagator config
 	propagation.TraceContext{},
 	propagation.Baggage{},
@@ -124,6 +126,16 @@ func injectTraceContext(ctx context.Context, headers map[string][]byte) map[stri
 	return propagatedHeaders
 }
 
+// headerCarrier converts Kafka message headers into a propagation.MapCarrier
+// for use with a TextMapPropagator's Extract.
+func headerCarrier(headers map[string][]byte) propagation.MapCarrier {
+	carrier := propagation.MapCarrier{}
+	for k, v := range headers {
+		carrier[k] = string(v)
+	}
+	return carrier
+}
+
 // extractSpanContext parses the OpenTelemetry SpanContext carried in a Kafka
 // message's headers (written by injectTraceContext at produce time), for use
 // as a trace.Link on the processing span.
@@ -131,13 +143,22 @@ func injectTraceContext(ctx context.Context, headers map[string][]byte) map[stri
 // Returns a zero-value SpanContext (check IsValid()) if the message carries
 // no trace context.
 func extractSpanContext(headers map[string][]byte) trace.SpanContext {
-	carrier := propagation.MapCarrier{}
-	for k, v := range headers {
-		carrier[k] = string(v)
-	}
-
-	ctx := tracePropagator.Extract(context.Background(), carrier)
+	// context.Background(), not the caller's ctx: if headers carry no valid
+	// traceparent, Extract returns its input unchanged, which would otherwise
+	// make this return whatever span the caller has active — linking to the
+	// consumer's own span instead of correctly reporting "no producer span."
+	ctx := propagation.TraceContext{}.Extract(context.Background(), headerCarrier(headers))
 	return trace.SpanContextFromContext(ctx)
+}
+
+// extractBaggage extracts W3C Baggage from a Kafka message's headers into
+// ctx. Unlike extractSpanContext, this uses the Baggage propagator alone
+// rather than the full tracePropagator: extracting into ctx (not a
+// throwaway context) with the full composite would also attach the
+// producer's span as ctx's current span, reintroducing the parent-child
+// relationship extractSpanContext's Link is meant to replace.
+func extractBaggage(ctx context.Context, headers map[string][]byte) context.Context {
+	return propagation.Baggage{}.Extract(ctx, headerCarrier(headers))
 }
 
 // startProcessingSpan creates a span for processing a Kafka message with all standard attributes.
@@ -177,6 +198,7 @@ func startProcessingSpan(
 		spanOpts = append(spanOpts, trace.WithLinks(trace.Link{SpanContext: sc}))
 	}
 
+	ctx = extractBaggage(ctx, msg.Headers)
 	return tracer.Start(ctx, spanName, spanOpts...)
 }
 
