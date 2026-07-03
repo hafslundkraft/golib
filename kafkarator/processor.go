@@ -124,17 +124,10 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 		if err := ctx.Err(); err != nil {
 			return processedCount, fmt.Errorf("context canceled: %w", err)
 		}
-		// Extract trace context from message headers to continue the distributed trace
-		msgCtx := msgs[i].ExtractTraceContext(ctx)
-		msgCtx, span := startProcessingSpan(
-			msgCtx,
-			p.tel.Tracer(),
-			p.reader.topic,
-			p.reader.consumerGroup,
-			//nolint:gosec // Partition is a Kafka partition ID, non-negative and defined by Kafka as int32
-			int32(msgs[i].Partition),
-			msgs[i].Offset,
-		)
+		// Link to the producer's span rather than parenting to it: Kafka is a
+		// durable, replayable log, so the processing span shouldn't be grafted
+		// onto a produce-time trace that may be long closed by the time this runs.
+		msgCtx, span := startProcessingSpan(ctx, p.tel.Tracer(), p.reader.consumerGroup, &msgs[i])
 
 		// Call user's processing function
 		processErr := p.handler(msgCtx, &msgs[i])
