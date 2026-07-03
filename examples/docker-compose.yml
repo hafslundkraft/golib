@@ -1,0 +1,19 @@
+services:
+  # All-in-one LGTM stack (Grafana + Tempo + Loki + Prometheus) with an
+  # OpenTelemetry Collector, for visually inspecting spans produced by the
+  # examples in this directory.
+  #
+  # Usage: from this directory, `docker compose up`, then point a demo's
+  # telemetry setup at the collector, e.g.:
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run ./kafkarator_processor_demo
+  # Grafana UI: http://localhost:3000
+  lgtm:
+    image: grafana/otel-lgtm
+    ports:
+      - "3000:3000" # Grafana UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'

@@ -31,6 +31,13 @@ cd kafkarator_processor_demo
 go run .
 ```
 
+By default spans print to the console. To inspect them in Grafana/Tempo instead, start the LGTM stack (`docker compose up` from the `examples` directory), then run 
+```bash 
+export $(xargs < .env) && go run .
+``` 
+
+(loads the OTLP endpoint and service name/namespace from `.env`), then open http://localhost:3000.
+
 ### What it demonstrates
 
 - Starting a local Kafka container for testing

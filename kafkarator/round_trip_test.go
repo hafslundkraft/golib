@@ -386,9 +386,21 @@ func TestWriterProcessorRoundtripWithTracing(t *testing.T) {
 	// Verify parent-child relationships
 	assertTraceContext(t, parentSpanRecorded, sendSpan)
 
-	// Verify same trace across send and process
-	assert.Equal(t, sendSpan.SpanContext().TraceID(), processSpan.SpanContext().TraceID(),
-		"send and process spans should share the same trace ID")
+	// Verify process span starts its own trace rather than extending the
+	// producer's (Kafka is a durable/replayable log, so we link, not parent)
+	assert.NotEqual(t, sendSpan.SpanContext().TraceID(), processSpan.SpanContext().TraceID(),
+		"process span should start its own trace, not extend the producer's")
+
+	// Verify the process span links back to the producer's send span.
+	// Compare TraceID/SpanID rather than the full SpanContext: a SpanContext
+	// reconstructed via propagator.Extract is always marked remote, unlike
+	// the span recorder's locally-recorded SpanContext.
+	links := processSpan.Links()
+	require.Len(t, links, 1, "process span should have exactly one link to the producer span")
+	assert.Equal(t, sendSpan.SpanContext().TraceID(), links[0].SpanContext.TraceID(),
+		"process span should link to the producer's send span (trace ID)")
+	assert.Equal(t, sendSpan.SpanContext().SpanID(), links[0].SpanContext.SpanID(),
+		"process span should link to the producer's send span (span ID)")
 }
 
 func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {

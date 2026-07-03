@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	testkafka "github.com/testcontainers/testcontainers-go/modules/kafka"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 )
 
 const kafkaImage = "confluentinc/confluent-local:7.5.0"
@@ -20,13 +18,6 @@ var (
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-
-	// Set up the global text map propagator for W3C Trace Context
-	// This is required for trace context propagation to work
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
 
 	os.Setenv("HAPPI_ENV", "test")
 	os.Setenv("KAFKA_SASL_SCOPE", "dummy-scope")

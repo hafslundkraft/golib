@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/hafslundkraft/golib/kafkarator"
@@ -64,8 +65,14 @@ func main() {
 	schemaRegistryURL := demohelpers.GetRedpandaSchemaRegistryAddress(ctx, kafkaContainer)
 	log.Printf("Redpanda Schema Registry URL: %s", schemaRegistryURL)
 
-	// Setup telemetry (observability)
-	tp, shutdown := telemetry.New(ctx, telemetry.WithLocal(true))
+	// Setup telemetry (observability). Prints to the console by default; set
+	// OTEL_EXPORTER_OTLP_ENDPOINT (e.g. http://localhost:4318, matching the
+	// lgtm stack in ../docker-compose.yml) to export real spans instead.
+	var telemetryOpts []telemetry.OptionFunc
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
+		telemetryOpts = append(telemetryOpts, telemetry.WithLocal(true))
+	}
+	tp, shutdown := telemetry.New(ctx, telemetryOpts...)
 	defer func() {
 		if err := shutdown(ctx); err != nil {
 			log.Printf("Failed to shutdown telemetry: %v", err)

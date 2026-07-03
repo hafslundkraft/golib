@@ -3,13 +3,25 @@ package kafkarator
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 	"go.opentelemetry.io/otel/trace"
+)
+
+// tracePropagator is used to read/write W3C trace context (and baggage) on
+// Kafka message headers. It's a package-local instance rather than
+// otel.GetTextMapPropagator(): that global defaults to a no-op until some
+// caller explicitly registers one via otel.SetTextMapPropagator, and
+// kafkarator shouldn't depend on the host application having done so.
+var tracePropagator = propagation.NewCompositeTextMapPropagator( //nolint:gochecknoglobals // stateless, read-only propagator config
+	propagation.TraceContext{},
+	propagation.Baggage{},
 )
 
 // OpenTelemetry semantic conventions for Kafka messaging.
@@ -47,15 +59,15 @@ func getErrorType(err error) string {
 //nolint:spancheck // Span is returned for caller to manage
 func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameSend, topic)
-	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindProducer))
-
-	span.SetAttributes(
-		semconv.MessagingSystemKafka,
-		semconv.MessagingDestinationName(topic),
-		semconv.MessagingOperationName(MessagingOperationNameSend),
-		semconv.MessagingOperationTypeSend)
-
-	return ctx, span
+	return tracer.Start(ctx, spanName,
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(
+			semconv.MessagingSystemKafka,
+			semconv.MessagingDestinationName(topic),
+			semconv.MessagingOperationName(MessagingOperationNameSend),
+			semconv.MessagingOperationTypeSend,
+		),
+	)
 }
 
 // startPollSpan creates a span for a Kafka poll operation with all standard attributes.
@@ -64,16 +76,16 @@ func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string) (c
 //nolint:spancheck // Span is returned for caller to manage
 func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNamePoll, topic)
-	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindClient))
-
-	span.SetAttributes(
-		semconv.MessagingSystemKafka,
-		semconv.MessagingDestinationName(topic),
-		semconv.MessagingConsumerGroupName(group),
-		semconv.MessagingOperationName(MessagingOperationNamePoll),
-		semconv.MessagingOperationTypeReceive)
-
-	return ctx, span
+	return tracer.Start(ctx, spanName,
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			semconv.MessagingSystemKafka,
+			semconv.MessagingDestinationName(topic),
+			semconv.MessagingConsumerGroupName(group),
+			semconv.MessagingOperationName(MessagingOperationNamePoll),
+			semconv.MessagingOperationTypeReceive,
+		),
+	)
 }
 
 // startCommitSpan creates a span for a Kafka commit operation with all standard attributes.
@@ -82,17 +94,56 @@ func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string
 //nolint:spancheck // Span is returned for caller to manage
 func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameCommit, topic)
-	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindClient))
-
-	span.SetAttributes(
-		semconv.MessagingSystemKafka,
-		semconv.MessagingDestinationName(topic),
-		semconv.MessagingConsumerGroupName(group),
-		semconv.MessagingOperationName(MessagingOperationNameCommit),
-		semconv.MessagingOperationTypeSettle,
+	return tracer.Start(ctx, spanName,
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			semconv.MessagingSystemKafka,
+			semconv.MessagingDestinationName(topic),
+			semconv.MessagingConsumerGroupName(group),
+			semconv.MessagingOperationName(MessagingOperationNameCommit),
+			semconv.MessagingOperationTypeSettle,
+		),
 	)
+}
 
-	return ctx, span
+// injectTraceContext extracts the trace context from the current span and injects it into the headers
+func injectTraceContext(ctx context.Context, headers map[string][]byte) map[string][]byte {
+	// Create a new map to avoid modifying the original
+	propagatedHeaders := make(map[string][]byte, len(headers))
+	maps.Copy(propagatedHeaders, headers)
+
+	// Use a MapCarrier to inject trace context
+	carrier := propagation.MapCarrier{}
+	tracePropagator.Inject(ctx, carrier)
+
+	// Add trace context headers to the Kafka headers
+	for k, v := range carrier {
+		propagatedHeaders[k] = []byte(v)
+	}
+
+	return propagatedHeaders
+}
+
+// extractSpanContext parses the OpenTelemetry SpanContext carried in a Kafka
+// message's headers (written by injectTraceContext at produce time), for use
+// as a trace.Link on the processing span.
+//
+// Kafka topics are durable and replayable, so a consumer span should link to
+// the producer's span rather than parent to it: parent-child ties the new
+// span into the original trace's lifetime, which falls apart on replay,
+// backfill, or ordinary lag, where the producer's trace may already be long
+// closed (or evicted from the backend) by the time the message is processed.
+//
+// Returns a zero-value SpanContext (check IsValid()) if the message carries
+// no trace context.
+func extractSpanContext(headers map[string][]byte) trace.SpanContext {
+	carrier := propagation.MapCarrier{}
+	for k, v := range headers {
+		carrier[k] = string(v)
+	}
+
+	ctx := tracePropagator.Extract(context.Background(), carrier)
+	return trace.SpanContextFromContext(ctx)
 }
 
 // startProcessingSpan creates a span for processing a Kafka message with all standard attributes.
@@ -102,34 +153,37 @@ func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group stri
 func startProcessingSpan(
 	ctx context.Context,
 	tracer trace.Tracer,
-	topic string,
 	group string,
-	partition int32,
-	offset int64,
+	msg *Message,
 ) (context.Context, trace.Span) {
-	spanName := fmt.Sprintf("%s %s", MessagingOperationNameProcess, topic)
-	ctx, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindConsumer))
+	spanName := fmt.Sprintf("%s %s", MessagingOperationNameProcess, msg.Topic)
 
 	attrs := []attribute.KeyValue{
 		semconv.MessagingSystemKafka,
-		semconv.MessagingDestinationName(topic),
+		semconv.MessagingDestinationName(msg.Topic),
 		semconv.MessagingConsumerGroupName(group),
 		semconv.MessagingOperationName(MessagingOperationNameProcess),
 		semconv.MessagingOperationTypeProcess,
 	}
 
 	// Only set partition and offset if they have valid values
-	if partition >= 0 {
-		attrs = append(attrs, semconv.MessagingDestinationPartitionID(fmt.Sprintf("%d", partition)))
+	if msg.Partition >= 0 {
+		attrs = append(attrs, semconv.MessagingDestinationPartitionID(fmt.Sprintf("%d", msg.Partition)))
 	}
 
-	if offset >= 0 {
-		attrs = append(attrs, semconv.MessagingKafkaOffset(int(offset)))
+	if msg.Offset >= 0 {
+		attrs = append(attrs, semconv.MessagingKafkaOffset(int(msg.Offset)))
 	}
 
-	span.SetAttributes(attrs...)
+	spanOpts := []trace.SpanStartOption{
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(attrs...),
+	}
+	if sc := extractSpanContext(msg.Headers); sc.IsValid() {
+		spanOpts = append(spanOpts, trace.WithLinks(trace.Link{SpanContext: sc}))
+	}
 
-	return ctx, span
+	return tracer.Start(ctx, spanName, spanOpts...)
 }
 
 // recordSentMessage records a metric for a sent message with standard attributes.
