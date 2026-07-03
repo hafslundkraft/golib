@@ -128,12 +128,6 @@ func injectTraceContext(ctx context.Context, headers map[string][]byte) map[stri
 // message's headers (written by injectTraceContext at produce time), for use
 // as a trace.Link on the processing span.
 //
-// Kafka topics are durable and replayable, so a consumer span should link to
-// the producer's span rather than parent to it: parent-child ties the new
-// span into the original trace's lifetime, which falls apart on replay,
-// backfill, or ordinary lag, where the producer's trace may already be long
-// closed (or evicted from the backend) by the time the message is processed.
-//
 // Returns a zero-value SpanContext (check IsValid()) if the message carries
 // no trace context.
 func extractSpanContext(headers map[string][]byte) trace.SpanContext {
