@@ -14,6 +14,9 @@ vet:
 lint:
 	$(MODEXEC) golangci-lint run --config=$(PWD)/.golangci.toml ./... \;
 
+lint-fix:
+	$(MODEXEC) golangci-lint run --fix --config=$(PWD)/.golangci.toml ./... \;	
+
 fmt:
 	$(MODEXEC) golangci-lint fmt --config=$(PWD)/.golangci.toml ./... \;
 

@@ -116,14 +116,20 @@ func getErrorType(err error) string {
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string, srv serverInfo) (context.Context, trace.Span) {
+func startProduceSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	topic string,
+	srv serverInfo,
+) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameSend, topic)
-	attrs := []attribute.KeyValue{
+	attrs := make([]attribute.KeyValue, 0, 4+len(srv.spanAttrs()))
+	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingDestinationName(topic),
 		semconv.MessagingOperationName(MessagingOperationNameSend),
 		semconv.MessagingOperationTypeSend,
-	}
+	)
 	attrs = append(attrs, srv.spanAttrs()...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindProducer),
@@ -135,15 +141,21 @@ func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string, sr
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string, srv serverInfo) (context.Context, trace.Span) {
+func startPollSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	topic, group string,
+	srv serverInfo,
+) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNamePoll, topic)
-	attrs := []attribute.KeyValue{
+	attrs := make([]attribute.KeyValue, 0, 5+len(srv.spanAttrs()))
+	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingDestinationName(topic),
 		semconv.MessagingConsumerGroupName(group),
 		semconv.MessagingOperationName(MessagingOperationNamePoll),
 		semconv.MessagingOperationTypeReceive,
-	}
+	)
 	attrs = append(attrs, srv.spanAttrs()...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
@@ -155,15 +167,21 @@ func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group string, srv serverInfo) (context.Context, trace.Span) {
+func startCommitSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	topic, group string,
+	srv serverInfo,
+) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameCommit, topic)
-	attrs := []attribute.KeyValue{
+	attrs := make([]attribute.KeyValue, 0, 5+len(srv.spanAttrs()))
+	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingDestinationName(topic),
 		semconv.MessagingConsumerGroupName(group),
 		semconv.MessagingOperationName(MessagingOperationNameCommit),
 		semconv.MessagingOperationTypeSettle,
-	}
+	)
 	attrs = append(attrs, srv.spanAttrs()...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
