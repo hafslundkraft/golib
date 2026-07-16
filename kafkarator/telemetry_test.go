@@ -36,7 +36,7 @@ func TestStartProcessingSpanPropagatesBaggage(t *testing.T) {
 
 	msg := &Message{Topic: "test-topic", Headers: headers}
 
-	msgCtx, span := startProcessingSpan(ctx, tracer, "test-group", msg)
+	msgCtx, span := startProcessingSpan(ctx, tracer, "test-group", msg, serverInfo{})
 	defer span.End()
 
 	assert.Equal(t, "acme-corp", baggage.FromContext(msgCtx).Member("tenant.id").Value(),

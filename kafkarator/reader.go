@@ -7,7 +7,6 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
@@ -20,7 +19,8 @@ type CommitFunc func(ctx context.Context) error
 func newReader(
 	c *kafka.Consumer,
 	rmc messagingconv.ClientConsumedMessages,
-	pfc metric.Int64Counter,
+	opDur messagingconv.ClientOperationDuration,
+	srv serverInfo,
 	tel TelemetryProvider,
 	topic string,
 	consumerGroup string,
@@ -28,7 +28,8 @@ func newReader(
 	r := &Reader{
 		consumer:            c,
 		readMessagesCounter: rmc,
-		pollFailuresCounter: pfc,
+		operationDuration:   opDur,
+		srv:                 srv,
 		tel:                 tel,
 		topic:               topic,
 		consumerGroup:       consumerGroup,
@@ -45,7 +46,8 @@ func newReader(
 type Reader struct {
 	consumer            *kafka.Consumer
 	readMessagesCounter messagingconv.ClientConsumedMessages
-	pollFailuresCounter metric.Int64Counter
+	operationDuration   messagingconv.ClientOperationDuration
+	srv                 serverInfo
 	tel                 TelemetryProvider
 	closed              bool
 	topic               string
@@ -78,8 +80,17 @@ func (rc *Reader) Read(
 	maxMessages int,
 	maxWait time.Duration,
 ) ([]Message, CommitFunc, error) {
-	ctx, span := startPollSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
+	ctx, span := startPollSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup, rc.srv)
 	defer span.End()
+
+	// Record one operation.duration per receive, matching the poll span. Emitted
+	// on every read — a caught-up read that waits out maxWait is expected, not an
+	// error — so the metric mirrors the span duration in all cases.
+	readStart := time.Now()
+	var pollErr error
+	defer func() {
+		rc.recordReceiveDuration(ctx, time.Since(readStart).Seconds(), pollErr)
+	}()
 
 	deadline := time.Now().Add(maxWait)
 	msgs := make([]Message, 0, maxMessages)
@@ -88,8 +99,14 @@ func (rc *Reader) Read(
 	latestOffsets := map[int32]kafka.Offset{}
 
 	commit := CommitFunc(func(ctx context.Context) error {
-		_, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup)
+		_, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup, rc.srv)
 		defer span.End()
+
+		commitStart := time.Now()
+		var commitErr error
+		defer func() {
+			rc.recordCommitDuration(ctx, time.Since(commitStart).Seconds(), commitErr)
+		}()
 
 		for partition, off := range latestOffsets {
 			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
@@ -100,8 +117,8 @@ func (rc *Reader) Read(
 				},
 			})
 			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
+				commitErr = err
+				setSpanError(span, err)
 				return fmt.Errorf("commit failed: %w", err)
 			}
 		}
@@ -135,14 +152,15 @@ func (rc *Reader) Read(
 
 			latestOffsets[e.TopicPartition.Partition] = e.TopicPartition.Offset
 			partitionID := fmt.Sprintf("%d", e.TopicPartition.Partition)
-			recordConsumedMessage(ctx, rc.readMessagesCounter, rc.topic, rc.consumerGroup, partitionID, nil)
+			rc.recordConsumed(ctx, partitionID, nil)
 
 		case kafka.Error:
 			setPollError(span, e, e.IsTimeout())
 			if e.IsTimeout() {
 				return msgs, commit, nil
 			}
-			recordPollFailure(ctx, rc.pollFailuresCounter, rc.topic, rc.consumerGroup, e)
+			rc.recordConsumed(ctx, "", e)
+			pollErr = e
 			return msgs, commit, fmt.Errorf("poll error: %w", e)
 
 		default:
@@ -174,4 +192,44 @@ func (rc *Reader) Read(
 	}
 
 	return msgs, commit, nil
+}
+
+// recordReceiveDuration records messaging.client.operation.duration for a
+// poll/receive covering the whole Read.
+func (rc *Reader) recordReceiveDuration(ctx context.Context, seconds float64, err error) {
+	recordOperationDuration(
+		ctx,
+		rc.operationDuration,
+		MessagingOperationNamePoll,
+		messagingconv.OperationTypeReceive,
+		rc.topic,
+		rc.consumerGroup,
+		"",
+		rc.srv,
+		seconds,
+		err,
+	)
+}
+
+// recordCommitDuration records messaging.client.operation.duration for an
+// offset commit (settle).
+func (rc *Reader) recordCommitDuration(ctx context.Context, seconds float64, err error) {
+	recordOperationDuration(
+		ctx,
+		rc.operationDuration,
+		MessagingOperationNameCommit,
+		messagingconv.OperationTypeSettle,
+		rc.topic,
+		rc.consumerGroup,
+		"",
+		rc.srv,
+		seconds,
+		err,
+	)
+}
+
+// recordConsumed records one messaging.client.consumed.messages for a delivered
+// message, or a failed receive when err is non-nil.
+func (rc *Reader) recordConsumed(ctx context.Context, partition string, err error) {
+	recordConsumedMessage(ctx, rc.readMessagesCounter, rc.topic, rc.consumerGroup, partition, rc.srv, err)
 }
