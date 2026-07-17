@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
@@ -263,15 +262,11 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 
 	if w.closed.Load() {
 		err := fmt.Errorf("writer is closed")
-		setSpanError(span, err)
+		setSpanStatus(span, err)
 		w.recordSendDuration(ctx, message.Topic, "", sendStart, err)
 		w.recordSent(ctx, message.Topic, "", err)
 		span.End()
 		return err
-	}
-
-	if message.Key != nil {
-		span.SetAttributes(semconv.MessagingKafkaMessageKey(string(message.Key)))
 	}
 
 	traceHeaders := injectTraceContext(ctx, message.Headers)
@@ -295,7 +290,7 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 
 	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
-		setSpanError(span, err)
+		setSpanStatus(span, err)
 		w.recordSendDuration(ctx, message.Topic, "", sendStart, err)
 		w.recordSent(ctx, message.Topic, "", err)
 		span.End()
@@ -327,6 +322,7 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 		partitionID := fmt.Sprintf("%d", m.TopicPartition.Partition)
 		defer w.recordSent(ctx, message.Topic, partitionID, m.TopicPartition.Error)
 		defer w.recordSendDuration(ctx, message.Topic, partitionID, sendStart, m.TopicPartition.Error)
+		defer setSpanStatus(span, m.TopicPartition.Error)
 
 		if writeOpts.DeliveryChannel != nil {
 			defer func() {
@@ -339,8 +335,6 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 		}
 
 		if m.TopicPartition.Error != nil {
-			setSpanError(span, m.TopicPartition.Error)
-
 			w.deliveryErrsMu.Lock()
 			if w.firstDeliveryErr == nil {
 				w.firstDeliveryErr = m.TopicPartition.Error
@@ -351,7 +345,7 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 			return
 		}
 
-		setProducerSuccess(span, partitionID, int64(m.TopicPartition.Offset))
+		setProducerSpanAttrs(span, partitionID, int64(m.TopicPartition.Offset))
 	})
 
 	return nil

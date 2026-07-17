@@ -432,58 +432,51 @@ func recordProcessDuration(
 	hist.Record(ctx, seconds, MessagingOperationNameProcess, messagingconv.SystemKafka, attrs...)
 }
 
-// setProducerSuccess sets span attributes and status for a successful send.
-func setProducerSuccess(span trace.Span, partition string, offset int64) {
-	span.SetAttributes(
-		semconv.MessagingDestinationPartitionID(partition),
-		semconv.MessagingKafkaOffset(int(offset)),
-	)
-	span.SetStatus(codes.Ok, "message sent successfully")
-}
-
-// setSpanError records err on the span: error status, an exception event, and
-// the error.type attribute, mirroring the metric-side error.type handling.
-func setSpanError(span trace.Span, err error) {
+// setSpanStatus records failure on a span: when err is non-nil it records the
+// error, sets Error status, and stamps the error.type attribute. On success it
+// does nothing, leaving the span status UNSET — instrumentations should not set
+// Ok (per OTel guidance and the Kafka semconv span example).
+func setSpanStatus(span trace.Span, err error) {
+	if err == nil {
+		return
+	}
 	span.RecordError(err)
 	span.SetStatus(codes.Error, err.Error())
 	span.SetAttributes(attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
 }
 
-// setPollSuccess sets span attributes and status for successful poll.
-func setPollSuccess(span trace.Span, messageCount int, partition string, offset int64) {
-	if messageCount > 0 {
-		attrs := []attribute.KeyValue{}
-
-		// Only set batch count for actual batches (2+ messages)
-		if messageCount > 1 {
-			attrs = append(attrs, semconv.MessagingBatchMessageCount(messageCount))
-		}
-
-		// partition.id may describe a single message or a same-partition batch.
-		if partition != "" {
-			attrs = append(attrs, semconv.MessagingDestinationPartitionID(partition))
-		}
-
-		// kafka.offset is a single-message attribute: set it only when the span
-		// describes exactly one message.
-		if messageCount == 1 {
-			attrs = append(attrs, semconv.MessagingKafkaOffset(int(offset)))
-		}
-
-		if len(attrs) > 0 {
-			span.SetAttributes(attrs...)
-		}
-		span.SetStatus(codes.Ok, "messages received")
-	} else {
-		span.SetStatus(codes.Ok, "no messages available")
-	}
+// setProducerSpanAttrs sets the single-message attributes on a successful send
+// span. Status is set separately via setSpanStatus.
+func setProducerSpanAttrs(span trace.Span, partition string, offset int64) {
+	span.SetAttributes(
+		semconv.MessagingDestinationPartitionID(partition),
+		semconv.MessagingKafkaOffset(int(offset)),
+	)
 }
 
-// setPollError sets span attributes and status for failed poll.
-func setPollError(span trace.Span, err error, isTimeout bool) {
-	if isTimeout {
-		span.SetStatus(codes.Ok, "poll timeout")
-		return
+// setPollSpanAttrs sets the batch attributes on a poll span. Status is set
+// separately via setSpanStatus.
+//
+// A poll is a batching operation, so batch.message_count is always set (the
+// batch size, including 0 or 1); partition.id is set only when the whole batch
+// came from a single partition. kafka.offset is deliberately not set here: it
+// is a single-message attribute and lives on the process span.
+func setPollSpanAttrs(span trace.Span, msgs []Message) {
+	attrs := []attribute.KeyValue{
+		semconv.MessagingBatchMessageCount(len(msgs)),
 	}
-	setSpanError(span, err)
+	if len(msgs) > 0 {
+		first := msgs[0].Partition
+		samePartition := true
+		for _, m := range msgs[1:] {
+			if m.Partition != first {
+				samePartition = false
+				break
+			}
+		}
+		if samePartition {
+			attrs = append(attrs, semconv.MessagingDestinationPartitionID(fmt.Sprintf("%d", first)))
+		}
+	}
+	span.SetAttributes(attrs...)
 }

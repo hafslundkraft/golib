@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
@@ -90,6 +89,7 @@ func (rc *Reader) Read(
 	var pollErr error
 	defer func() {
 		rc.recordReceiveDuration(ctx, time.Since(readStart).Seconds(), pollErr)
+		setSpanStatus(span, pollErr)
 	}()
 
 	deadline := time.Now().Add(maxWait)
@@ -106,6 +106,7 @@ func (rc *Reader) Read(
 		var commitErr error
 		defer func() {
 			rc.recordCommitDuration(ctx, time.Since(commitStart).Seconds(), commitErr)
+			setSpanStatus(span, commitErr)
 		}()
 
 		for partition, off := range latestOffsets {
@@ -118,12 +119,10 @@ func (rc *Reader) Read(
 			})
 			if err != nil {
 				commitErr = err
-				setSpanError(span, err)
 				return fmt.Errorf("commit failed: %w", err)
 			}
 		}
 
-		span.SetStatus(codes.Ok, "offsets committed")
 		return nil
 	})
 
@@ -155,7 +154,6 @@ func (rc *Reader) Read(
 			rc.recordConsumed(ctx, partitionID, nil)
 
 		case kafka.Error:
-			setPollError(span, e, e.IsTimeout())
 			if e.IsTimeout() {
 				return msgs, commit, nil
 			}
@@ -168,28 +166,7 @@ func (rc *Reader) Read(
 		}
 	}
 
-	if len(msgs) > 0 {
-		// Check if all messages are from the same partition
-		firstPartition := msgs[0].Partition
-		samePartition := true
-		for _, msg := range msgs[1:] {
-			if msg.Partition != firstPartition {
-				samePartition = false
-				break
-			}
-		}
-
-		if samePartition {
-			// Single partition: include partition and offset details
-			partitionID := fmt.Sprintf("%d", firstPartition)
-			setPollSuccess(span, len(msgs), partitionID, msgs[0].Offset)
-		} else {
-			// Multiple partitions: only include batch count
-			setPollSuccess(span, len(msgs), "", 0)
-		}
-	} else {
-		setPollSuccess(span, 0, "", 0)
-	}
+	setPollSpanAttrs(span, msgs)
 
 	return msgs, commit, nil
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
@@ -143,11 +142,10 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 			time.Since(procStart).Seconds(),
 			processErr,
 		)
+		setSpanStatus(span, processErr)
+		span.End()
 
-		// Set span status based on processing result
 		if processErr != nil {
-			setSpanError(span, processErr)
-			span.End()
 			return processedCount, fmt.Errorf(
 				"process message (partition=%d, offset=%d): %w",
 				msgs[i].Partition,
@@ -156,8 +154,6 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 			)
 		}
 
-		span.SetStatus(codes.Ok, "message processed successfully")
-		span.End()
 		processedCount++
 	}
 
