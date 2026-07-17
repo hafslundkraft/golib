@@ -16,11 +16,6 @@ import (
 	"github.com/hafslundkraft/golib/kafkarator/internal/auth"
 )
 
-const (
-	// Custom metrics not in semconv
-	meterPollFailures = "messaging.client.poll.failures"
-)
-
 // Connection represents a Connection to a Kafka service. Connection supports both writing
 // and reading messages. For reading, a consumer group must be supplied. This means
 // that multiple copies of the service using this library can be started simultaneously, and Kafka
@@ -184,7 +179,16 @@ func (c *Connection) Writer() (*Writer, error) {
 		return nil, fmt.Errorf("create sent messages counter: %w", err)
 	}
 
-	return newWriter(p, counter, c.tel), nil
+	opDuration, err := messagingconv.NewClientOperationDuration(
+		c.tel.Meter(),
+		metric.WithExplicitBucketBoundaries(messagingDurationBuckets...),
+	)
+	if err != nil {
+		p.Close()
+		return nil, fmt.Errorf("create operation duration histogram: %w", err)
+	}
+
+	return newWriter(p, counter, opDuration, parseServerInfo(c.config.Broker), c.tel), nil
 }
 
 // Deserializer returns a deserializer for deserializing Avro bytes to Go objects
@@ -285,13 +289,16 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 		return nil, fmt.Errorf("create consumed messages counter: %w", err)
 	}
 
-	failureCounter, err := c.tel.Meter().Int64Counter(meterPollFailures)
+	opDuration, err := messagingconv.NewClientOperationDuration(
+		c.tel.Meter(),
+		metric.WithExplicitBucketBoundaries(messagingDurationBuckets...),
+	)
 	if err != nil {
 		_ = consumer.Close()
-		return nil, fmt.Errorf("create meter counter %q: %w", meterPollFailures, err)
+		return nil, fmt.Errorf("create operation duration histogram: %w", err)
 	}
 
-	r, err := newReader(consumer, counter, failureCounter, c.tel, topic, group)
+	r, err := newReader(consumer, counter, opDuration, parseServerInfo(c.config.Broker), c.tel, topic, group)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +339,17 @@ func (c *Connection) Processor(
 	if err != nil {
 		return nil, fmt.Errorf("creating reader: %w", err)
 	}
-	return newProcessor(reader, c.tel, handler, cfg.readTimeout, cfg.maxMessages), nil
+
+	processDuration, err := messagingconv.NewProcessDuration(
+		c.tel.Meter(),
+		metric.WithExplicitBucketBoundaries(messagingDurationBuckets...),
+	)
+	if err != nil {
+		_ = reader.Close(context.Background())
+		return nil, fmt.Errorf("create process duration histogram: %w", err)
+	}
+
+	return newProcessor(reader, c.tel, handler, cfg.readTimeout, cfg.maxMessages, processDuration), nil
 }
 
 // ChannelReader returns a channel that emits messages from the given Kafka topic.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
 // Processor provides automatic processing of Kafka messages with built-in
@@ -18,6 +18,7 @@ type Processor struct {
 	handler            ProcessFunc
 	defaultReadTimeout time.Duration
 	defaultMaxMessages int
+	processDuration    messagingconv.ProcessDuration
 }
 
 // ProcessFunc is a function that processes a single Kafka message.
@@ -89,6 +90,7 @@ func newProcessor(
 	handler ProcessFunc,
 	readTimeout time.Duration,
 	maxMessages int,
+	processDuration messagingconv.ProcessDuration,
 ) *Processor {
 	return &Processor{
 		reader:             reader,
@@ -96,6 +98,7 @@ func newProcessor(
 		handler:            handler,
 		defaultReadTimeout: readTimeout,
 		defaultMaxMessages: maxMessages,
+		processDuration:    processDuration,
 	}
 }
 
@@ -127,16 +130,22 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 		if err := ctx.Err(); err != nil {
 			return processedCount, fmt.Errorf("context canceled: %w", err)
 		}
-		msgCtx, span := startProcessingSpan(ctx, p.tel.Tracer(), p.reader.consumerGroup, &msgs[i])
+		msgCtx, span := startProcessingSpan(ctx, p.tel.Tracer(), p.reader.consumerGroup, &msgs[i], p.reader.srv)
 
 		// Call user's processing function
+		procStart := time.Now()
 		processErr := p.handler(msgCtx, &msgs[i])
+		p.recordProcess(
+			ctx,
+			msgs[i].Topic,
+			fmt.Sprintf("%d", msgs[i].Partition),
+			time.Since(procStart).Seconds(),
+			processErr,
+		)
+		setSpanStatus(span, processErr)
+		span.End()
 
-		// Set span status based on processing result
 		if processErr != nil {
-			span.RecordError(processErr)
-			span.SetStatus(codes.Error, processErr.Error())
-			span.End()
 			return processedCount, fmt.Errorf(
 				"process message (partition=%d, offset=%d): %w",
 				msgs[i].Partition,
@@ -145,8 +154,6 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 			)
 		}
 
-		span.SetStatus(codes.Ok, "message processed successfully")
-		span.End()
 		processedCount++
 	}
 
@@ -156,4 +163,19 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 	}
 
 	return processedCount, nil
+}
+
+// recordProcess records messaging.process.duration for handling one delivered
+// message.
+func (p *Processor) recordProcess(ctx context.Context, topic, partition string, seconds float64, err error) {
+	recordProcessDuration(
+		ctx,
+		p.processDuration,
+		topic,
+		p.reader.consumerGroup,
+		partition,
+		p.reader.srv,
+		seconds,
+		err,
+	)
 }

@@ -2,12 +2,16 @@ package kafkarator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"net"
+	"strconv"
+	"strings"
 
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
@@ -39,6 +43,57 @@ const (
 	DefaultErrorType = "_OTHER"
 )
 
+// messagingDurationBuckets is the ExplicitBucketBoundaries advisory the
+// messaging semantic conventions specify for the duration histograms
+// (messaging.client.operation.duration, messaging.process.duration). The
+// generated messagingconv constructors omit it, so it's passed at instrument
+// creation; without it the SDK defaults to buckets tuned for a 0–10000 range,
+// which are useless for second-scale durations.
+var messagingDurationBuckets = []float64{ //nolint:gochecknoglobals // static semconv advisory
+	0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10,
+}
+
+// serverInfo is the parsed broker endpoint recorded as server.address /
+// server.port on spans and metrics. The zero value (empty address) means
+// "unknown" and the attributes are omitted.
+type serverInfo struct {
+	address string
+	port    int
+}
+
+// parseServerInfo extracts server.address/server.port from a configured broker
+// string. The broker may be comma-separated; the first endpoint is used (the
+// client-facing endpoint is the same regardless of how many nodes back it).
+func parseServerInfo(broker string) serverInfo {
+	first := strings.TrimSpace(strings.SplitN(broker, ",", 2)[0])
+	if first == "" {
+		return serverInfo{}
+	}
+	host, port, err := net.SplitHostPort(first)
+	if err != nil {
+		// No parseable port — use the whole value as the address.
+		return serverInfo{address: first}
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return serverInfo{address: host}
+	}
+	return serverInfo{address: host, port: p}
+}
+
+// spanAttrs returns the server.address/server.port span attributes, or nil when
+// the broker endpoint is unknown.
+func (s serverInfo) spanAttrs() []attribute.KeyValue {
+	if s.address == "" {
+		return nil
+	}
+	attrs := []attribute.KeyValue{semconv.ServerAddress(s.address)}
+	if s.port > 0 {
+		attrs = append(attrs, semconv.ServerPort(s.port))
+	}
+	return attrs
+}
+
 // getErrorType extracts a low-cardinality error type from an error.
 // For Kafka errors, it returns the error code. For other errors, it returns a generic type.
 func getErrorType(err error) string {
@@ -46,8 +101,10 @@ func getErrorType(err error) string {
 		return ""
 	}
 
-	// Check if it's a Kafka error with a code
-	if ke, ok := err.(interface{ Code() int }); ok {
+	// Kafka errors carry a broker/client code; surface it as a low-cardinality
+	// error.type. errors.As unwraps fmt.Errorf(%w) chains.
+	var ke kafka.Error
+	if errors.As(err, &ke) {
 		return fmt.Sprintf("kafka_error_%d", ke.Code())
 	}
 
@@ -59,16 +116,24 @@ func getErrorType(err error) string {
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string) (context.Context, trace.Span) {
+func startProduceSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	topic string,
+	srv serverInfo,
+) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameSend, topic)
+	attrs := make([]attribute.KeyValue, 0, 4+len(srv.spanAttrs()))
+	attrs = append(attrs,
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingOperationName(MessagingOperationNameSend),
+		semconv.MessagingOperationTypeSend,
+	)
+	attrs = append(attrs, srv.spanAttrs()...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindProducer),
-		trace.WithAttributes(
-			semconv.MessagingSystemKafka,
-			semconv.MessagingDestinationName(topic),
-			semconv.MessagingOperationName(MessagingOperationNameSend),
-			semconv.MessagingOperationTypeSend,
-		),
+		trace.WithAttributes(attrs...),
 	)
 }
 
@@ -76,17 +141,25 @@ func startProduceSpan(ctx context.Context, tracer trace.Tracer, topic string) (c
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string) (context.Context, trace.Span) {
+func startPollSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	topic, group string,
+	srv serverInfo,
+) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNamePoll, topic)
+	attrs := make([]attribute.KeyValue, 0, 5+len(srv.spanAttrs()))
+	attrs = append(attrs,
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingConsumerGroupName(group),
+		semconv.MessagingOperationName(MessagingOperationNamePoll),
+		semconv.MessagingOperationTypeReceive,
+	)
+	attrs = append(attrs, srv.spanAttrs()...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			semconv.MessagingSystemKafka,
-			semconv.MessagingDestinationName(topic),
-			semconv.MessagingConsumerGroupName(group),
-			semconv.MessagingOperationName(MessagingOperationNamePoll),
-			semconv.MessagingOperationTypeReceive,
-		),
+		trace.WithAttributes(attrs...),
 	)
 }
 
@@ -94,17 +167,25 @@ func startPollSpan(ctx context.Context, tracer trace.Tracer, topic, group string
 // Caller must call span.End() when the operation completes.
 //
 //nolint:spancheck // Span is returned for caller to manage
-func startCommitSpan(ctx context.Context, tracer trace.Tracer, topic, group string) (context.Context, trace.Span) {
+func startCommitSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	topic, group string,
+	srv serverInfo,
+) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameCommit, topic)
+	attrs := make([]attribute.KeyValue, 0, 5+len(srv.spanAttrs()))
+	attrs = append(attrs,
+		semconv.MessagingSystemKafka,
+		semconv.MessagingDestinationName(topic),
+		semconv.MessagingConsumerGroupName(group),
+		semconv.MessagingOperationName(MessagingOperationNameCommit),
+		semconv.MessagingOperationTypeSettle,
+	)
+	attrs = append(attrs, srv.spanAttrs()...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			semconv.MessagingSystemKafka,
-			semconv.MessagingDestinationName(topic),
-			semconv.MessagingConsumerGroupName(group),
-			semconv.MessagingOperationName(MessagingOperationNameCommit),
-			semconv.MessagingOperationTypeSettle,
-		),
+		trace.WithAttributes(attrs...),
 	)
 }
 
@@ -170,6 +251,7 @@ func startProcessingSpan(
 	tracer trace.Tracer,
 	group string,
 	msg *Message,
+	srv serverInfo,
 ) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameProcess, msg.Topic)
 
@@ -180,6 +262,7 @@ func startProcessingSpan(
 		semconv.MessagingOperationName(MessagingOperationNameProcess),
 		semconv.MessagingOperationTypeProcess,
 	}
+	attrs = append(attrs, srv.spanAttrs()...)
 
 	// Only set partition and offset if they have valid values
 	if msg.Partition >= 0 {
@@ -207,9 +290,10 @@ func recordSentMessage(
 	ctx context.Context,
 	counter messagingconv.ClientSentMessages,
 	topic, partition string,
+	srv serverInfo,
 	err error,
 ) {
-	attrs := make([]attribute.KeyValue, 0, 3)
+	attrs := make([]attribute.KeyValue, 0, 5)
 
 	if topic != "" {
 		attrs = append(attrs, counter.AttrDestinationName(topic))
@@ -217,6 +301,13 @@ func recordSentMessage(
 
 	if partition != "" {
 		attrs = append(attrs, counter.AttrDestinationPartitionID(partition))
+	}
+
+	if srv.address != "" {
+		attrs = append(attrs, counter.AttrServerAddress(srv.address))
+		if srv.port > 0 {
+			attrs = append(attrs, counter.AttrServerPort(srv.port))
+		}
 	}
 
 	if err != nil {
@@ -231,9 +322,10 @@ func recordConsumedMessage(
 	ctx context.Context,
 	counter messagingconv.ClientConsumedMessages,
 	topic, group, partition string,
+	srv serverInfo,
 	err error,
 ) {
-	attrs := make([]attribute.KeyValue, 0, 4)
+	attrs := make([]attribute.KeyValue, 0, 5)
 
 	if topic != "" {
 		attrs = append(attrs, counter.AttrDestinationName(topic))
@@ -247,6 +339,13 @@ func recordConsumedMessage(
 		attrs = append(attrs, counter.AttrDestinationPartitionID(partition))
 	}
 
+	if srv.address != "" {
+		attrs = append(attrs, counter.AttrServerAddress(srv.address))
+		if srv.port > 0 {
+			attrs = append(attrs, counter.AttrServerPort(srv.port))
+		}
+	}
+
 	if err != nil {
 		attrs = append(attrs, counter.AttrErrorType(messagingconv.ErrorTypeAttr(getErrorType(err))))
 	}
@@ -254,75 +353,130 @@ func recordConsumedMessage(
 	counter.Add(ctx, 1, MessagingOperationNamePoll, messagingconv.SystemKafka, attrs...)
 }
 
-// recordPollFailure records a metric for a poll failure with standard attributes.
-func recordPollFailure(ctx context.Context, counter metric.Int64Counter, topic, group string, err error) {
+// recordOperationDuration records the duration (seconds) of a client send or
+// receive operation with standard attributes.
+func recordOperationDuration(
+	ctx context.Context,
+	hist messagingconv.ClientOperationDuration,
+	operationName string,
+	operationType messagingconv.OperationTypeAttr,
+	topic, group, partition string,
+	srv serverInfo,
+	seconds float64,
+	err error,
+) {
 	attrs := make([]attribute.KeyValue, 0, 6)
+	attrs = append(attrs, hist.AttrOperationType(operationType))
 
-	attrs = append(attrs,
-		semconv.MessagingSystemKafka,
-		semconv.MessagingDestinationName(topic),
-		semconv.MessagingConsumerGroupName(group),
-		semconv.MessagingOperationName(MessagingOperationNamePoll),
-		semconv.MessagingOperationTypeReceive,
-	)
-
-	if err != nil {
-		attrs = append(attrs, attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
+	if topic != "" {
+		attrs = append(attrs, hist.AttrDestinationName(topic))
 	}
 
-	counter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	if group != "" {
+		attrs = append(attrs, hist.AttrConsumerGroupName(group))
+	}
+
+	if partition != "" {
+		attrs = append(attrs, hist.AttrDestinationPartitionID(partition))
+	}
+
+	if srv.address != "" {
+		attrs = append(attrs, hist.AttrServerAddress(srv.address))
+		if srv.port > 0 {
+			attrs = append(attrs, hist.AttrServerPort(srv.port))
+		}
+	}
+
+	if err != nil {
+		attrs = append(attrs, hist.AttrErrorType(messagingconv.ErrorTypeAttr(getErrorType(err))))
+	}
+
+	hist.Record(ctx, seconds, operationName, messagingconv.SystemKafka, attrs...)
 }
 
-// setProducerSuccess sets span attributes and status for a successful send.
-func setProducerSuccess(span trace.Span, partition string, offset int64) {
-	span.SetAttributes(
-		semconv.MessagingDestinationPartitionID(partition),
-		semconv.MessagingKafkaOffset(int(offset)),
-	)
-	span.SetStatus(codes.Ok, "message sent successfully")
+// recordProcessDuration records the duration (seconds) of processing a delivered
+// message with standard attributes.
+func recordProcessDuration(
+	ctx context.Context,
+	hist messagingconv.ProcessDuration,
+	topic, group, partition string,
+	srv serverInfo,
+	seconds float64,
+	err error,
+) {
+	attrs := make([]attribute.KeyValue, 0, 5)
+
+	if topic != "" {
+		attrs = append(attrs, hist.AttrDestinationName(topic))
+	}
+
+	if group != "" {
+		attrs = append(attrs, hist.AttrConsumerGroupName(group))
+	}
+
+	if partition != "" {
+		attrs = append(attrs, hist.AttrDestinationPartitionID(partition))
+	}
+
+	if srv.address != "" {
+		attrs = append(attrs, hist.AttrServerAddress(srv.address))
+		if srv.port > 0 {
+			attrs = append(attrs, hist.AttrServerPort(srv.port))
+		}
+	}
+
+	if err != nil {
+		attrs = append(attrs, hist.AttrErrorType(messagingconv.ErrorTypeAttr(getErrorType(err))))
+	}
+
+	hist.Record(ctx, seconds, MessagingOperationNameProcess, messagingconv.SystemKafka, attrs...)
 }
 
-// setProducerError sets span attributes and status for a failed send.
-func setProducerError(span trace.Span, err error) {
+// setSpanStatus records failure on a span: when err is non-nil it records the
+// error, sets Error status, and stamps the error.type attribute. On success it
+// does nothing, leaving the span status UNSET — instrumentations should not set
+// Ok (per OTel guidance and the Kafka semconv span example).
+func setSpanStatus(span trace.Span, err error) {
+	if err == nil {
+		return
+	}
 	span.RecordError(err)
 	span.SetStatus(codes.Error, err.Error())
 	span.SetAttributes(attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
 }
 
-// setPollSuccess sets span attributes and status for successful poll.
-func setPollSuccess(span trace.Span, messageCount int, partition string, offset int64) {
-	if messageCount > 0 {
-		attrs := []attribute.KeyValue{}
-
-		// Only set batch count for actual batches (2+ messages)
-		if messageCount > 1 {
-			attrs = append(attrs, semconv.MessagingBatchMessageCount(messageCount))
-		}
-
-		// Only set partition/offset if provided (single partition batch)
-		if partition != "" {
-			attrs = append(attrs,
-				semconv.MessagingDestinationPartitionID(partition),
-				semconv.MessagingKafkaOffset(int(offset)),
-			)
-		}
-
-		if len(attrs) > 0 {
-			span.SetAttributes(attrs...)
-		}
-		span.SetStatus(codes.Ok, "messages received")
-	} else {
-		span.SetStatus(codes.Ok, "no messages available")
-	}
+// setProducerSpanAttrs sets the single-message attributes on a successful send
+// span. Status is set separately via setSpanStatus.
+func setProducerSpanAttrs(span trace.Span, partition string, offset int64) {
+	span.SetAttributes(
+		semconv.MessagingDestinationPartitionID(partition),
+		semconv.MessagingKafkaOffset(int(offset)),
+	)
 }
 
-// setPollError sets span attributes and status for failed poll.
-func setPollError(span trace.Span, err error, isTimeout bool) {
-	if isTimeout {
-		span.SetStatus(codes.Ok, "poll timeout")
-	} else {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		span.SetAttributes(attribute.String(string(semconv.ErrorTypeKey), getErrorType(err)))
+// setPollSpanAttrs sets the batch attributes on a poll span. Status is set
+// separately via setSpanStatus.
+//
+// A poll is a batching operation, so batch.message_count is always set (the
+// batch size, including 0 or 1); partition.id is set only when the whole batch
+// came from a single partition. kafka.offset is deliberately not set here: it
+// is a single-message attribute and lives on the process span.
+func setPollSpanAttrs(span trace.Span, msgs []Message) {
+	attrs := []attribute.KeyValue{
+		semconv.MessagingBatchMessageCount(len(msgs)),
 	}
+	if len(msgs) > 0 {
+		first := msgs[0].Partition
+		samePartition := true
+		for _, m := range msgs[1:] {
+			if m.Partition != first {
+				samePartition = false
+				break
+			}
+		}
+		if samePartition {
+			attrs = append(attrs, semconv.MessagingDestinationPartitionID(fmt.Sprintf("%d", first)))
+		}
+	}
+	span.SetAttributes(attrs...)
 }
