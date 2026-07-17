@@ -87,13 +87,16 @@ func (rc *Reader) Read(
 	// error — so the metric mirrors the span duration in all cases.
 	readStart := time.Now()
 	var pollErr error
+	msgs := make([]Message, 0, maxMessages)
+	// Always stamp batch attrs (plus duration/status), even when the read fails
+	// mid-batch, with the messages collected so far.
 	defer func() {
+		setPollSpanAttrs(span, msgs)
 		rc.recordReceiveDuration(ctx, time.Since(readStart).Seconds(), pollErr)
 		setSpanStatus(span, pollErr)
 	}()
 
 	deadline := time.Now().Add(maxWait)
-	msgs := make([]Message, 0, maxMessages)
 
 	// Track last seen offsets per partition
 	latestOffsets := map[int32]kafka.Offset{}
@@ -165,8 +168,6 @@ func (rc *Reader) Read(
 			// ignore rebalance events etc.
 		}
 	}
-
-	setPollSpanAttrs(span, msgs)
 
 	return msgs, commit, nil
 }
