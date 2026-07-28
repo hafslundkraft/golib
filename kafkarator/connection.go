@@ -263,6 +263,12 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 	conf["group.id"] = group
 	conf["auto.offset.reset"] = string(ro.autoOffsetReset)
 
+	maxPollInterval := c.config.MaxPollInterval
+	if maxPollInterval <= 0 {
+		maxPollInterval = DefaultMaxPollInterval
+	}
+	conf["max.poll.interval.ms"] = int(maxPollInterval.Milliseconds())
+
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
 		return nil, fmt.Errorf("create consumer: %w", err)
