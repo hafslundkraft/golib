@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 )
 
-// DefaultMaxPollInterval is the default value for Config.MaxPollInterval.
-// Matches the librdkafka default and the value used by hafslund.happi.py.
-const DefaultMaxPollInterval = 5 * time.Minute
+// DefaultMaxPollIntervalMs is the default value in milliseconds for
+// Config.MaxPollIntervalMs. Matches the librdkafka default and the value used
+// by hafslund.happi.py (5 minutes).
+const DefaultMaxPollIntervalMs = 300_000
 
 const (
 	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
@@ -126,11 +126,12 @@ type Config struct {
 	// WorkloadName is the name of the workload on the happi platform. Used for consumer group generation.
 	WorkloadName string
 
-	// MaxPollInterval is the maximum time between consumer poll calls before the consumer is
-	// considered failed and removed from the group (librdkafka `max.poll.interval.ms`). Increase
-	// this when consumers do heavy per-message work (e.g. claim-check readers fetching large
-	// S3/Parquet payloads). If zero, DefaultMaxPollInterval (5 minutes) is used.
-	MaxPollInterval time.Duration
+	// MaxPollIntervalMs is the maximum time in milliseconds between consumer poll calls before
+	// the consumer is considered failed and removed from the group (librdkafka
+	// `max.poll.interval.ms`). Increase this when consumers do heavy per-message work (e.g.
+	// claim-check readers fetching large S3/Parquet payloads). If zero, DefaultMaxPollIntervalMs
+	// (300000 ms / 5 minutes) is used.
+	MaxPollIntervalMs int
 }
 
 // ConfigFromEnvVars loads and returns an instance with values that are fetched from environment variables defined

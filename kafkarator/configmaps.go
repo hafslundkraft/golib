@@ -78,6 +78,23 @@ func cloneConfigMap(src *kafka.ConfigMap) kafka.ConfigMap {
 	return dst
 }
 
+// applyConsumerConfig sets the consumer-specific keys on a base ConfigMap.
+// If maxPollIntervalMs is <= 0, DefaultMaxPollIntervalMs is applied.
+func applyConsumerConfig(
+	conf kafka.ConfigMap,
+	groupID string,
+	autoOffsetReset AutoOffsetReset,
+	maxPollIntervalMs int,
+) {
+	conf["group.id"] = groupID
+	conf["auto.offset.reset"] = string(autoOffsetReset)
+
+	if maxPollIntervalMs <= 0 {
+		maxPollIntervalMs = DefaultMaxPollIntervalMs
+	}
+	conf["max.poll.interval.ms"] = maxPollIntervalMs
+}
+
 func resolveCertPath(certEnv, prefix string) (string, error) {
 	certEnv = strings.TrimSpace(certEnv)
 	if certEnv == "" {
