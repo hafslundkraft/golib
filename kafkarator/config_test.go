@@ -110,3 +110,46 @@ func TestConfigFromEnvVars_TLS(t *testing.T) {
 		assert.NotEmpty(t, cfg.Broker)
 	})
 }
+
+// TestGetSRConfig_NoURLReturnsNil verifies that Schema Registry is truly optional
+// at the env-loader layer: with KAFKA_SCHEMA_REGISTRY_URL unset, getSRConfig
+// returns (nil, nil) instead of an error.
+func TestGetSRConfig_NoURLReturnsNil(t *testing.T) {
+	withEnv(t, map[string]string{
+		envSchemaRegistryURL: "",
+		envKafkaUser:         "",
+		envKafkaPassword:     "",
+	}, func() {
+		cfg, err := getSRConfig()
+
+		require.NoError(t, err)
+		assert.Nil(t, cfg)
+	})
+}
+
+// TestConfigFromEnvVars_NoSchemaRegistry verifies ConfigFromEnvVars succeeds
+// when no Schema Registry env vars are set. The resulting Config carries a
+// zero-value SchemaRegistryConfig (URL == ""), and NewConnection will skip
+// creating a Schema Registry client.
+func TestConfigFromEnvVars_NoSchemaRegistry(t *testing.T) {
+	withEnv(t, map[string]string{
+		envHappiEnvName:      "test",
+		envHappiSystemName:   "system",
+		envHappiWorkloadName: "workload",
+		envAuthType:          "tls",
+		envCertFile:          "cert.pem",
+		envKeyFile:           "key.pem",
+		envCACert:            "ca.pem",
+		envBroker:            "broker:9090",
+		envSchemaRegistryURL: "",
+		envKafkaUser:         "",
+		envKafkaPassword:     "",
+	}, func() {
+		cfg, err := ConfigFromEnvVars()
+
+		require.NoError(t, err)
+		assert.Empty(t, cfg.SchemaRegistryConfig.SchemaRegistryURL)
+		assert.Empty(t, cfg.SchemaRegistryConfig.SchemaRegistryUser)
+		assert.Empty(t, cfg.SchemaRegistryConfig.SchemaRegistryPassword)
+	})
+}
