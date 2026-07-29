@@ -24,7 +24,7 @@ In order to use the serializer, a schema for the topic must be available in the 
 ctx := context.Background()
 
 writer, _ := conn.Writer()
-serializer, _ := conn.Serializer() 
+serializer := conn.Serializer()
 defer writer.Close(ctx)
 
 key := []byte("key")
@@ -86,8 +86,8 @@ deserializer := conn.Deserializer()
 
 // Define handler to process each message
 handler := func(ctx context.Context, msg *kafkarator.Message) error {
-    decoded, err := deserializer.Deserialize(ctx, msg.Topic, msg.Value)
-    if err != nil {
+    var decoded MyStruct
+    if err := deserializer.Deserialize(ctx, msg.Topic, msg.Value, &decoded); err != nil {
         return err
     }
     return handleMessage(ctx, decoded)
@@ -122,11 +122,15 @@ go func() {
         msg, ok := <-messageChan
         if !ok {
             // channel closed
-        return
-	}
-	decoded, _ := deserializer.Deserialize(ctx, "my-topic", msg)
-    handleMessage(decoded)
-}
+            return
+        }
+        var decoded MyStruct
+        if err := deserializer.Deserialize(ctx, "my-topic", msg.Value, &decoded); err != nil {
+            // handle error
+            continue
+        }
+        handleMessage(decoded)
+    }
 }()
 ```
 
