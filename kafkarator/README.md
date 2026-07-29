@@ -250,7 +250,7 @@ These environment variables are necessary as well for SASL mode. `AZURE_KAFKA_SC
 
 #### Optional Environment Variables
 
-Schema Registry is optional. If `KAFKA_SCHEMA_REGISTRY_URL` is unset, `LoadConfig` succeeds and the resulting `Connection` will not have a Schema Registry client (calling `Deserializer()` / `Serializer()` will not work). If `KAFKA_SCHEMA_REGISTRY_URL` **is** set, both `KAFKA_USERNAME` and `KAFKA_PASSWORD` become required.
+Schema Registry is optional. If `KAFKA_SCHEMA_REGISTRY_URL` is unset, `ConfigFromEnvVars`/`NewConnection` succeed and the resulting `Connection` will not have a Schema Registry client (calling `Deserializer()` / `Serializer()` will panic). If `KAFKA_SCHEMA_REGISTRY_URL` **is** set, both `KAFKA_USERNAME` and `KAFKA_PASSWORD` become required.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
