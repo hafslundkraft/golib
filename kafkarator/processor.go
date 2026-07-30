@@ -44,11 +44,11 @@ func defaultProcessorConfig() processorConfig {
 }
 
 // WithProcessorReadTimeout sets the default read timeout for the processor.
-// Default is 10 seconds.
+// Default is 10 seconds. Returns an error if timeout is negative.
 func WithProcessorReadTimeout(timeout time.Duration) ProcessorOption {
 	return func(cfg *processorConfig) error {
 		if timeout < 0 {
-			timeout = 0
+			return fmt.Errorf("WithProcessorReadTimeout: timeout must be non-negative, got %s", timeout)
 		}
 		cfg.readTimeout = timeout
 		return nil
@@ -56,11 +56,11 @@ func WithProcessorReadTimeout(timeout time.Duration) ProcessorOption {
 }
 
 // WithProcessorMaxMessages sets the default maximum number of messages to process per batch.
-// Default is 10.
+// Default is 10. Returns an error if maxMessages is less than 1.
 func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
 	return func(cfg *processorConfig) error {
 		if maxMessages < 1 {
-			maxMessages = 10
+			return fmt.Errorf("WithProcessorMaxMessages: maxMessages must be >= 1, got %d", maxMessages)
 		}
 		cfg.maxMessages = maxMessages
 		return nil
@@ -73,11 +73,10 @@ func WithProcessorMaxMessages(maxMessages int) ProcessorOption {
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
 func WithProcessorAutoOffsetReset(v AutoOffsetReset) ProcessorOption {
-	err := v.validate()
-	if err != nil {
-		return nil
-	}
 	return func(cfg *processorConfig) error {
+		if err := v.validate(); err != nil {
+			return fmt.Errorf("WithProcessorAutoOffsetReset: %w", err)
+		}
 		cfg.autoOffsetReset = v
 		return nil
 	}
