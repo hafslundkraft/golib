@@ -24,7 +24,7 @@ In order to use the serializer, a schema for the topic must be available in the 
 ctx := context.Background()
 
 writer, _ := conn.Writer()
-serializer, _ := conn.Serializer() 
+serializer := conn.Serializer()
 defer writer.Close(ctx)
 
 key := []byte("key")
@@ -70,14 +70,24 @@ There are three ways to read messages from Kafka, each suited for different use 
 In order to use the deserializer, a schema for the topic must be available in the schema registry.
 The Processor wraps the Reader and automatically tracks messages as they flow through your system using OpenTelemetry. It reads trace information from message headers (like `traceparent`), creates spans for each message, and only saves your progress when all messages in a batch succeed.
 
+Processor options and their defaults:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithProcessorReadTimeout(d)` | `10s` | Max time `ProcessNext` blocks waiting for messages. Must be non-negative. |
+| `WithProcessorMaxMessages(n)` | `10` | Max messages processed per `ProcessNext` call. Must be `>= 1`. |
+| `WithProcessorAutoOffsetReset(v)` | `OffsetEarliest` | Where to start when the consumer group has no committed offset. Valid values: `OffsetEarliest`, `OffsetLatest`. |
+
+Invalid option values now cause `conn.Processor(...)` to return an error (previously silently coerced or, for `WithProcessorAutoOffsetReset`, caused a nil-func panic).
+
 ```go
 ctx := context.Background()
 deserializer := conn.Deserializer()
 
 // Define handler to process each message
 handler := func(ctx context.Context, msg *kafkarator.Message) error {
-    decoded, err := deserializer.Deserialize(ctx, msg.Topic, msg.Value)
-    if err != nil {
+    var decoded MyStruct
+    if err := deserializer.Deserialize(ctx, msg.Topic, msg.Value, &decoded); err != nil {
         return err
     }
     return handleMessage(ctx, decoded)
@@ -87,8 +97,9 @@ handler := func(ctx context.Context, msg *kafkarator.Message) error {
 processor, err := conn.Processor(
     "my-topic",
     handler,
-    kafkarator.WithProcessorMaxMessages(10),           // Process up to 10 messages per call to ProcessNext
-    kafkarator.WithProcessorReadTimeout(5*time.Second), // 5 second read timeout
+    kafkarator.WithProcessorMaxMessages(10),                        // Process up to 10 messages per call to ProcessNext
+    kafkarator.WithProcessorReadTimeout(5*time.Second),             // 5 second read timeout
+    kafkarator.WithProcessorAutoOffsetReset(kafkarator.OffsetLatest), // Start from latest if no committed offset
 )
 defer processor.Close(ctx)
 
@@ -111,11 +122,15 @@ go func() {
         msg, ok := <-messageChan
         if !ok {
             // channel closed
-        return
-	}
-	decoded, _ := deserializer.Deserialize(ctx, "my-topic", msg)
-    handleMessage(decoded)
-}
+            return
+        }
+        var decoded MyStruct
+        if err := deserializer.Deserialize(ctx, "my-topic", msg.Value, &decoded); err != nil {
+            // handle error
+            continue
+        }
+        handleMessage(decoded)
+    }
 }()
 ```
 
@@ -210,6 +225,11 @@ if err != nil {
 |----------|-------------|---------|
 | `ENV` | Environment determines which Kafka service and authentication mode | `prod` |
 | `KAFKA_AUTH_TYPE` | Determines how to authenticate with to Aiven | `sasl` or `tls`|
+| `KAFKA_BROKER` | Kafka broker address to use | `broker1:9092` |
+| `KAFKA_CA_CERT` | Either path to the Certificate Authority file, the raw PEM, or a base64-encoded PEM | `/path/to/ca-cert.pem` |
+| `HAPPI_SYSTEM_NAME` | Happi system name. Used for consumer group id generation | `my-system` |
+| `HAPPI_WORKLOAD_NAME` | Happi workload/app/job name. Used for consumer group id generation | `my-worker` |
+| `HAPPI_ENV` | Happi environment name. Used for consumer group id generation | `prod` |
 
 ##### TLS mode
 
@@ -218,40 +238,25 @@ These environment variables are necessary as well for TLS mode
 |----------|-------------|---------|
 | `KAFKA_CERT_FILE` | Path to the client certificate file | `/path/to/client-cert.pem` |
 | `KAFKA_KEY_FILE` | Path to the client key file | `/path/to/client-key.pem` |
-| `KAFKA_CA_CERT` | Either path to the Certificate Authority file or the certificate itself | `/path/to/ca-cert.pem` |
 
 ##### SASL mode
 
-These environment variables are necessary as well for SASL mode. AZURE_KAFKA_SCOPE does not need to be set if using custom token source.
+These environment variables are necessary as well for SASL mode. `AZURE_KAFKA_SCOPE` does not need to be set if using a custom token source.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AZURE_KAFKA_SCOPE` | Azure scope to use for fetching tokens to authenticate with to Aiven | `api://aaaa-bbbb-cccc-dddd` |
-| `KAFKA_CA_CERT` | Either path to the Certificate Authority file or the certificate itself | `/path/to/ca-cert.pem` |
 
 
 #### Optional Environment Variables
 
+Schema Registry is optional. If `KAFKA_SCHEMA_REGISTRY_URL` is unset, `ConfigFromEnvVars`/`NewConnection` succeed and the resulting `Connection` will not have a Schema Registry client (calling `Deserializer()` / `Serializer()` will panic). If `KAFKA_SCHEMA_REGISTRY_URL` **is** set, both `KAFKA_USERNAME` and `KAFKA_PASSWORD` become required.
+
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `KAFKA_BROKER` | Kafka broker address to use | `broker1:9092` |
-| `KAFKA_SCHEMA_REGISTRY_URL` | URL to the desired schema registry you want to use | `https://url.com:9090` |
-| `KAFKA_USER` | Username to authenticate with to the desired schema registry | `username` |
-| `KAFKA_PASSWORD` | Password to authenticate with to Aiven Schema Registry | `pass` |
-
-If any of the above variables are not set, they will default to:
-
-Test environment:
-- KAFKA_BROKER = kafka-test-ture-test.com
-- KAFKA_SCHEMA_REGISTRY_URL = kafka-test-ture-test.com:18360
-- KAFKA_USER: object ID from Azure as username for the application
-- KAFKA_PASSWORD: password associated with the user in Aiven
-
-Prod environment:
-- KAFKA_BROKER = kafka-prod-ture-prod.com
-- KAFKA_SCHEMA_REGISTRY_URL = kafka-prod-ture-prod.com:11132
-- KAFKA_USER: object ID from Azure as username for the application
-- KAFKA_PASSWORD: password associated with the user in Aiven
+| `KAFKA_SCHEMA_REGISTRY_URL` | URL to the desired schema registry | `https://url.com:9090` |
+| `KAFKA_USERNAME` | Username to authenticate with the schema registry (required if URL is set) | `username` |
+| `KAFKA_PASSWORD` | Password to authenticate with the schema registry (required if URL is set) | `pass` |
 
 
 ### Programmatic Configuration

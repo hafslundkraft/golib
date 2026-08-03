@@ -114,7 +114,7 @@ func NewConnection(
 
 		default:
 			if config.SASL.Scope == "" {
-				return nil, fmt.Errorf("KAFKA_SASL_SCOPE env variable not set")
+				return nil, fmt.Errorf("%s env variable not set", envAzureScope)
 			}
 
 			tp, err = auth.NewDefaultTokenProvider(config.SASL.Scope)
@@ -259,11 +259,10 @@ func defaultReaderOptions() readerOptions {
 //   - `earliest`: start from the earliest available offset when no committed offset exists
 //   - `latest`: start from the latest offset when no committed offset exists
 func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
-	err := v.validate()
-	if err != nil {
-		return nil
-	}
 	return func(o *readerOptions) error {
+		if err := v.validate(); err != nil {
+			return fmt.Errorf("WithReaderAutoOffsetReset: %w", err)
+		}
 		o.autoOffsetReset = v
 		return nil
 	}
@@ -285,8 +284,7 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		return nil, fmt.Errorf("consumer group name: %w", err)
 	}
 
-	conf["group.id"] = group
-	conf["auto.offset.reset"] = string(ro.autoOffsetReset)
+	applyConsumerConfig(conf, group, ro.autoOffsetReset, c.config.MaxPollIntervalMs)
 
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
