@@ -190,7 +190,7 @@ func TestStartOAuthRefreshLoop_InitialError(t *testing.T) {
 	tr := &fakeTokenReceiver{}
 	tracer := sdktrace.NewTracerProvider().Tracer("test")
 
-	err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
+	_, err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
 	if err == nil {
 		t.Fatal("expected error from initial refresh, got nil")
 	}
@@ -211,10 +211,11 @@ func TestStartOAuthRefreshLoop_InitialSuccess(t *testing.T) {
 	tr := &fakeTokenReceiver{}
 	tracer := sdktrace.NewTracerProvider().Tracer("test")
 
-	err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
+	stop, err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer stop()
 
 	// StartOAuthRefreshLoop should call refreshOAuthToken once synchronously
 	if tp.calls != 1 {
@@ -222,5 +223,37 @@ func TestStartOAuthRefreshLoop_InitialSuccess(t *testing.T) {
 	}
 	if tr.setCalls != 1 {
 		t.Fatalf("expected 1 SetOAuthBearerToken call, got %d", tr.setCalls)
+	}
+}
+
+// Writer.Close and Reader.Close tear down the Kafka handle immediately after
+// stop returns, so stop must not return while the loop could still be calling
+// into that handle. The loop's own sleep is at least a minute (see
+// refreshInterval), so a stop that failed to wake it would block forever.
+func TestStartOAuthRefreshLoop_StopWaitsForLoopToExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tp := &fakeAccessTokenProvider{value: "tok"}
+	tr := &fakeTokenReceiver{}
+	tracer := sdktrace.NewTracerProvider().Tracer("test")
+
+	stop, err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		stop()
+		// Documented as idempotent: a second call must neither block nor panic.
+		stop()
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not return; the refresh loop is still running")
 	}
 }

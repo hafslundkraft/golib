@@ -64,15 +64,19 @@ func defaultWriteOptions() *WriteOptions {
 	return &WriteOptions{}
 }
 
+// newWriter wraps an already-configured producer. stopAuth may be nil; see the
+// field on [Writer].
 func newWriter(
 	p *kafka.Producer,
 	pmc messagingconv.ClientSentMessages,
 	tel TelemetryProvider,
+	stopAuth func(),
 ) *Writer {
 	w := &Writer{
 		producer:                p,
 		producedMessagesCounter: pmc,
 		tel:                     tel,
+		stopAuth:                stopAuth,
 		done:                    make(chan struct{}),
 	}
 
@@ -93,6 +97,10 @@ type Writer struct {
 	producer                *kafka.Producer
 	tel                     TelemetryProvider
 	closed                  atomic.Bool
+
+	// stopAuth stops the OAuth token refresh goroutine feeding this writer's
+	// producer and waits for it to exit. Nil when not using SASL.
+	stopAuth func()
 
 	// pending tracks in-flight per-message delivery goroutines so Flush can wait
 	// for them to record their results before reporting.
@@ -115,6 +123,11 @@ type Writer struct {
 // producer. Any per-message goroutines still waiting for delivery reports are
 // unblocked and observe [ErrWriterClosed] on their delivery channel.
 //
+// ctx bounds only the flush. Close then waits, unbounded, for the OAuth refresh
+// goroutine to exit. That goroutine must not be mid-call into the producer when
+// librdkafka destroys the handle, so abandoning the wait to meet a deadline
+// would trade a late return for a use-after-free.
+//
 // Close is idempotent. It must not be called concurrently with Write or Flush.
 func (w *Writer) Close(ctx context.Context) error {
 	// Best-effort flush of any in-flight messages before tearing down. We
@@ -125,6 +138,11 @@ func (w *Writer) Close(ctx context.Context) error {
 
 	if !w.closed.CompareAndSwap(false, true) {
 		return nil // It's ok to call Close multiple times.
+	}
+
+	// Must happen before the producer is torn down.
+	if w.stopAuth != nil {
+		w.stopAuth()
 	}
 
 	// Signal per-message goroutines that are still blocked on their delivery

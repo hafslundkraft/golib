@@ -3,6 +3,7 @@ package kafkarator
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -17,6 +18,8 @@ const magicByte = 0
 // It is safe to call multiple times; committing is idempotent.
 type CommitFunc func(ctx context.Context) error
 
+// newReader wraps an already-subscribed consumer. stopAuth may be nil; see the
+// field on [Reader].
 func newReader(
 	c *kafka.Consumer,
 	rmc messagingconv.ClientConsumedMessages,
@@ -24,17 +27,17 @@ func newReader(
 	tel TelemetryProvider,
 	topic string,
 	consumerGroup string,
-) (*Reader, error) {
-	r := &Reader{
+	stopAuth func(),
+) *Reader {
+	return &Reader{
 		consumer:            c,
 		readMessagesCounter: rmc,
 		pollFailuresCounter: pfc,
 		tel:                 tel,
 		topic:               topic,
 		consumerGroup:       consumerGroup,
+		stopAuth:            stopAuth,
 	}
-
-	return r, nil
 }
 
 // Reader provides an interface for reading messages from a Kafka topic, as well
@@ -47,21 +50,35 @@ type Reader struct {
 	readMessagesCounter messagingconv.ClientConsumedMessages
 	pollFailuresCounter metric.Int64Counter
 	tel                 TelemetryProvider
-	closed              bool
+	closed              atomic.Bool
 	topic               string
 	consumerGroup       string
+
+	// stopAuth stops the OAuth token refresh goroutine feeding this reader's
+	// consumer and waits for it to exit. Nil when not using SASL.
+	stopAuth func()
 }
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
+//
+// Close ignores ctx: it waits, unbounded, for the OAuth refresh goroutine to
+// exit. That goroutine must not be mid-call into the consumer when librdkafka
+// destroys the handle, so abandoning the wait to meet a deadline would trade a
+// late return for a use-after-free.
 func (r *Reader) Close(ctx context.Context) error {
-	if r.closed {
+	if !r.closed.CompareAndSwap(false, true) {
 		return nil // It's ok to close multiple times.
+	}
+
+	// Before the consumer is torn down, and unconditionally, so a failed close
+	// does not leak the goroutine for the lifetime of the process.
+	if r.stopAuth != nil {
+		r.stopAuth()
 	}
 
 	if err := r.consumer.Close(); err != nil {
 		return fmt.Errorf("error closing reader: %w", err)
 	}
-	r.closed = true
 	return nil
 }
 

@@ -35,6 +35,14 @@ const (
 // abstraction that wraps Reader with automatic trace propagation and offset management.
 //
 // For writing, a writer is exposed. It supports writing messages, one at a time.
+//
+// Connection holds no broker connection of its own: it is a factory that carries
+// configuration, telemetry and a Schema Registry client, and builds a fresh
+// producer or consumer on each Writer, Reader, Processor or ChannelReader call.
+// Each of those owns its Kafka handle and its OAuth refresh loop, and must be
+// closed individually. The Reader behind ChannelReader is the exception: it is
+// owned by the returned channel's goroutine and closed when the context passed
+// to ChannelReader is canceled.
 type Connection struct {
 	config    Config
 	configMap *kafka.ConfigMap
@@ -141,12 +149,18 @@ func (c *Connection) Test(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create admin: %w", err)
 	}
+	defer admin.Close()
 
 	if c.config.AuthMode == AuthSASL {
-		if err := c.startOAuth(ctx, admin); err != nil {
-			admin.Close()
+		// The refresh loop is scoped to this call: the admin client does not
+		// outlive Test, so neither should the goroutine feeding it tokens.
+		stopAuth, err := c.startOAuth(ctx, admin)
+		if err != nil {
 			return fmt.Errorf("create token provider: %w", err)
 		}
+		// Registered after admin.Close and therefore run before it: the loop
+		// must be gone before the handle it writes to is destroyed.
+		defer stopAuth()
 	}
 
 	_, err = admin.GetMetadata(nil, true, 5_000)
@@ -163,7 +177,7 @@ func (c *Connection) Serializer() ValueSerializer {
 }
 
 // Writer returns a writer for writing messages to Kafka.
-func (c *Connection) Writer() (*Writer, error) {
+func (c *Connection) Writer() (_ *Writer, err error) {
 	conf := cloneConfigMap(c.configMap)
 
 	p, err := kafka.NewProducer(&conf)
@@ -171,20 +185,31 @@ func (c *Connection) Writer() (*Writer, error) {
 		return nil, fmt.Errorf("create producer: %w", err)
 	}
 
-	if c.config.AuthMode == AuthSASL {
-		if err := c.startOAuth(context.Background(), p); err != nil {
+	// Unwind on failure; on success ownership transfers to the Writer.
+	var stopAuth func()
+	defer func() {
+		if err != nil {
+			if stopAuth != nil {
+				stopAuth()
+			}
 			p.Close()
+		}
+	}()
+
+	if c.config.AuthMode == AuthSASL {
+		// The refresh loop is scoped to this producer, not to the Connection:
+		// it must stop when the writer is closed, not at process exit.
+		if stopAuth, err = c.startOAuth(context.Background(), p); err != nil {
 			return nil, err
 		}
 	}
 
 	counter, err := messagingconv.NewClientSentMessages(c.tel.Meter())
 	if err != nil {
-		p.Close()
 		return nil, fmt.Errorf("create sent messages counter: %w", err)
 	}
 
-	return newWriter(p, counter, c.tel), nil
+	return newWriter(p, counter, c.tel, stopAuth), nil
 }
 
 // Deserializer returns a deserializer for deserializing Avro bytes to Go objects
@@ -245,7 +270,7 @@ func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
 }
 
 // Reader returns a reader that is used to fetch messages from Kafka.
-func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error) {
+func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err error) {
 	ro := defaultReaderOptions()
 
 	for _, opt := range opts {
@@ -268,35 +293,40 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (*Reader, error)
 		return nil, fmt.Errorf("create consumer: %w", err)
 	}
 
-	if err := consumer.Subscribe(topic, nil); err != nil {
-		_ = consumer.Close()
+	// Unwind on failure; on success ownership transfers to the Reader.
+	var stopAuth func()
+	defer func() {
+		if err != nil {
+			if stopAuth != nil {
+				stopAuth()
+			}
+			_ = consumer.Close()
+		}
+	}()
+
+	if err = consumer.Subscribe(topic, nil); err != nil {
 		return nil, fmt.Errorf("subscribe: %w", err)
 	}
 
 	if c.config.AuthMode == AuthSASL {
-		if err := c.startOAuth(context.Background(), consumer); err != nil {
-			_ = consumer.Close()
-			return nil, fmt.Errorf("start oauth: %w", err)
+		// The refresh loop is scoped to this consumer, not to the Connection:
+		// it must stop when the reader is closed, not at process exit.
+		if stopAuth, err = c.startOAuth(context.Background(), consumer); err != nil {
+			return nil, err
 		}
 	}
+
 	counter, err := messagingconv.NewClientConsumedMessages(c.tel.Meter())
 	if err != nil {
-		_ = consumer.Close()
 		return nil, fmt.Errorf("create consumed messages counter: %w", err)
 	}
 
 	failureCounter, err := c.tel.Meter().Int64Counter(meterPollFailures)
 	if err != nil {
-		_ = consumer.Close()
 		return nil, fmt.Errorf("create meter counter %q: %w", meterPollFailures, err)
 	}
 
-	r, err := newReader(consumer, counter, failureCounter, c.tel, topic, group)
-	if err != nil {
-		return nil, err
-	}
-
-	return r, nil
+	return newReader(consumer, counter, failureCounter, c.tel, topic, group, stopAuth), nil
 }
 
 // Processor returns a processor that automatically handles trace propagation and span management
@@ -386,17 +416,21 @@ func (c *Connection) ChannelReader(
 	return outgoing, nil
 }
 
-func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) error {
+// startOAuth starts the OAuth refresh loop feeding tr. The returned stop
+// function terminates the loop and blocks until it has exited; the caller owns
+// it and must call it before tearing tr down.
+func (c *Connection) startOAuth(ctx context.Context, tr auth.TokenReceiver) (func(), error) {
 	tracer := c.tel.Tracer()
 	if c.tokenProvider == nil {
-		return fmt.Errorf("no token provider configured")
+		return nil, fmt.Errorf("no token provider configured")
 	}
 
-	if err := auth.StartOAuthRefreshLoop(ctx, c.tokenProvider, tr, tracer); err != nil {
-		return fmt.Errorf("start oauth refresh loop: %w", err)
+	stop, err := auth.StartOAuthRefreshLoop(ctx, c.tokenProvider, tr, tracer)
+	if err != nil {
+		return nil, fmt.Errorf("start oauth refresh loop: %w", err)
 	}
 
-	return nil
+	return stop, nil
 }
 
 func (c *Connection) consumerGroupName(topic string) (string, error) {

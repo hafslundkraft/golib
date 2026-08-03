@@ -21,34 +21,45 @@ type TokenReceiver interface {
 }
 
 // StartOAuthRefreshLoop performs an initial OAuth token refresh and starts a
-// background goroutine that periodically refreshes the token until the context
-// is canceled.
+// background goroutine that periodically refreshes the token.
 //
 // The refresh interval is derived from the token expiration time and includes
 // exponential backoff on failures.
+//
+// ctx bounds the initial synchronous refresh and every refresh performed by the
+// loop; canceling it also stops the loop. The returned stop function stops the
+// loop and blocks until its goroutine has returned, so that callers may tear
+// down tr as soon as stop returns — an in-flight SetOAuthBearerToken on a
+// destroyed Kafka handle is a use-after-free, not a returned error. stop is
+// idempotent and safe to call concurrently.
 func StartOAuthRefreshLoop(
 	ctx context.Context,
 	tp AccessTokenProvider,
 	tr TokenReceiver,
 	tracer trace.Tracer,
-) error {
+) (stop func(), err error) {
 	// Initial token refresh
 	token, err := refreshOAuthToken(ctx, tp, tr, tracer)
 	if err != nil {
-		return fmt.Errorf("refresh oauth token: %w", err)
+		return nil, fmt.Errorf("refresh oauth token: %w", err)
 	}
 
-	refreshDelay := refreshInterval(token)
-	backoffDelay := 1 * time.Second
+	loopCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 
 	go func() {
+		defer close(done)
+
+		refreshDelay := refreshInterval(token)
+		backoffDelay := 1 * time.Second
+
 		for {
 			select {
-			case <-ctx.Done():
+			case <-loopCtx.Done():
 				return
 
 			case <-time.After(refreshDelay):
-				tkn, err := refreshOAuthToken(ctx, tp, tr, tracer)
+				tkn, err := refreshOAuthToken(loopCtx, tp, tr, tracer)
 				if err != nil {
 					backoffDelay = backoff(backoffDelay)
 					refreshDelay = backoffDelay
@@ -60,7 +71,13 @@ func StartOAuthRefreshLoop(
 		}
 	}()
 
-	return nil
+	// Both operations are idempotent, so stop needs no additional guard:
+	// canceling twice is a no-op and a receive on a closed channel never
+	// blocks.
+	return func() {
+		cancel()
+		<-done
+	}, nil
 }
 
 // refreshOAuthToken fetches a new OAuth access token and delivers it to Kafka
