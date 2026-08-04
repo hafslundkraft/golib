@@ -61,10 +61,9 @@ type Reader struct {
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
 //
-// Close ignores ctx: it waits, unbounded, for the OAuth refresh goroutine to
-// exit. That goroutine must not be mid-call into the consumer when librdkafka
-// destroys the handle, so abandoning the wait to meet a deadline would trade a
-// late return for a use-after-free.
+// Close ignores ctx. It waits for the OAuth refresh loop to exit before
+// destroying the consumer; otherwise the loop could call into a freed
+// librdkafka handle.
 func (r *Reader) Close(ctx context.Context) error {
 	if !r.closed.CompareAndSwap(false, true) {
 		return nil // It's ok to close multiple times.

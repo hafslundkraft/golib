@@ -26,12 +26,11 @@ type TokenReceiver interface {
 // The refresh interval is derived from the token expiration time and includes
 // exponential backoff on failures.
 //
-// ctx bounds the initial synchronous refresh and every refresh performed by the
-// loop; canceling it also stops the loop. The returned stop function stops the
-// loop and blocks until its goroutine has returned, so that callers may tear
-// down tr as soon as stop returns — an in-flight SetOAuthBearerToken on a
-// destroyed Kafka handle is a use-after-free, not a returned error. stop is
-// idempotent and safe to call concurrently.
+// ctx bounds the initial refresh and every refresh performed by the loop;
+// canceling it also stops the loop. The returned stop function stops the loop
+// and waits for its goroutine to exit, so callers may tear tr down as soon as
+// stop returns; otherwise the loop could call into a freed Kafka handle. stop
+// is idempotent and safe to call concurrently.
 func StartOAuthRefreshLoop(
 	ctx context.Context,
 	tp AccessTokenProvider,

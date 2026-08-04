@@ -123,10 +123,9 @@ type Writer struct {
 // producer. Any per-message goroutines still waiting for delivery reports are
 // unblocked and observe [ErrWriterClosed] on their delivery channel.
 //
-// ctx bounds only the flush. Close then waits, unbounded, for the OAuth refresh
-// goroutine to exit. That goroutine must not be mid-call into the producer when
-// librdkafka destroys the handle, so abandoning the wait to meet a deadline
-// would trade a late return for a use-after-free.
+// ctx bounds only the flush. Close still waits for the OAuth refresh loop to
+// exit before destroying the producer; otherwise the loop could call into a
+// freed librdkafka handle.
 //
 // Close is idempotent. It must not be called concurrently with Write or Flush.
 func (w *Writer) Close(ctx context.Context) error {
