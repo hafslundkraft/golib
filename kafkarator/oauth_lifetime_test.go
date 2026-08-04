@@ -15,8 +15,8 @@ import (
 // invoked by Close. If that wiring breaks, the loop outlives the Kafka handle
 // it feeds and keeps running until the process exits.
 //
-// internal/auth.TestStartOAuthRefreshLoop_StopWaitsForLoopToExit covers the
-// other half — that stopping actually ends the goroutine.
+// internal/auth.TestStartOAuthRefreshLoop_StopReturnsAndIsIdempotent covers the
+// other half — that the stop func returns and tolerates repeat calls.
 
 // dummyBroker is deliberately not the container address from TestMain: these
 // tests only construct and close handles, and librdkafka does not dial on
@@ -38,7 +38,14 @@ func TestWriterCloseStopsOAuthRefresh(t *testing.T) {
 	}
 
 	stopped := make(chan struct{})
-	w := newWriter(p, counter, tel, func() { close(stopped) })
+	w := newWriter(p, counter, tel, func() {
+		// The loop must be stopped while the handle is still alive; stopping it
+		// afterwards is the use-after-free this wiring exists to prevent.
+		if p.IsClosed() {
+			t.Error("stopAuth ran after the producer was closed")
+		}
+		close(stopped)
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -137,7 +144,13 @@ func TestReaderCloseStopsOAuthRefresh(t *testing.T) {
 	r := newReader(
 		c, consumed, pollFailures, tel,
 		"oauth-lifetime-topic", "oauth-lifetime-test",
-		func() { close(stopped) },
+		func() {
+			// See the producer equivalent: order is the point, not just the call.
+			if c.IsClosed() {
+				t.Error("stopAuth ran after the consumer was closed")
+			}
+			close(stopped)
+		},
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

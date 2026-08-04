@@ -43,14 +43,14 @@ func StartOAuthRefreshLoop(
 		return nil, fmt.Errorf("refresh oauth token: %w", err)
 	}
 
+	refreshDelay := refreshInterval(token)
+	backoffDelay := 1 * time.Second
+
 	loopCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 
 	go func() {
 		defer close(done)
-
-		refreshDelay := refreshInterval(token)
-		backoffDelay := 1 * time.Second
 
 		for {
 			select {

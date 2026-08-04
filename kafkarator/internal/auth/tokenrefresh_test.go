@@ -226,11 +226,10 @@ func TestStartOAuthRefreshLoop_InitialSuccess(t *testing.T) {
 	}
 }
 
-// Writer.Close and Reader.Close tear down the Kafka handle immediately after
-// stop returns, so stop must not return while the loop could still be calling
-// into that handle. The loop's own sleep is at least a minute (see
-// refreshInterval), so a stop that failed to wake it would block forever.
-func TestStartOAuthRefreshLoop_StopWaitsForLoopToExit(t *testing.T) {
+// stop must not deadlock, and must tolerate being called twice — Writer.Close
+// and Reader.Close both call it. The deadline catches a stop that never wakes
+// the loop, which would hang for the loop's full sleep of at least a minute.
+func TestStartOAuthRefreshLoop_StopReturnsAndIsIdempotent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
