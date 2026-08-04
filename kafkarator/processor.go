@@ -99,6 +99,10 @@ func newProcessor(
 }
 
 // Close releases the underlying reader resources.
+//
+// Close ignores ctx. It delegates to [Reader.Close], which waits for the OAuth
+// refresh loop to exit before destroying the consumer, so Close is not bounded
+// by ctx's deadline.
 func (p *Processor) Close(ctx context.Context) error {
 	return p.reader.Close(ctx)
 }

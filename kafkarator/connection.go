@@ -41,8 +41,10 @@ const (
 // producer or consumer on each Writer, Reader, Processor or ChannelReader call.
 // Each of those owns its Kafka handle and its OAuth refresh loop, and must be
 // closed individually. The Reader behind ChannelReader is the exception: it is
-// owned by the returned channel's goroutine and closed when the context passed
-// to ChannelReader is canceled.
+// owned by the returned channel's goroutine and closed when that goroutine
+// exits. Cancellation is only observed between messages, so callers must keep
+// receiving until the channel closes; abandoning it strands the goroutine, and
+// the Reader and refresh loop with it.
 type Connection struct {
 	config    Config
 	configMap *kafka.ConfigMap
@@ -71,7 +73,8 @@ type options struct {
 //
 // ts is called from the OAuth refresh loop, which cannot cancel it: oauth2.TokenSource
 // takes no context. Back ts with an http.Client that has a timeout, otherwise a stalled
-// token fetch blocks Writer.Close and Reader.Close for as long as it lasts.
+// token fetch blocks whoever is waiting for the loop to exit — Writer.Close,
+// Reader.Close, Processor.Close or Connection.Test — for as long as it lasts.
 func WithTokenSource(ts oauth2.TokenSource) Option {
 	return func(o *options) {
 		o.tokenSource = ts

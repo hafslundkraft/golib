@@ -139,15 +139,17 @@ func (w *Writer) Close(ctx context.Context) error {
 		return nil // It's ok to call Close multiple times.
 	}
 
+	// Signal per-message goroutines that are still blocked on their delivery
+	// channel to exit so they don't leak when librdkafka is torn down without
+	// sending the remaining delivery reports. Safe to do before stopAuth — this
+	// touches no Kafka handle — and doing it first means they are not held for
+	// the duration of a final token fetch.
+	close(w.done)
+
 	// Must happen before the producer is torn down.
 	if w.stopAuth != nil {
 		w.stopAuth()
 	}
-
-	// Signal per-message goroutines that are still blocked on their delivery
-	// channel to exit so they don't leak when librdkafka is torn down without
-	// sending the remaining delivery reports.
-	close(w.done)
 
 	w.producer.Close()
 
