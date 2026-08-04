@@ -1,7 +1,9 @@
 package kafkarator
 
 import (
+	"bytes"
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -198,5 +200,113 @@ func TestReaderCloseWithoutOAuthRefresh(t *testing.T) {
 
 	if err := r.Close(ctx); err != nil {
 		t.Fatalf("close reader with nil stopAuth: %v", err)
+	}
+}
+
+// The tests above inject a stub stop func, so they prove Close calls whatever it
+// was given. The two below go through Connection instead, so the loop they stop
+// is the real one: they cover the handover in Connection.Writer/Reader, which
+// nothing else exercises.
+
+// stubTokenProvider returns a token librdkafka accepts. Principal is empty, as
+// it is on the WithTokenSource path; librdkafka does not require it locally.
+type stubTokenProvider struct{}
+
+func (stubTokenProvider) GetAccessToken(context.Context) (kafka.OAuthBearerToken, error) {
+	return kafka.OAuthBearerToken{
+		TokenValue: "abc123",
+		Expiration: time.Now().Add(time.Hour),
+		Extensions: map[string]string{},
+	}, nil
+}
+
+// saslConnection builds a Connection on the SASL/OAUTHBEARER path, so Writer and
+// Reader start a real refresh loop without needing Entra ID or a live broker.
+func saslConnection() *Connection {
+	return &Connection{
+		config: Config{
+			AuthMode:     AuthSASL,
+			SystemName:   "oauth",
+			Env:          "test",
+			WorkloadName: "lifetime",
+		},
+		configMap: &kafka.ConfigMap{
+			"bootstrap.servers": dummyBroker,
+			"security.protocol": "SASL_PLAINTEXT",
+			"sasl.mechanisms":   "OAUTHBEARER",
+		},
+		tel:           newMockTelemetry(),
+		tokenProvider: stubTokenProvider{},
+	}
+}
+
+// refreshLoopCount reports how many goroutines are sitting in the OAuth refresh
+// loop. Reading stacks is blunt, but the loop is otherwise unobservable from
+// here: its stop func is private to Writer/Reader, and the minimum refresh
+// interval of one minute puts a second token fetch out of a fast test's reach.
+//
+// Matching the .func1 frame rather than the bare function name is deliberate:
+// runtime.Stack also emits a "created by ...StartOAuthRefreshLoop" line, so the
+// plain name occurs twice per goroutine.
+func refreshLoopCount() int {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	return bytes.Count(buf[:n], []byte("auth.StartOAuthRefreshLoop.func1()"))
+}
+
+func TestWriterCloseStopsRealOAuthRefreshLoop(t *testing.T) {
+	before := refreshLoopCount()
+
+	w, err := saslConnection().Writer()
+	if err != nil {
+		t.Fatalf("create writer: %v", err)
+	}
+
+	if w.stopAuth == nil {
+		t.Fatal("Connection.Writer did not hand the loop's stop func to the Writer")
+	}
+	if got := refreshLoopCount(); got != before+1 {
+		t.Fatalf("refresh loop goroutines after Writer: got %d, want %d", got, before+1)
+	}
+
+	// Close's flush budget comes from ctx, and on the SASL path librdkafka waits
+	// out the whole budget against an unreachable broker. Nothing was written, so
+	// keep it short rather than idling for seconds.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	if err := w.Close(ctx); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	if got := refreshLoopCount(); got != before {
+		t.Errorf("refresh loop outlived Writer.Close: got %d goroutines, want %d", got, before)
+	}
+}
+
+func TestReaderCloseStopsRealOAuthRefreshLoop(t *testing.T) {
+	before := refreshLoopCount()
+
+	r, err := saslConnection().Reader("oauth-lifetime-topic")
+	if err != nil {
+		t.Fatalf("create reader: %v", err)
+	}
+
+	if r.stopAuth == nil {
+		t.Fatal("Connection.Reader did not hand the loop's stop func to the Reader")
+	}
+	if got := refreshLoopCount(); got != before+1 {
+		t.Fatalf("refresh loop goroutines after Reader: got %d, want %d", got, before+1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := r.Close(ctx); err != nil {
+		t.Fatalf("close reader: %v", err)
+	}
+
+	if got := refreshLoopCount(); got != before {
+		t.Errorf("refresh loop outlived Reader.Close: got %d goroutines, want %d", got, before)
 	}
 }

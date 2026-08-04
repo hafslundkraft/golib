@@ -67,7 +67,11 @@ type options struct {
 	srClient    SchemaRegistryClient
 }
 
-// WithTokenSource provides the optional TokenSource to use instead of default token provider
+// WithTokenSource provides the optional TokenSource to use instead of default token provider.
+//
+// ts is called from the OAuth refresh loop, which cannot cancel it: oauth2.TokenSource
+// takes no context. Back ts with an http.Client that has a timeout, otherwise a stalled
+// token fetch blocks Writer.Close and Reader.Close for as long as it lasts.
 func WithTokenSource(ts oauth2.TokenSource) Option {
 	return func(o *options) {
 		o.tokenSource = ts
