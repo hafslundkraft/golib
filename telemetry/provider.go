@@ -145,9 +145,26 @@ func (p *Provider) LoggerProvider() log.LoggerProvider {
 	return p.loggerProvider
 }
 
+// HTTPOption configures the HTTP middleware returned by [Provider.HTTPMiddleware].
+type HTTPOption func(*httpConfig)
+
+type httpConfig struct {
+	routeResolver func(*http.Request) string
+}
+
+// WithRouteResolver supplies a function that returns the matched route template for a request.
+func WithRouteResolver(fn func(*http.Request) string) HTTPOption {
+	return func(c *httpConfig) { c.routeResolver = fn }
+}
+
 // HTTPMiddleware constructs a plain http middleware that instruments incoming
 // requests with traces and metrics.
-func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
+func (p *Provider) HTTPMiddleware(opts ...HTTPOption) func(http.Handler) http.Handler {
+	cfg := &httpConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	otelMW := otelhttp.NewMiddleware("http-server",
 		otelhttp.WithPropagators(p.propagator),
 		otelhttp.WithTracerProvider(p.tracerProvider),
@@ -160,23 +177,28 @@ func (p *Provider) HTTPMiddleware() func(http.Handler) http.Handler {
 		}),
 	)
 	return func(h http.Handler) http.Handler {
-		return otelMW(labelerMiddleware(h))
+		return otelMW(routeMiddleware(cfg, h))
 	}
 }
 
-func labelerMiddleware(next http.Handler) http.HandlerFunc {
+func routeMiddleware(cfg *httpConfig, next http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+
+		if r.Pattern == "" && cfg.routeResolver != nil {
+			if route := cfg.routeResolver(r); route != "" {
+				r.Pattern = r.Method + " " + route
+			}
+		}
+
 		labeler, _ := otelhttp.LabelerFromContext(r.Context())
 
 		// Stripping the method to leave only the route
-		_, route, found := strings.Cut(r.Pattern, " ")
-		if found {
+		if _, route, found := strings.Cut(r.Pattern, " "); found {
 			labeler.Add(semconv.HTTPRoute(route))
 		} else if r.Pattern != "" {
 			labeler.Add(semconv.HTTPRoute(r.Pattern))
 		}
-
-		next.ServeHTTP(w, r)
 	}
 }
 
