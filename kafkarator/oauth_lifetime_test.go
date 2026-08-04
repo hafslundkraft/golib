@@ -11,19 +11,12 @@ import (
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
-// The OAuth refresh loop that keeps a producer/consumer authenticated is
-// started by Connection.Writer/Connection.Reader but owned by the resulting
-// Writer/Reader: its stop func is handed over at construction and must be
-// invoked by Close. If that wiring breaks, the loop outlives the Kafka handle
-// it feeds and keeps running until the process exits.
-//
-// internal/auth.TestStartOAuthRefreshLoop_StopReturnsAndIsIdempotent covers the
-// other half — that the stop func returns and tolerates repeat calls.
+// The OAuth refresh loop is started by Connection but owned by the Writer/Reader
+// it is handed to, which must stop it in Close. Break that wiring and the loop
+// outlives the Kafka handle it feeds. internal/auth covers the stop func itself.
 
-// dummyBroker is deliberately not the container address from TestMain: these
-// tests only construct and close handles, and librdkafka does not dial on
-// construction, so nothing here needs a reachable broker. Port 9 (discard) so a
-// real local Kafka can never be picked up by accident.
+// dummyBroker: librdkafka does not dial on construction, so nothing here needs a
+// reachable broker. Port 9 (discard) so a local Kafka is never picked up.
 const dummyBroker = "127.0.0.1:9"
 
 func TestWriterCloseStopsOAuthRefresh(t *testing.T) {
@@ -41,8 +34,7 @@ func TestWriterCloseStopsOAuthRefresh(t *testing.T) {
 
 	stopped := make(chan struct{})
 	w := newWriter(p, counter, tel, func() {
-		// The loop must be stopped while the handle is still alive; stopping it
-		// afterwards is the use-after-free this wiring exists to prevent.
+		// Order is the point: stopping after teardown is the use-after-free.
 		if p.IsClosed() {
 			t.Error("stopAuth ran after the producer was closed")
 		}
@@ -82,9 +74,7 @@ func TestWriterCloseStopsOAuthRefreshOnlyOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Close is documented as idempotent. Stopping twice would be harmless on
-	// its own, but a second call must not slip past the guard and tear the
-	// producer down twice.
+	// A second Close must not slip past the guard and close the producer twice.
 	if err := w.Close(ctx); err != nil {
 		t.Fatalf("first close: %v", err)
 	}
@@ -97,8 +87,7 @@ func TestWriterCloseStopsOAuthRefreshOnlyOnce(t *testing.T) {
 	}
 }
 
-// A Writer built without SASL has no refresh loop and therefore a nil stop
-// func. Close must tolerate that rather than panicking.
+// Without SASL there is no loop and stopAuth is nil; Close must not panic.
 func TestWriterCloseWithoutOAuthRefresh(t *testing.T) {
 	tel := newMockTelemetry()
 
@@ -147,7 +136,7 @@ func TestReaderCloseStopsOAuthRefresh(t *testing.T) {
 		c, consumed, pollFailures, tel,
 		"oauth-lifetime-topic", "oauth-lifetime-test",
 		func() {
-			// See the producer equivalent: order is the point, not just the call.
+			// Order is the point; see the producer equivalent.
 			if c.IsClosed() {
 				t.Error("stopAuth ran after the consumer was closed")
 			}
@@ -166,6 +155,49 @@ func TestReaderCloseStopsOAuthRefresh(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Fatal("Reader.Close did not stop the OAuth refresh loop")
+	}
+}
+
+func TestReaderCloseStopsOAuthRefreshOnlyOnce(t *testing.T) {
+	tel := newMockTelemetry()
+
+	consumed, err := messagingconv.NewClientConsumedMessages(tel.Meter())
+	if err != nil {
+		t.Fatalf("create consumed counter: %v", err)
+	}
+	pollFailures, err := tel.Meter().Int64Counter(meterPollFailures)
+	if err != nil {
+		t.Fatalf("create poll failure counter: %v", err)
+	}
+
+	c, err := kafka.NewConsumer(&kafka.ConfigMap{
+		"bootstrap.servers": dummyBroker,
+		"group.id":          "oauth-lifetime-test-once",
+	})
+	if err != nil {
+		t.Fatalf("create consumer: %v", err)
+	}
+
+	calls := 0
+	r := newReader(
+		c, consumed, pollFailures, tel,
+		"oauth-lifetime-topic", "oauth-lifetime-test-once",
+		func() { calls++ },
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// The consumer half of the guard: a second Close must not close it twice.
+	if err := r.Close(ctx); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := r.Close(ctx); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf("expected stop to be called exactly once, got %d", calls)
 	}
 }
 
@@ -203,13 +235,10 @@ func TestReaderCloseWithoutOAuthRefresh(t *testing.T) {
 	}
 }
 
-// The tests above inject a stub stop func, so they prove Close calls whatever it
-// was given. The two below go through Connection instead, so the loop they stop
-// is the real one: they cover the handover in Connection.Writer/Reader, which
-// nothing else exercises.
+// The tests above inject a stub stop func. Those below go through Connection, so
+// the loop is real and the handover in Writer/Reader is actually covered.
 
-// stubTokenProvider returns a token librdkafka accepts. Principal is empty, as
-// it is on the WithTokenSource path; librdkafka does not require it locally.
+// Empty Principal matches the WithTokenSource path; librdkafka accepts it locally.
 type stubTokenProvider struct{}
 
 func (stubTokenProvider) GetAccessToken(context.Context) (kafka.OAuthBearerToken, error) {
@@ -220,8 +249,7 @@ func (stubTokenProvider) GetAccessToken(context.Context) (kafka.OAuthBearerToken
 	}, nil
 }
 
-// saslConnection builds a Connection on the SASL/OAUTHBEARER path, so Writer and
-// Reader start a real refresh loop without needing Entra ID or a live broker.
+// saslConnection puts Writer/Reader on the SASL path without Entra ID or a broker.
 func saslConnection() *Connection {
 	return &Connection{
 		config: Config{
@@ -240,14 +268,10 @@ func saslConnection() *Connection {
 	}
 }
 
-// refreshLoopCount reports how many goroutines are sitting in the OAuth refresh
-// loop. Reading stacks is blunt, but the loop is otherwise unobservable from
-// here: its stop func is private to Writer/Reader, and the minimum refresh
-// interval of one minute puts a second token fetch out of a fast test's reach.
-//
-// Matching the .func1 frame rather than the bare function name is deliberate:
-// runtime.Stack also emits a "created by ...StartOAuthRefreshLoop" line, so the
-// plain name occurs twice per goroutine.
+// refreshLoopCount counts goroutines in the refresh loop. Assert the count rises
+// before asserting it falls: a renamed frame reads as zero, which would let the
+// leak check pass vacuously. Match .func1 — the bare name also appears in the
+// "created by" line. Process-wide, so no t.Parallel in this package.
 func refreshLoopCount() int {
 	buf := make([]byte, 1<<20)
 	n := runtime.Stack(buf, true)
@@ -269,9 +293,8 @@ func TestWriterCloseStopsRealOAuthRefreshLoop(t *testing.T) {
 		t.Fatalf("refresh loop goroutines after Writer: got %d, want %d", got, before+1)
 	}
 
-	// Close's flush budget comes from ctx, and on the SASL path librdkafka waits
-	// out the whole budget against an unreachable broker. Nothing was written, so
-	// keep it short rather than idling for seconds.
+	// Close's flush waits out the whole ctx budget against an unreachable broker.
+	// Nothing was written, so keep it short.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
@@ -308,5 +331,39 @@ func TestReaderCloseStopsRealOAuthRefreshLoop(t *testing.T) {
 
 	if got := refreshLoopCount(); got != before {
 		t.Errorf("refresh loop outlived Reader.Close: got %d goroutines, want %d", got, before)
+	}
+}
+
+// Test is the third place a loop is started and the only one that stops it itself,
+// via defers whose order matters. Watched from a second goroutine because checking
+// after Test returns would pass even if no loop was ever started; the 5s
+// GetMetadata timeout against the unreachable broker is the observation window.
+func TestConnectionTestStopsOAuthRefreshLoop(t *testing.T) {
+	before := refreshLoopCount()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- saslConnection().Test(context.Background())
+	}()
+
+	sawLoop := false
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		if refreshLoopCount() == before+1 {
+			sawLoop = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !sawLoop {
+		t.Fatal("no refresh loop seen while Test ran: none started, or the frame was renamed")
+	}
+
+	// The error is expected; the point is that the defers run on the failure path.
+	if err := <-done; err == nil {
+		t.Fatal("expected Test to fail against an unreachable broker")
+	}
+
+	if got := refreshLoopCount(); got != before {
+		t.Errorf("refresh loop outlived Test: got %d goroutines, want %d", got, before)
 	}
 }
