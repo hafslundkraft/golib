@@ -221,8 +221,7 @@ func requiredFields(schema *parquet.Schema) []string {
 // Batch is not safe for concurrent use. All Write, Produce, and Cleanup calls
 // must be made from the same goroutine.
 //
-// Producing an empty batch (zero Write calls) is allowed: it uploads a
-// row-less Parquet file and produces an envelope with RecordCount 0.
+// Producing an empty batch (zero Write calls) is an error.
 type Batch struct {
 	// produce is set by writer.go's NewBatch; it handles the Kafka write.
 	produce func(ctx context.Context, value []byte) error
@@ -363,27 +362,10 @@ func isNil(v any) bool {
 	return rv.Kind() == reflect.Pointer && rv.IsNil()
 }
 
-// flushRowGroup writes the buffered records as a single Parquet row group.
-//
-// parquet-go panics rather than returning an error when a record does not fit
-// its column — a string in an int64 column, or a byte array field that is
-// unaddressable because Write boxed the record in an `any`. Recover and return
-// it: a panic escaping here would skip the callers' abort paths, and by then
-// Produce has already set done, so the caller's deferred Cleanup is a no-op and
-// the S3 multipart upload would be left dangling.
-//
-// b.pending is deliberately left intact — dropping the offending records is the
-// silent data loss this package exists to avoid. A later flush returns the same
-// error.
-func (b *Batch) flushRowGroup() (err error) {
+func (b *Batch) flushRowGroup() error {
 	if len(b.pending) == 0 {
 		return nil
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("claimcheck: write parquet row group: %v", r)
-		}
-	}()
 	if _, err := b.pw.Write(b.pending); err != nil {
 		return fmt.Errorf("claimcheck: write parquet row group: %w", err)
 	}
