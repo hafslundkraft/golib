@@ -195,9 +195,12 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 }
 
 // requiredFields returns the names of the schema's top-level non-optional
-// fields — those whose Avro type is not a ["null", X] union. Every record must
-// carry a value for each of them; optional fields may be omitted and are
-// written as null.
+// fields — those whose Avro type is not a ["null", X] union. Optional fields may
+// be omitted and are written as null.
+//
+// A non-nullable array, map, or nested record counts as required: its key must
+// be present, though an empty collection satisfies that. Fields nested inside a
+// record are not checked, matching the Python library's top-level guard.
 func requiredFields(schema *parquet.Schema) []string {
 	names := make([]string, 0, len(schema.Fields()))
 	for _, f := range schema.Fields() {
@@ -215,8 +218,7 @@ func requiredFields(schema *parquet.Schema) []string {
 // Records can be any Go value whose fields map to the Avro schema registered
 // in Schema Registry — either a concrete struct with parquet field tags, or a
 // map[string]any keyed by field name. A map must contain a non-nil entry for
-// every required (non-nullable) schema field; see [Batch.Write]. A record that
-// fails that check closes the batch — it is all its records or none of them.
+// every required (non-nullable) schema field; see [Batch.Write].
 //
 // Batch is not safe for concurrent use. All Write, Produce, and Cleanup calls
 // must be made from the same goroutine.
@@ -382,14 +384,14 @@ func (b *Batch) flushRowGroup() error {
 // new batch via [Writer.NewBatch]. Calling Produce more than once returns an error.
 //
 // If any [Batch.Write] failed, Produce aborts the upload and returns that error
-// without producing anything — a batch is all its records or none of them.
+// without producing anything.
 func (b *Batch) Produce(ctx context.Context) error {
 	if b.done {
 		return fmt.Errorf("claimcheck: batch already closed")
 	}
 	if b.failed != nil {
 		b.Cleanup()
-		return fmt.Errorf("claimcheck: earlier record was rejected: %w", b.failed)
+		return fmt.Errorf("claimcheck: batch closed by an earlier error: %w", b.failed)
 	}
 	b.done = true
 	value, err := b.finalizeUpload(ctx)
