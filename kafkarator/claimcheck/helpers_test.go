@@ -89,6 +89,28 @@ func unmarshalEnvelope(t *testing.T, data []byte) *claimcheck.Envelope {
 	return &envelope
 }
 
+// abortSpyS3 wraps FakeS3Client and counts the multipart calls that decide
+// whether an upload was cleaned up or left dangling.
+type abortSpyS3 struct {
+	*claimcheck.FakeS3Client
+	aborts    int
+	completes int
+}
+
+func (s *abortSpyS3) AbortMultipartUpload(ctx context.Context, bucket, key, uploadID string) error {
+	s.aborts++
+	return s.FakeS3Client.AbortMultipartUpload(ctx, bucket, key, uploadID)
+}
+
+func (s *abortSpyS3) CompleteMultipartUpload(
+	ctx context.Context,
+	bucket, key, uploadID string,
+	parts []claimcheck.CompletedPart,
+) error {
+	s.completes++
+	return s.FakeS3Client.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts)
+}
+
 // bucketAndKey splits an s3://bucket/key URI into its two components.
 func bucketAndKey(t *testing.T, storageURI string) (bucket, key string) {
 	t.Helper()

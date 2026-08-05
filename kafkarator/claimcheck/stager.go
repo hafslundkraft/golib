@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"time"
 
@@ -189,7 +190,22 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 		ser:      s.ser,
 		pw:       parquet.NewGenericWriter[any](pipe, writerOpts...),
 		rowGroup: s.rowGroupSize,
+		required: requiredFields(parquetSchema),
 	}, nil
+}
+
+// requiredFields returns the names of the schema's top-level non-optional
+// fields — those whose Avro type is not a ["null", X] union. Every record must
+// carry a value for each of them; optional fields may be omitted and are
+// written as null.
+func requiredFields(schema *parquet.Schema) []string {
+	names := make([]string, 0, len(schema.Fields()))
+	for _, f := range schema.Fields() {
+		if !f.Optional() {
+			names = append(names, f.Name())
+		}
+	}
+	return names
 }
 
 // Batch is an open write session returned by [Writer.NewBatch]. Write records
@@ -198,12 +214,15 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 //
 // Records can be any Go value whose fields map to the Avro schema registered
 // in Schema Registry — either a concrete struct with parquet field tags, or a
-// map[string]any keyed by field name.
+// map[string]any keyed by field name. A map must contain a non-nil entry for
+// every required (non-nullable) schema field; see [Batch.Write]. A record that
+// fails that check closes the batch — it is all its records or none of them.
 //
 // Batch is not safe for concurrent use. All Write, Produce, and Cleanup calls
 // must be made from the same goroutine.
 //
-// Producing an empty batch (zero Write calls) is an error.
+// Producing an empty batch (zero Write calls) is allowed: it uploads a
+// row-less Parquet file and produces an envelope with RecordCount 0.
 type Batch struct {
 	// produce is set by writer.go's NewBatch; it handles the Kafka write.
 	produce func(ctx context.Context, value []byte) error
@@ -220,6 +239,12 @@ type Batch struct {
 	rowGroup    int
 	recordCount int64
 	done        bool
+	// required holds the schema's non-optional field names, checked by Write.
+	required []string
+	// failed holds the first error returned by Write. It poisons the batch so a
+	// caller that ignores that error cannot go on to produce a batch which is
+	// silently missing rows.
+	failed error
 }
 
 // finalizeUpload flushes and closes the Parquet writer, serializes the envelope,
@@ -277,18 +302,88 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 }
 
 // Write buffers one record into the batch.
+//
+// Records given as map[string]any are checked against the schema first: a
+// required field that is absent, or present but nil, is an error. Structs are
+// not checked — every field of a struct is present by construction.
+//
+// The first error closes the batch for good: it is returned by every later
+// Write and by [Batch.Produce], which uploads nothing. A rejected record can
+// therefore not be quietly skipped, leaving a batch that looks complete but is
+// missing rows. Obtain a new batch via [Writer.NewBatch] to start over.
 func (b *Batch) Write(record any) error {
+	if b.failed != nil {
+		return b.failed
+	}
+	if err := b.checkRequired(record); err != nil {
+		b.failed = err
+		return err
+	}
 	b.pending = append(b.pending, record)
 	if len(b.pending) >= b.rowGroup {
-		return b.flushRowGroup()
+		if err := b.flushRowGroup(); err != nil {
+			b.failed = err
+			return err
+		}
 	}
 	return nil
 }
 
-func (b *Batch) flushRowGroup() error {
+// checkRequired rejects maps that omit a required field, or set one to nil.
+// Without it such records reach S3 as zero values: the Parquet writer looks
+// each field up by name and substitutes the column's zero value when it finds
+// nothing, so "" and 0 become indistinguishable from real data on the read
+// side. The Avro schema is only used to build the writer, never to validate
+// rows, so this is the one place the omission can be caught.
+func (b *Batch) checkRequired(record any) error {
+	m, ok := record.(map[string]any)
+	if !ok {
+		return nil
+	}
+	for _, name := range b.required {
+		v, present := m[name]
+		if !present {
+			return fmt.Errorf("claimcheck: record is missing required field %q", name)
+		}
+		if isNil(v) {
+			return fmt.Errorf("claimcheck: required field %q is nil", name)
+		}
+	}
+	return nil
+}
+
+// isNil reports whether v carries no value. Only nil interfaces and nil
+// pointers count: a nil slice or map is the empty collection, which is a legal
+// value for a required bytes, array, or map field.
+func isNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
+}
+
+// flushRowGroup writes the buffered records as a single Parquet row group.
+//
+// parquet-go panics rather than returning an error when a record does not fit
+// its column — a string in an int64 column, or a byte array field that is
+// unaddressable because Write boxed the record in an `any`. Recover and return
+// it: a panic escaping here would skip the callers' abort paths, and by then
+// Produce has already set done, so the caller's deferred Cleanup is a no-op and
+// the S3 multipart upload would be left dangling.
+//
+// b.pending is deliberately left intact — dropping the offending records is the
+// silent data loss this package exists to avoid. A later flush returns the same
+// error.
+func (b *Batch) flushRowGroup() (err error) {
 	if len(b.pending) == 0 {
 		return nil
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("claimcheck: write parquet row group: %v", r)
+		}
+	}()
 	if _, err := b.pw.Write(b.pending); err != nil {
 		return fmt.Errorf("claimcheck: write parquet row group: %w", err)
 	}
@@ -303,9 +398,16 @@ func (b *Batch) flushRowGroup() error {
 // Produce finalizes the S3 upload and produces the claim-check envelope to Kafka.
 // On any error the batch is permanently closed and cannot be retried; obtain a
 // new batch via [Writer.NewBatch]. Calling Produce more than once returns an error.
+//
+// If any [Batch.Write] failed, Produce aborts the upload and returns that error
+// without producing anything — a batch is all its records or none of them.
 func (b *Batch) Produce(ctx context.Context) error {
 	if b.done {
 		return fmt.Errorf("claimcheck: batch already closed")
+	}
+	if b.failed != nil {
+		b.Cleanup()
+		return fmt.Errorf("claimcheck: earlier record was rejected: %w", b.failed)
 	}
 	b.done = true
 	value, err := b.finalizeUpload(ctx)

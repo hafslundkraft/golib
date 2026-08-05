@@ -292,6 +292,179 @@ func TestBatch_CleanupAfterProduceIsNoop(t *testing.T) {
 	require.NoError(t, batch.Produce(context.Background()))
 }
 
+// guardSchema has one required and one nullable field, mirroring the schema the
+// Python library's required-field guard is tested against.
+const guardSchema = `{"type":"record","name":"G","fields":[` +
+	`{"name":"id","type":"int"},` +
+	`{"name":"note","type":["null","string"]}]}`
+
+// newGuardBatch opens a batch over guardSchema. The caller must Cleanup.
+func newGuardBatch(t *testing.T) *claimcheck.Batch {
+	t.Helper()
+	w := claimcheck.NewTestWriter(&captureKW{}, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(claimcheck.NewFakeS3Client()),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: guardSchema, version: 1, id: 1}),
+	)
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.guard--v1")
+	require.NoError(t, err)
+	return batch
+}
+
+func TestBatch_WriteRejectsMissingRequiredField(t *testing.T) {
+	batch := newGuardBatch(t)
+	defer batch.Cleanup()
+
+	err := batch.Write(map[string]any{"note": "no id"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `missing required field "id"`)
+}
+
+func TestBatch_WriteRejectsNilRequiredField(t *testing.T) {
+	// parquet-go writes a nil required field as the column's zero value, so key
+	// presence alone is not enough — the value has to be checked too. A typed nil
+	// pointer writes an empty value just the same, so it must be caught as well.
+	//
+	// One batch per case: the first rejection closes the batch, so a second Write
+	// on the same batch would only echo the first error.
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{"untyped_nil", nil},
+		{"typed_nil_pointer", (*int32)(nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			batch := newGuardBatch(t)
+			defer batch.Cleanup()
+
+			assert.Error(t, batch.Write(map[string]any{"id": tc.value, "note": "x"}))
+		})
+	}
+}
+
+func TestBatch_WriteAllowsMissingNullableField(t *testing.T) {
+	// Only non-optional fields are required; an omitted nullable field is null.
+	batch := newGuardBatch(t)
+	defer batch.Cleanup()
+
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	require.NoError(t, batch.Write(map[string]any{"id": int32(2), "note": nil}))
+}
+
+func TestBatch_RejectedRecordClosesTheBatch(t *testing.T) {
+	// A batch is all its records or none of them, matching the Python library:
+	// there, the guard raises out of the stage() context manager and nothing is
+	// uploaded. Without this, a caller that ignores the Write error produces a
+	// batch that looks complete but is missing rows, and nothing downstream can
+	// tell.
+	const topic = "test.sys--demo.guardbuffer--v1"
+	spy := &abortSpyS3{FakeS3Client: claimcheck.NewFakeS3Client()}
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(spy),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: guardSchema, version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
+	rejected := batch.Write(map[string]any{"note": "rejected"})
+	require.Error(t, rejected)
+
+	// Every later call reports the same failure, and Produce uploads nothing.
+	assert.Equal(t, rejected, batch.Write(map[string]any{"id": int32(2)}))
+
+	err = batch.Produce(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, rejected, "Produce reports the record that closed the batch")
+
+	assert.Nil(t, kw.last, "no envelope may reach Kafka")
+	assert.Equal(t, 1, spy.aborts, "the upload must be aborted")
+	assert.Empty(t, spy.Store, "no object may be left in the bucket")
+}
+
+// mismatchSchema has one int column, so writing a string into it is a type
+// mismatch parquet-go reports by panicking.
+const mismatchSchema = `{"type":"record","name":"M","fields":[{"name":"n","type":"long"}]}`
+
+func TestBatch_TypeMismatchReturnsErrorInsteadOfPanicking(t *testing.T) {
+	s3 := claimcheck.NewFakeS3Client()
+	w := claimcheck.NewTestWriter(&captureKW{}, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: mismatchSchema, version: 1, id: 1}),
+	)
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.mismatch--v1")
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	// The guard cannot catch this: the key is present and non-nil, only its type
+	// is wrong. parquet-go panics, and flushRowGroup turns that into an error.
+	require.NoError(t, batch.Write(map[string]any{"n": "not a number"}))
+
+	err = batch.Produce(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write parquet row group")
+	assert.Contains(t, err.Error(), "int64 column")
+}
+
+func TestBatch_TypeMismatchAtRowGroupBoundaryFailsWrite(t *testing.T) {
+	// flushRowGroup also runs from Write when a row group fills up, so the same
+	// panic has to surface as an error there.
+	s3 := claimcheck.NewFakeS3Client()
+	w := claimcheck.NewTestWriter(&captureKW{}, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: mismatchSchema, version: 1, id: 1}),
+		claimcheck.WithWriterRowGroupSize(1),
+	)
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.mismatchflush--v1")
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	err = batch.Write(map[string]any{"n": "not a number"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write parquet row group")
+}
+
+func TestBatch_FailedProduceAbortsMultipartUpload(t *testing.T) {
+	// Produce sets done before finalizing, so the caller's deferred Cleanup is a
+	// no-op by the time this fails. If Produce does not abort the upload itself,
+	// the multipart parts are orphaned — invisible in a bucket listing, and no
+	// lifecycle rule reclaims them.
+	spy := &abortSpyS3{FakeS3Client: claimcheck.NewFakeS3Client()}
+	w := claimcheck.NewTestWriter(&captureKW{}, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(spy),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: mismatchSchema, version: 1, id: 1}),
+	)
+	batch, err := w.NewBatch(context.Background(), "test.sys--demo.abort--v1")
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	require.NoError(t, batch.Write(map[string]any{"n": "not a number"}))
+	require.Error(t, batch.Produce(context.Background()))
+
+	assert.Equal(t, 1, spy.aborts, "the failed upload must be aborted")
+	assert.Zero(t, spy.completes)
+	assert.Empty(t, spy.Store, "no object may be left in the bucket")
+}
+
+func TestBatch_WriteDoesNotCheckStructs(t *testing.T) {
+	// A struct always carries every field, so there is nothing to check — and
+	// its zero value is not distinguishable from a deliberate one.
+	type G struct {
+		ID   int32   `parquet:"id"`
+		Note *string `parquet:"note,optional"`
+	}
+	batch := newGuardBatch(t)
+	defer batch.Cleanup()
+
+	require.NoError(t, batch.Write(G{}))
+}
+
 // TestPayloadReader_ReadAtDoesNotMoveSequentialPosition verifies that
 // ReadAt (used by parquet.OpenFile for the footer) does not disturb the
 // sequential read position, satisfying the io.ReaderAt contract.
