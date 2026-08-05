@@ -99,7 +99,10 @@ type abortSpyS3 struct {
 
 func (s *abortSpyS3) AbortMultipartUpload(ctx context.Context, bucket, key, uploadID string) error {
 	s.aborts++
-	return s.FakeS3Client.AbortMultipartUpload(ctx, bucket, key, uploadID)
+	if err := s.FakeS3Client.AbortMultipartUpload(ctx, bucket, key, uploadID); err != nil {
+		return fmt.Errorf("abort multipart upload: %w", err)
+	}
+	return nil
 }
 
 func (s *abortSpyS3) CompleteMultipartUpload(
@@ -108,7 +111,10 @@ func (s *abortSpyS3) CompleteMultipartUpload(
 	parts []claimcheck.CompletedPart,
 ) error {
 	s.completes++
-	return s.FakeS3Client.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts)
+	if err := s.FakeS3Client.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts); err != nil {
+		return fmt.Errorf("complete multipart upload: %w", err)
+	}
+	return nil
 }
 
 // bucketAndKey splits an s3://bucket/key URI into its two components.

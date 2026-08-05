@@ -373,7 +373,7 @@ func TestBatch_RejectedRecordClosesTheBatch(t *testing.T) {
 
 	err = batch.Produce(context.Background())
 	require.Error(t, err)
-	assert.ErrorIs(t, err, rejected, "Produce reports the record that closed the batch")
+	require.ErrorIs(t, err, rejected, "Produce reports the record that closed the batch")
 
 	assert.Nil(t, kw.last, "no envelope may reach Kafka")
 	assert.Equal(t, 1, spy.aborts, "the upload must be aborted")
