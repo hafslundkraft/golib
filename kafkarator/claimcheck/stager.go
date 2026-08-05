@@ -308,6 +308,9 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 // and by [Batch.Produce], which uploads nothing. Obtain a new batch via
 // [Writer.NewBatch] to start over.
 func (b *Batch) Write(record any) error {
+	if b.done {
+		return fmt.Errorf("claimcheck: batch already closed")
+	}
 	if b.failed != nil {
 		return b.failed
 	}
