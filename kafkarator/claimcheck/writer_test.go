@@ -292,8 +292,7 @@ func TestBatch_CleanupAfterProduceIsNoop(t *testing.T) {
 	require.NoError(t, batch.Produce(context.Background()))
 }
 
-// guardSchema has one required and one nullable field, mirroring the schema the
-// Python library's required-field guard is tested against.
+// guardSchema has one required and one nullable field.
 const guardSchema = `{"type":"record","name":"G","fields":[` +
 	`{"name":"id","type":"int"},` +
 	`{"name":"note","type":["null","string"]}]}`
@@ -321,12 +320,9 @@ func TestBatch_WriteRejectsMissingRequiredField(t *testing.T) {
 }
 
 func TestBatch_WriteRejectsNilRequiredField(t *testing.T) {
-	// parquet-go writes a nil required field as the column's zero value, so key
-	// presence alone is not enough — the value has to be checked too. A typed nil
-	// pointer writes an empty value just the same, so it must be caught as well.
-	//
-	// One batch per case: the first rejection closes the batch, so a second Write
-	// on the same batch would only echo the first error.
+	// Key presence alone is not enough: parquet-go writes a nil required field as
+	// the column's zero value, and a typed nil pointer the same. One batch per
+	// case — the first rejection closes the batch.
 	for _, tc := range []struct {
 		name  string
 		value any
@@ -353,11 +349,9 @@ func TestBatch_WriteAllowsMissingNullableField(t *testing.T) {
 }
 
 func TestBatch_RejectedRecordClosesTheBatch(t *testing.T) {
-	// A batch is all its records or none of them, matching the Python library:
-	// there, the guard raises out of the stage() context manager and nothing is
-	// uploaded. Without this, a caller that ignores the Write error produces a
-	// batch that looks complete but is missing rows, and nothing downstream can
-	// tell.
+	// All its records or none of them. Without this, a caller that ignores the
+	// Write error produces a batch that looks complete but is missing rows, and
+	// nothing downstream can tell.
 	const topic = "test.sys--demo.guardbuffer--v1"
 	spy := &abortSpyS3{FakeS3Client: claimcheck.NewFakeS3Client()}
 	kw := &captureKW{}

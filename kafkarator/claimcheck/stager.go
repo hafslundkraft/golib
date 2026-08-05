@@ -195,12 +195,9 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 }
 
 // requiredFields returns the names of the schema's top-level non-optional
-// fields — those whose Avro type is not a ["null", X] union. Optional fields may
-// be omitted and are written as null.
-//
-// A non-nullable array, map, or nested record counts as required: its key must
-// be present, though an empty collection satisfies that. Fields nested inside a
-// record are not checked, matching the Python library's top-level guard.
+// fields — those whose Avro type is not a ["null", X] union. A non-nullable
+// array, map, or record is included, so its key must be present even when the
+// collection is empty. Fields nested inside a record are not checked.
 func requiredFields(schema *parquet.Schema) []string {
 	names := make([]string, 0, len(schema.Fields()))
 	for _, f := range schema.Fields() {
@@ -242,9 +239,8 @@ type Batch struct {
 	done        bool
 	// required holds the schema's non-optional field names, checked by Write.
 	required []string
-	// failed holds the first error returned by Write. It poisons the batch so a
-	// caller that ignores that error cannot go on to produce a batch which is
-	// silently missing rows.
+	// failed holds the first error from Write. It poisons the batch so a caller
+	// that ignores that error cannot produce one that is silently missing rows.
 	failed error
 }
 
@@ -304,14 +300,13 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 
 // Write buffers one record into the batch.
 //
-// Records given as map[string]any are checked against the schema first: a
-// required field that is absent, or present but nil, is an error. Structs are
-// not checked — every field of a struct is present by construction.
+// A map[string]any is checked against the schema first: a required field that is
+// absent, or present but nil, is an error. Structs are not checked — every field
+// of a struct is present by construction.
 //
-// The first error closes the batch for good: it is returned by every later
-// Write and by [Batch.Produce], which uploads nothing. A rejected record can
-// therefore not be quietly skipped, leaving a batch that looks complete but is
-// missing rows. Obtain a new batch via [Writer.NewBatch] to start over.
+// The first error closes the batch for good, and is returned by every later Write
+// and by [Batch.Produce], which uploads nothing. Obtain a new batch via
+// [Writer.NewBatch] to start over.
 func (b *Batch) Write(record any) error {
 	if b.failed != nil {
 		return b.failed
@@ -331,11 +326,9 @@ func (b *Batch) Write(record any) error {
 }
 
 // checkRequired rejects maps that omit a required field, or set one to nil.
-// Without it such records reach S3 as zero values: the Parquet writer looks
-// each field up by name and substitutes the column's zero value when it finds
-// nothing, so "" and 0 become indistinguishable from real data on the read
-// side. The Avro schema is only used to build the writer, never to validate
-// rows, so this is the one place the omission can be caught.
+// Without it those records reach S3 as the column's zero value, where "" and 0
+// are indistinguishable from real data. The Avro schema only builds the writer
+// and never validates rows, so this is the one place to catch it.
 func (b *Batch) checkRequired(record any) error {
 	m, ok := record.(map[string]any)
 	if !ok {
