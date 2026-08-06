@@ -133,7 +133,8 @@ func (w *Writer) Close(ctx context.Context) error {
 // "{topic}-claim-check-payload".
 //
 // Records passed to [Batch.Write] can be any value whose fields map to that
-// schema — a concrete struct with parquet field tags, or a map[string]any.
+// schema — a concrete struct with parquet field tags, or a map[string]any. A
+// map is validated against the schema's required fields on every Write.
 //
 //	batch, err := w.NewBatch(ctx, topic)
 //	if err != nil { ... }
