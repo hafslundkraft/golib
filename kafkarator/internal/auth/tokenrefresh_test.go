@@ -190,7 +190,7 @@ func TestStartOAuthRefreshLoop_InitialError(t *testing.T) {
 	tr := &fakeTokenReceiver{}
 	tracer := sdktrace.NewTracerProvider().Tracer("test")
 
-	err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
+	_, err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
 	if err == nil {
 		t.Fatal("expected error from initial refresh, got nil")
 	}
@@ -211,10 +211,11 @@ func TestStartOAuthRefreshLoop_InitialSuccess(t *testing.T) {
 	tr := &fakeTokenReceiver{}
 	tracer := sdktrace.NewTracerProvider().Tracer("test")
 
-	err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
+	stop, err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer stop()
 
 	// StartOAuthRefreshLoop should call refreshOAuthToken once synchronously
 	if tp.calls != 1 {
@@ -222,5 +223,36 @@ func TestStartOAuthRefreshLoop_InitialSuccess(t *testing.T) {
 	}
 	if tr.setCalls != 1 {
 		t.Fatalf("expected 1 SetOAuthBearerToken call, got %d", tr.setCalls)
+	}
+}
+
+// stop must not deadlock, and must tolerate being called twice — Writer.Close
+// and Reader.Close both call it. The deadline catches a stop that never wakes
+// the loop, which would hang for the loop's full sleep of at least a minute.
+func TestStartOAuthRefreshLoop_StopReturnsAndIsIdempotent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tp := &fakeAccessTokenProvider{value: "tok"}
+	tr := &fakeTokenReceiver{}
+	tracer := sdktrace.NewTracerProvider().Tracer("test")
+
+	stop, err := StartOAuthRefreshLoop(ctx, tp, tr, tracer)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		stop()
+		// Documented as idempotent: a second call must neither block nor panic.
+		stop()
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not return; the refresh loop is still running")
 	}
 }

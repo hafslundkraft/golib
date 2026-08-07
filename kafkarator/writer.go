@@ -64,15 +64,19 @@ func defaultWriteOptions() *WriteOptions {
 	return &WriteOptions{}
 }
 
+// newWriter wraps an already-configured producer. stopAuth may be nil; see the
+// field on [Writer].
 func newWriter(
 	p *kafka.Producer,
 	pmc messagingconv.ClientSentMessages,
 	tel TelemetryProvider,
+	stopAuth func(),
 ) *Writer {
 	w := &Writer{
 		producer:                p,
 		producedMessagesCounter: pmc,
 		tel:                     tel,
+		stopAuth:                stopAuth,
 		done:                    make(chan struct{}),
 	}
 
@@ -93,6 +97,10 @@ type Writer struct {
 	producer                *kafka.Producer
 	tel                     TelemetryProvider
 	closed                  atomic.Bool
+
+	// stopAuth stops the OAuth token refresh goroutine feeding this writer's
+	// producer and waits for it to exit. Nil when not using SASL.
+	stopAuth func()
 
 	// pending tracks in-flight per-message delivery goroutines so Flush can wait
 	// for them to record their results before reporting.
@@ -115,6 +123,10 @@ type Writer struct {
 // producer. Any per-message goroutines still waiting for delivery reports are
 // unblocked and observe [ErrWriterClosed] on their delivery channel.
 //
+// ctx bounds only the flush. Close still waits for the OAuth refresh loop to
+// exit before destroying the producer; otherwise the loop could call into a
+// freed librdkafka handle.
+//
 // Close is idempotent. It must not be called concurrently with Write or Flush.
 func (w *Writer) Close(ctx context.Context) error {
 	// Best-effort flush of any in-flight messages before tearing down. We
@@ -129,8 +141,15 @@ func (w *Writer) Close(ctx context.Context) error {
 
 	// Signal per-message goroutines that are still blocked on their delivery
 	// channel to exit so they don't leak when librdkafka is torn down without
-	// sending the remaining delivery reports.
+	// sending the remaining delivery reports. Safe to do before stopAuth — this
+	// touches no Kafka handle — and doing it first means they are not held for
+	// the duration of a final token fetch.
 	close(w.done)
+
+	// Must happen before the producer is torn down.
+	if w.stopAuth != nil {
+		w.stopAuth()
+	}
 
 	w.producer.Close()
 
