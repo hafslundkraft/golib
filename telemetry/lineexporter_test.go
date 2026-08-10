@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	logsdk "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/log/logtest"
@@ -13,12 +14,11 @@ import (
 
 func newTestRecord() logsdk.Record {
 	return logtest.RecordFactory{
-		Timestamp:                 time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC),
-		Severity:                  log.SeverityInfo,
-		SeverityText:              "INFO",
-		Body:                      log.StringValue("hello"),
-		Attributes:                []log.KeyValue{log.String("app", "test")},
-		AttributeValueLengthLimit: -1,
+		Timestamp:    time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC),
+		Severity:     log.SeverityInfo,
+		SeverityText: "INFO",
+		Body:         attribute.StringValue("hello"),
+		Attributes:   []attribute.KeyValue{attribute.String("app", "test")},
 	}.NewRecord()
 }
 
