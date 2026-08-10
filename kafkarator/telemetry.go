@@ -123,14 +123,15 @@ func startProduceSpan(
 	srv serverInfo,
 ) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameSend, topic)
-	attrs := make([]attribute.KeyValue, 0, 4+len(srv.spanAttrs()))
+	srvAttrs := srv.spanAttrs()
+	attrs := make([]attribute.KeyValue, 0, 4+len(srvAttrs))
 	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingDestinationName(topic),
 		semconv.MessagingOperationName(MessagingOperationNameSend),
 		semconv.MessagingOperationTypeSend,
 	)
-	attrs = append(attrs, srv.spanAttrs()...)
+	attrs = append(attrs, srvAttrs...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindProducer),
 		trace.WithAttributes(attrs...),
@@ -148,7 +149,8 @@ func startPollSpan(
 	srv serverInfo,
 ) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNamePoll, topic)
-	attrs := make([]attribute.KeyValue, 0, 5+len(srv.spanAttrs()))
+	srvAttrs := srv.spanAttrs()
+	attrs := make([]attribute.KeyValue, 0, 5+len(srvAttrs))
 	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingDestinationName(topic),
@@ -156,7 +158,7 @@ func startPollSpan(
 		semconv.MessagingOperationName(MessagingOperationNamePoll),
 		semconv.MessagingOperationTypeReceive,
 	)
-	attrs = append(attrs, srv.spanAttrs()...)
+	attrs = append(attrs, srvAttrs...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
@@ -174,7 +176,8 @@ func startCommitSpan(
 	srv serverInfo,
 ) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", MessagingOperationNameCommit, topic)
-	attrs := make([]attribute.KeyValue, 0, 5+len(srv.spanAttrs()))
+	srvAttrs := srv.spanAttrs()
+	attrs := make([]attribute.KeyValue, 0, 5+len(srvAttrs))
 	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingDestinationName(topic),
@@ -182,7 +185,7 @@ func startCommitSpan(
 		semconv.MessagingOperationName(MessagingOperationNameCommit),
 		semconv.MessagingOperationTypeSettle,
 	)
-	attrs = append(attrs, srv.spanAttrs()...)
+	attrs = append(attrs, srvAttrs...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
