@@ -139,7 +139,7 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 		procStart := time.Now()
 		processErr := p.handler(msgCtx, &msgs[i])
 		p.recordProcess(
-			ctx,
+			msgCtx,
 			msgs[i].Topic,
 			fmt.Sprintf("%d", msgs[i].Partition),
 			time.Since(procStart).Seconds(),

@@ -118,13 +118,13 @@ func (rc *Reader) Read(
 	latestOffsets := map[int32]kafka.Offset{}
 
 	commit := CommitFunc(func(ctx context.Context) error {
-		_, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup, rc.srv)
+		commitCtx, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup, rc.srv)
 		defer span.End()
 
 		commitStart := time.Now()
 		var commitErr error
 		defer func() {
-			rc.recordCommitDuration(ctx, time.Since(commitStart).Seconds(), commitErr)
+			rc.recordCommitDuration(commitCtx, time.Since(commitStart).Seconds(), commitErr)
 			setSpanStatus(span, commitErr)
 		}()
 
