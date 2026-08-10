@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// DefaultMaxPollIntervalMs is the default value in milliseconds for
+// Config.MaxPollIntervalMs. Matches the librdkafka default and the value used
+// by hafslund.happi.py (5 minutes).
+const DefaultMaxPollIntervalMs = 300_000
+
 const (
 	// envBrokers is the environment variable for Kafka broker addresses (comma-separated)
 	envBroker = "KAFKA_BROKER"
@@ -120,6 +125,13 @@ type Config struct {
 
 	// WorkloadName is the name of the workload on the happi platform. Used for consumer group generation.
 	WorkloadName string
+
+	// MaxPollIntervalMs is the maximum time in milliseconds between consumer poll calls before
+	// the consumer is considered failed and removed from the group (librdkafka
+	// `max.poll.interval.ms`). Increase this when consumers do heavy per-message work (e.g.
+	// claim-check readers fetching large S3/Parquet payloads). If zero, DefaultMaxPollIntervalMs
+	// (300000 ms / 5 minutes) is used.
+	MaxPollIntervalMs int
 }
 
 // ConfigFromEnvVars loads and returns an instance with values that are fetched from environment variables defined
@@ -160,7 +172,9 @@ func ConfigFromEnvVars() (*Config, error) {
 	if err != nil {
 		return &Config{}, err
 	}
-	cfg.SchemaRegistryConfig = *srConfig
+	if srConfig != nil {
+		cfg.SchemaRegistryConfig = *srConfig
+	}
 
 	if authType == "sasl" {
 		saslConfig, err := getSASLConfig()
@@ -225,17 +239,19 @@ func getTLSConfig() (*TLSConfig, error) {
 func getSRConfig() (*SchemaRegistryConfig, error) {
 	srURL := os.Getenv(envSchemaRegistryURL)
 	if srURL == "" {
-		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envSchemaRegistryURL)
+		// Schema Registry is optional. When the URL is not set, callers get a
+		// Connection without a Schema Registry client (see connection.go).
+		return nil, nil
 	}
 
 	srUser := os.Getenv(envKafkaUser)
 	if srUser == "" {
-		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envKafkaUser)
+		return nil, fmt.Errorf("environment variable %s is not set", envKafkaUser)
 	}
 
 	srPassword := os.Getenv(envKafkaPassword)
 	if srPassword == "" {
-		return &SchemaRegistryConfig{}, fmt.Errorf("environment variable %s is not set", envKafkaPassword)
+		return nil, fmt.Errorf("environment variable %s is not set", envKafkaPassword)
 	}
 
 	return &SchemaRegistryConfig{
