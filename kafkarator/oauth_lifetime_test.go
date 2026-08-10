@@ -19,21 +19,11 @@ import (
 // reachable broker. Port 9 (discard) so a local Kafka is never picked up.
 const dummyBroker = "127.0.0.1:9"
 
+var dummyServer = parseServerInfo(dummyBroker)
+
 func TestWriterCloseStopsOAuthRefresh(t *testing.T) {
-	tel := newMockTelemetry()
-
-	counter, err := messagingconv.NewClientSentMessages(tel.Meter())
-	if err != nil {
-		t.Fatalf("create counter: %v", err)
-	}
-
-	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": dummyBroker})
-	if err != nil {
-		t.Fatalf("create producer: %v", err)
-	}
-
 	stopped := make(chan struct{})
-	w := newWriter(p, counter, tel, func() {
+	w := newTestWriter(t, func(p *kafka.Producer) {
 		// Order is the point: stopping after teardown is the use-after-free.
 		if p.IsClosed() {
 			t.Error("stopAuth ran after the producer was closed")
@@ -56,20 +46,8 @@ func TestWriterCloseStopsOAuthRefresh(t *testing.T) {
 }
 
 func TestWriterCloseStopsOAuthRefreshOnlyOnce(t *testing.T) {
-	tel := newMockTelemetry()
-
-	counter, err := messagingconv.NewClientSentMessages(tel.Meter())
-	if err != nil {
-		t.Fatalf("create counter: %v", err)
-	}
-
-	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": dummyBroker})
-	if err != nil {
-		t.Fatalf("create producer: %v", err)
-	}
-
 	calls := 0
-	w := newWriter(p, counter, tel, func() { calls++ })
+	w := newTestWriter(t, func(*kafka.Producer) { calls++ })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -89,19 +67,7 @@ func TestWriterCloseStopsOAuthRefreshOnlyOnce(t *testing.T) {
 
 // Without SASL there is no loop and stopAuth is nil; Close must not panic.
 func TestWriterCloseWithoutOAuthRefresh(t *testing.T) {
-	tel := newMockTelemetry()
-
-	counter, err := messagingconv.NewClientSentMessages(tel.Meter())
-	if err != nil {
-		t.Fatalf("create counter: %v", err)
-	}
-
-	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": dummyBroker})
-	if err != nil {
-		t.Fatalf("create producer: %v", err)
-	}
-
-	w := newWriter(p, counter, tel, nil)
+	w := newTestWriter(t, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -112,37 +78,14 @@ func TestWriterCloseWithoutOAuthRefresh(t *testing.T) {
 }
 
 func TestReaderCloseStopsOAuthRefresh(t *testing.T) {
-	tel := newMockTelemetry()
-
-	consumed, err := messagingconv.NewClientConsumedMessages(tel.Meter())
-	if err != nil {
-		t.Fatalf("create consumed counter: %v", err)
-	}
-	pollFailures, err := tel.Meter().Int64Counter(meterPollFailures)
-	if err != nil {
-		t.Fatalf("create poll failure counter: %v", err)
-	}
-
-	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": dummyBroker,
-		"group.id":          "oauth-lifetime-test",
-	})
-	if err != nil {
-		t.Fatalf("create consumer: %v", err)
-	}
-
 	stopped := make(chan struct{})
-	r := newReader(
-		c, consumed, pollFailures, tel,
-		"oauth-lifetime-topic", "oauth-lifetime-test",
-		func() {
-			// Order is the point; see the producer equivalent.
-			if c.IsClosed() {
-				t.Error("stopAuth ran after the consumer was closed")
-			}
-			close(stopped)
-		},
-	)
+	r := newTestReader(t, "oauth-lifetime-test", func(c *kafka.Consumer) {
+		// Order is the point; see the producer equivalent.
+		if c.IsClosed() {
+			t.Error("stopAuth ran after the consumer was closed")
+		}
+		close(stopped)
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -159,31 +102,8 @@ func TestReaderCloseStopsOAuthRefresh(t *testing.T) {
 }
 
 func TestReaderCloseStopsOAuthRefreshOnlyOnce(t *testing.T) {
-	tel := newMockTelemetry()
-
-	consumed, err := messagingconv.NewClientConsumedMessages(tel.Meter())
-	if err != nil {
-		t.Fatalf("create consumed counter: %v", err)
-	}
-	pollFailures, err := tel.Meter().Int64Counter(meterPollFailures)
-	if err != nil {
-		t.Fatalf("create poll failure counter: %v", err)
-	}
-
-	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": dummyBroker,
-		"group.id":          "oauth-lifetime-test-once",
-	})
-	if err != nil {
-		t.Fatalf("create consumer: %v", err)
-	}
-
 	calls := 0
-	r := newReader(
-		c, consumed, pollFailures, tel,
-		"oauth-lifetime-topic", "oauth-lifetime-test-once",
-		func() { calls++ },
-	)
+	r := newTestReader(t, "oauth-lifetime-test-once", func(*kafka.Consumer) { calls++ })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -202,30 +122,7 @@ func TestReaderCloseStopsOAuthRefreshOnlyOnce(t *testing.T) {
 }
 
 func TestReaderCloseWithoutOAuthRefresh(t *testing.T) {
-	tel := newMockTelemetry()
-
-	consumed, err := messagingconv.NewClientConsumedMessages(tel.Meter())
-	if err != nil {
-		t.Fatalf("create consumed counter: %v", err)
-	}
-	pollFailures, err := tel.Meter().Int64Counter(meterPollFailures)
-	if err != nil {
-		t.Fatalf("create poll failure counter: %v", err)
-	}
-
-	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": dummyBroker,
-		"group.id":          "oauth-lifetime-test-nil",
-	})
-	if err != nil {
-		t.Fatalf("create consumer: %v", err)
-	}
-
-	r := newReader(
-		c, consumed, pollFailures, tel,
-		"oauth-lifetime-topic", "oauth-lifetime-test-nil",
-		nil,
-	)
+	r := newTestReader(t, "oauth-lifetime-test-nil", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -366,4 +263,64 @@ func TestConnectionTestStopsOAuthRefreshLoop(t *testing.T) {
 	if got := refreshLoopCount(); got != before {
 		t.Errorf("refresh loop outlived Test: got %d goroutines, want %d", got, before)
 	}
+}
+
+// newTestWriter builds a Writer over a producer pointed at the dummy broker.
+// stopAuth stands in for the refresh loop's stop func and is handed the producer
+// so callers can assert on teardown order; a nil stopAuth is passed through as a
+// nil func, matching the no-SASL case.
+func newTestWriter(t *testing.T, stopAuth func(*kafka.Producer)) *Writer {
+	tel := newMockTelemetry()
+
+	counter, err := messagingconv.NewClientSentMessages(tel.Meter())
+	if err != nil {
+		t.Fatalf("create counter: %v", err)
+	}
+
+	opDur, err := messagingconv.NewClientOperationDuration(tel.Meter())
+	if err != nil {
+		t.Fatalf("create operation duration: %v", err)
+	}
+
+	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": dummyBroker})
+	if err != nil {
+		t.Fatalf("create producer: %v", err)
+	}
+
+	var stop func()
+	if stopAuth != nil {
+		stop = func() { stopAuth(p) }
+	}
+
+	return newWriter(p, counter, opDur, dummyServer, tel, stop)
+}
+
+// newTestReader is the consumer-side equivalent of [newTestWriter].
+func newTestReader(t *testing.T, group string, stopAuth func(*kafka.Consumer)) *Reader {
+	tel := newMockTelemetry()
+
+	consumed, err := messagingconv.NewClientConsumedMessages(tel.Meter())
+	if err != nil {
+		t.Fatalf("create consumed counter: %v", err)
+	}
+
+	opDur, err := messagingconv.NewClientOperationDuration(tel.Meter())
+	if err != nil {
+		t.Fatalf("create operation duration: %v", err)
+	}
+
+	c, err := kafka.NewConsumer(&kafka.ConfigMap{
+		"bootstrap.servers": dummyBroker,
+		"group.id":          group,
+	})
+	if err != nil {
+		t.Fatalf("create consumer: %v", err)
+	}
+
+	var stop func()
+	if stopAuth != nil {
+		stop = func() { stopAuth(c) }
+	}
+
+	return newReader(c, consumed, opDur, dummyServer, tel, "oauth-lifetime-topic", group, stop)
 }
