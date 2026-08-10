@@ -20,4 +20,4 @@ lint-fix:
 fmt:
 	$(MODEXEC) golangci-lint fmt --config=$(PWD)/.golangci.toml ./... \;
 
-.PHONY: all test test-coverage lint vet fmt
+.PHONY: all test test-coverage lint lint-fix vet fmt
