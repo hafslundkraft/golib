@@ -339,7 +339,16 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		return nil, fmt.Errorf("create operation duration histogram: %w", err)
 	}
 
-	return newReader(consumer, counter, opDuration, parseServerInfo(c.config.Broker), c.tel, topic, group, stopAuth), nil
+	return newReader(
+		consumer,
+		counter,
+		opDuration,
+		parseServerInfo(c.config.Broker),
+		c.tel,
+		topic,
+		group,
+		stopAuth,
+	), nil
 }
 
 // Processor returns a processor that automatically handles trace propagation and span management

@@ -19,8 +19,6 @@ import (
 // reachable broker. Port 9 (discard) so a local Kafka is never picked up.
 const dummyBroker = "127.0.0.1:9"
 
-var dummyServer = parseServerInfo(dummyBroker)
-
 func TestWriterCloseStopsOAuthRefresh(t *testing.T) {
 	stopped := make(chan struct{})
 	w := newTestWriter(t, func(p *kafka.Producer) {
@@ -270,6 +268,7 @@ func TestConnectionTestStopsOAuthRefreshLoop(t *testing.T) {
 // so callers can assert on teardown order; a nil stopAuth is passed through as a
 // nil func, matching the no-SASL case.
 func newTestWriter(t *testing.T, stopAuth func(*kafka.Producer)) *Writer {
+	t.Helper()
 	tel := newMockTelemetry()
 
 	counter, err := messagingconv.NewClientSentMessages(tel.Meter())
@@ -292,11 +291,14 @@ func newTestWriter(t *testing.T, stopAuth func(*kafka.Producer)) *Writer {
 		stop = func() { stopAuth(p) }
 	}
 
+	dummyServer := parseServerInfo(dummyBroker)
+
 	return newWriter(p, counter, opDur, dummyServer, tel, stop)
 }
 
 // newTestReader is the consumer-side equivalent of [newTestWriter].
 func newTestReader(t *testing.T, group string, stopAuth func(*kafka.Consumer)) *Reader {
+	t.Helper()
 	tel := newMockTelemetry()
 
 	consumed, err := messagingconv.NewClientConsumedMessages(tel.Meter())
@@ -321,6 +323,8 @@ func newTestReader(t *testing.T, group string, stopAuth func(*kafka.Consumer)) *
 	if stopAuth != nil {
 		stop = func() { stopAuth(c) }
 	}
+
+	dummyServer := parseServerInfo(dummyBroker)
 
 	return newReader(c, consumed, opDur, dummyServer, tel, "oauth-lifetime-topic", group, stop)
 }
