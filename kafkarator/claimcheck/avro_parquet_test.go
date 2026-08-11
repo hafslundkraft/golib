@@ -143,9 +143,13 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 			"TIME(isAdjustedToUTC=true,unit=MICROS)",
 		},
 		{
+			// Avro uuid annotates an RFC-4122 string, so it stays UTF-8 rather
+			// than becoming Parquet's FIXED_LEN_BYTE_ARRAY(16) UUID. This keeps
+			// the Snowflake column TEXT, matching the Kafka Connector path and
+			// the Python claim-check library. See TestAvroParquet_UUIDIsUTF8.
 			"uuid",
 			`{"type":"string","logicalType":"uuid"}`,
-			"UUID",
+			"STRING",
 		},
 	}
 
@@ -163,6 +167,71 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "decimal")
 	})
+}
+
+// TestAvroParquet_UUIDIsUTF8 pins the *physical* type of a uuid column, which is
+// what decides the warehouse column type. The Python claim-check library maps
+// uuid to a UTF-8 string, and Snowflake's Kafka Connector creates TEXT columns
+// for uuid fields, so a claim-check payload must not produce a fixed-length byte
+// array instead — that would land as BINARY and make the same Avro field get a
+// different Snowflake type depending on the data product's transport mode.
+func TestAvroParquet_UUIDIsUTF8(t *testing.T) {
+	schema := mustBuildSchema(t, avroRecord(
+		avroField("foi", `{"type":"string","logicalType":"uuid"}`),
+	))
+	f := findField(t, schema, "foi")
+
+	assert.Equal(t, parquet.ByteArray, f.Type().Kind(),
+		"uuid must stay a variable-length byte array; FixedLenByteArray lands as BINARY in Snowflake")
+	assert.Equal(t, 0, f.Type().Length(),
+		"uuid must be variable-length (0); a fixed length of 16 means Parquet UUID")
+	assert.Equal(t, "STRING", f.Type().String())
+}
+
+// TestAvroParquet_LogicalTypesMatchPython pins the physical Parquet type for
+// every Avro logicalType present in the information_architecture schemas, so the
+// Go and Python converters cannot drift apart again. The expectations mirror what
+// hafslund.happi.py's claim_check/_avro_arrow.py produces:
+//
+//	timestamp-millis → INT64  TIMESTAMP(isAdjustedToUTC=true, MILLIS)
+//	date             → INT32  DATE
+//	uuid             → BYTE_ARRAY STRING
+//	decimal          → unsupported in both (see the subtest above)
+func TestAvroParquet_LogicalTypesMatchPython(t *testing.T) {
+	tests := []struct {
+		name      string
+		avroType  string
+		wantKind  parquet.Kind
+		wantLogic string
+	}{
+		{
+			"timestamp_millis",
+			`{"type":"long","logicalType":"timestamp-millis"}`,
+			parquet.Int64,
+			"TIMESTAMP(isAdjustedToUTC=true,unit=MILLIS)",
+		},
+		{
+			"date",
+			`{"type":"int","logicalType":"date"}`,
+			parquet.Int32,
+			"DATE",
+		},
+		{
+			"uuid",
+			`{"type":"string","logicalType":"uuid"}`,
+			parquet.ByteArray,
+			"STRING",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := mustBuildSchema(t, avroRecord(avroField("f", tc.avroType)))
+			f := findField(t, schema, "f")
+			assert.Equal(t, tc.wantKind, f.Type().Kind())
+			assert.Equal(t, tc.wantLogic, f.Type().String())
+		})
+	}
 
 	t.Run("unknown_logical_type_name_in_error", func(t *testing.T) {
 		avroType := `{"type":"int","logicalType":"custom-type"}`
