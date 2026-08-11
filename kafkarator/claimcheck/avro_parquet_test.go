@@ -177,6 +177,7 @@ func TestAvroParquet_UUIDPhysicalType(t *testing.T) {
 	assert.Equal(t, 0, f.Type().Length(),
 		"uuid must be variable-length; a fixed length of 16 means Parquet UUID")
 }
+
 func TestAvroParquet_ComplexTypes(t *testing.T) {
 	t.Run("nested_record", func(t *testing.T) {
 		inner := `{"type":"record","name":"Inner","fields":[` +
