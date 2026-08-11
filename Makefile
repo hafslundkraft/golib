@@ -14,7 +14,10 @@ vet:
 lint:
 	$(MODEXEC) golangci-lint run --config=$(PWD)/.golangci.toml ./... \;
 
+lint-fix:
+	$(MODEXEC) golangci-lint run --fix --config=$(PWD)/.golangci.toml ./... \;
+
 fmt:
 	$(MODEXEC) golangci-lint fmt --config=$(PWD)/.golangci.toml ./... \;
 
-.PHONY: all test test-coverage lint vet fmt
+.PHONY: all test test-coverage lint lint-fix vet fmt

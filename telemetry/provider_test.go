@@ -107,9 +107,12 @@ func TestProvider_withLocalWriter(t *testing.T) {
 func TestProvider_withEndpoint(t *testing.T) {
 	ctx := t.Context()
 
-	gotPaths := sync.Map{}
+	var mu sync.Mutex
+	var gotPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPaths.Store(r.URL.Path, true)
+		mu.Lock()
+		gotPaths = append(gotPaths, r.URL.Path)
+		mu.Unlock()
 		// An empty 200 body is a valid (empty) OTLP export response.
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -117,8 +120,9 @@ func TestProvider_withEndpoint(t *testing.T) {
 
 	// WithEndpoint overrides the OTLP endpoint for all signals, so the OTLP
 	// exporters should send to the test server rather than the default one
-	// derived from OTEL_EXPORTER_OTLP_ENDPOINT.
-	tel, shutdown := New(ctx, WithEndpoint(srv.URL))
+	// derived from OTEL_EXPORTER_OTLP_ENDPOINT. Every signal goes to its own
+	// default path on that host.
+	tel, shutdown := New(ctx, WithEndpoint(srv.Listener.Addr().String()), WithInsecure())
 	require.NotNil(t, tel)
 
 	_, span := tel.Tracer().Start(ctx, "test")
@@ -128,16 +132,16 @@ func TestProvider_withEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	counter.Add(ctx, 42)
 
-	// Shutdown flushes the batched span processor and the periodic metric
-	// reader, forcing the exports to the overridden endpoint.
+	tel.Logger().InfoContext(ctx, "test-line")
+
+	// Shutdown flushes the batched log and span processors and the periodic
+	// metric reader, forcing the exports to the overridden endpoint.
 	require.NoError(t, shutdown(ctx))
 
-	tp, found := gotPaths.Load("/v1/traces")
-	require.True(t, found, "expected /v1/traces to be a key in the map")
-	require.True(t, tp.(bool), "expected trace export to hit the overridden endpoint")
-	mp, found := gotPaths.Load("/v1/metrics")
-	require.True(t, found, "expected /v1/metrics to be a key in the map")
-	require.True(t, mp.(bool), "expected metric export to hit the overridden endpoint")
+	mu.Lock()
+	defer mu.Unlock()
+	require.ElementsMatch(t, []string{"/v1/traces", "/v1/metrics", "/v1/logs"}, gotPaths,
+		"expected every signal to be exported to its default path on the overridden endpoint")
 }
 
 func TestProvider_withHTTPClient(t *testing.T) {
@@ -154,7 +158,7 @@ func TestProvider_withHTTPClient(t *testing.T) {
 	rt := &countingRoundTripper{next: http.DefaultTransport}
 	client := &http.Client{Transport: rt}
 
-	tel, shutdown := New(ctx, WithEndpoint(srv.URL), WithHTTPClient(client))
+	tel, shutdown := New(ctx, WithEndpoint(srv.Listener.Addr().String()), WithInsecure(), WithHTTPClient(client))
 	require.NotNil(t, tel)
 
 	_, span := tel.Tracer().Start(ctx, "test")

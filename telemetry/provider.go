@@ -49,6 +49,7 @@ type config struct {
 	testIDGen   bool
 	minSeverity minsev.Severitier
 	endpoint    string
+	insecure    bool
 	httpClient  *http.Client
 }
 
@@ -200,7 +201,10 @@ func newPropagator() propagation.TextMapPropagator {
 func newTracerProvider(ctx context.Context, cfg *config) *tracesdk.TracerProvider {
 	var otlpOpts []otlptracehttp.Option
 	if cfg.endpoint != "" {
-		otlpOpts = append(otlpOpts, otlptracehttp.WithEndpointURL(cfg.endpoint))
+		otlpOpts = append(otlpOpts, otlptracehttp.WithEndpoint(cfg.endpoint))
+	}
+	if cfg.insecure {
+		otlpOpts = append(otlpOpts, otlptracehttp.WithInsecure())
 	}
 	if cfg.httpClient != nil {
 		otlpOpts = append(otlpOpts, otlptracehttp.WithHTTPClient(cfg.httpClient))
@@ -226,7 +230,10 @@ func newTracerProvider(ctx context.Context, cfg *config) *tracesdk.TracerProvide
 func newMeterProvider(ctx context.Context, cfg *config) *metricsdk.MeterProvider {
 	var otlpOpts []otlpmetrichttp.Option
 	if cfg.endpoint != "" {
-		otlpOpts = append(otlpOpts, otlpmetrichttp.WithEndpointURL(cfg.endpoint))
+		otlpOpts = append(otlpOpts, otlpmetrichttp.WithEndpoint(cfg.endpoint))
+	}
+	if cfg.insecure {
+		otlpOpts = append(otlpOpts, otlpmetrichttp.WithInsecure())
 	}
 	if cfg.httpClient != nil {
 		otlpOpts = append(otlpOpts, otlpmetrichttp.WithHTTPClient(cfg.httpClient))
@@ -254,7 +261,10 @@ func newLoggerProvider(ctx context.Context, cfg *config) *logsdk.LoggerProvider 
 	} else {
 		var otlpOpts []otlploghttp.Option
 		if cfg.endpoint != "" {
-			otlpOpts = append(otlpOpts, otlploghttp.WithEndpointURL(cfg.endpoint))
+			otlpOpts = append(otlpOpts, otlploghttp.WithEndpoint(cfg.endpoint))
+		}
+		if cfg.insecure {
+			otlpOpts = append(otlpOpts, otlploghttp.WithInsecure())
 		}
 		if cfg.httpClient != nil {
 			otlpOpts = append(otlpOpts, otlploghttp.WithHTTPClient(cfg.httpClient))

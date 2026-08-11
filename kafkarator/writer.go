@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
@@ -69,12 +68,16 @@ func defaultWriteOptions() *WriteOptions {
 func newWriter(
 	p *kafka.Producer,
 	pmc messagingconv.ClientSentMessages,
+	opDur messagingconv.ClientOperationDuration,
+	srv serverInfo,
 	tel TelemetryProvider,
 	stopAuth func(),
 ) *Writer {
 	w := &Writer{
 		producer:                p,
 		producedMessagesCounter: pmc,
+		operationDuration:       opDur,
+		srv:                     srv,
 		tel:                     tel,
 		stopAuth:                stopAuth,
 		done:                    make(chan struct{}),
@@ -94,6 +97,8 @@ func newWriter(
 // goroutines), wait for them all to return, then Flush or Close.
 type Writer struct {
 	producedMessagesCounter messagingconv.ClientSentMessages
+	operationDuration       messagingconv.ClientOperationDuration
+	srv                     serverInfo
 	producer                *kafka.Producer
 	tel                     TelemetryProvider
 	closed                  atomic.Bool
@@ -271,17 +276,16 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 		return fmt.Errorf("message topic cannot be empty")
 	}
 
-	ctx, span := startProduceSpan(ctx, w.tel.Tracer(), message.Topic)
+	ctx, span := startProduceSpan(ctx, w.tel.Tracer(), message.Topic, w.srv)
+	sendStart := time.Now()
 
 	if w.closed.Load() {
 		err := fmt.Errorf("writer is closed")
-		setProducerError(span, err)
+		setSpanStatus(span, err)
+		w.recordSendDuration(ctx, message.Topic, "", sendStart, err)
+		w.recordSent(ctx, message.Topic, "", err)
 		span.End()
 		return err
-	}
-
-	if message.Key != nil {
-		span.SetAttributes(semconv.MessagingKafkaMessageKey(string(message.Key)))
 	}
 
 	traceHeaders := injectTraceContext(ctx, message.Headers)
@@ -305,7 +309,9 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 
 	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
-		setProducerError(span, err)
+		setSpanStatus(span, err)
+		w.recordSendDuration(ctx, message.Topic, "", sendStart, err)
+		w.recordSent(ctx, message.Topic, "", err)
 		span.End()
 		return fmt.Errorf("produce message: %w", err)
 	}
@@ -333,7 +339,9 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 
 		m := ev.(*kafka.Message)
 		partitionID := fmt.Sprintf("%d", m.TopicPartition.Partition)
-		defer recordSentMessage(ctx, w.producedMessagesCounter, message.Topic, partitionID, m.TopicPartition.Error)
+		defer w.recordSent(ctx, message.Topic, partitionID, m.TopicPartition.Error)
+		defer w.recordSendDuration(ctx, message.Topic, partitionID, sendStart, m.TopicPartition.Error)
+		defer setSpanStatus(span, m.TopicPartition.Error)
 
 		if writeOpts.DeliveryChannel != nil {
 			defer func() {
@@ -346,8 +354,6 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 		}
 
 		if m.TopicPartition.Error != nil {
-			setProducerError(span, m.TopicPartition.Error)
-
 			w.deliveryErrsMu.Lock()
 			if w.firstDeliveryErr == nil {
 				w.firstDeliveryErr = m.TopicPartition.Error
@@ -358,8 +364,31 @@ func (w *Writer) Write(ctx context.Context, message *Message, opts ...WriteOptio
 			return
 		}
 
-		setProducerSuccess(span, partitionID, int64(m.TopicPartition.Offset))
+		setProducerSpanAttrs(span, partitionID, int64(m.TopicPartition.Offset))
 	})
 
 	return nil
+}
+
+// recordSendDuration records messaging.client.operation.duration for a send
+// operation (initiation → delivery report, or a synchronous failure).
+func (w *Writer) recordSendDuration(ctx context.Context, topic, partition string, start time.Time, err error) {
+	recordOperationDuration(
+		ctx,
+		w.operationDuration,
+		MessagingOperationNameSend,
+		messagingconv.OperationTypeSend,
+		topic,
+		"",
+		partition,
+		w.srv,
+		time.Since(start).Seconds(),
+		err,
+	)
+}
+
+// recordSent records one messaging.client.sent.messages for a delivered (or
+// failed) message.
+func (w *Writer) recordSent(ctx context.Context, topic, partition string, err error) {
+	recordSentMessage(ctx, w.producedMessagesCounter, topic, partition, w.srv, err)
 }
