@@ -220,7 +220,7 @@ func (l *LineLogExporter) Export(ctx context.Context, records []logsdk.Record) e
 			severityText,
 			record.Body().AsString(),
 		)
-		record.WalkAttributes(func(kv log.KeyValue) bool {
+		record.WalkAttributes(func(kv attribute.KeyValue) bool {
 			line = fmt.Sprintf("%s %s=%q", line, kv.Key, kv.Value)
 			return true
 		})

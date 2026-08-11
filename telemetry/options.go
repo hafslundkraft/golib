@@ -53,11 +53,22 @@ func WithTestIDGenerator() OptionFunc {
 
 // WithEndpoint overrides the OTLP endpoint that telemetry data is exported to.
 // By default the endpoint is read from the OTEL_EXPORTER_OTLP_ENDPOINT
-// environment variable (and the per-signal variants). The value must be a full
-// URL, e.g. "https://otel.example.com:4318". This has no effect in local mode.
+// environment variable (and the per-signal variants). The value is a host with
+// an optional port, without scheme or path, e.g. "otel.example.com:4318". Each
+// signal is exported to its own default path on that host ("/v1/traces",
+// "/v1/metrics" and "/v1/logs"). Exports use TLS unless WithInsecure is set.
+// This has no effect in local mode.
 func WithEndpoint(endpoint string) OptionFunc {
 	return func(c *config) {
 		c.endpoint = endpoint
+	}
+}
+
+// WithInsecure exports telemetry over HTTP instead of HTTPS, e.g. to a
+// collector reached over the cluster network. This has no effect in local mode.
+func WithInsecure() OptionFunc {
+	return func(c *config) {
+		c.insecure = true
 	}
 }
 
