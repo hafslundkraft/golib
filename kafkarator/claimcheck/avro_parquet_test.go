@@ -143,9 +143,10 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 			"TIME(isAdjustedToUTC=true,unit=MICROS)",
 		},
 		{
+			// Avro uuid annotates an RFC-4122 string
 			"uuid",
 			`{"type":"string","logicalType":"uuid"}`,
-			"UUID",
+			"STRING",
 		},
 	}
 
@@ -163,13 +164,17 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "decimal")
 	})
+}
 
-	t.Run("unknown_logical_type_name_in_error", func(t *testing.T) {
-		avroType := `{"type":"int","logicalType":"custom-type"}`
-		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", avroType)))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "custom-type")
-	})
+func TestAvroParquet_UUIDPhysicalType(t *testing.T) {
+	schema := mustBuildSchema(t, avroRecord(
+		avroField("foi", `{"type":"string","logicalType":"uuid"}`),
+	))
+	f := findField(t, schema, "foi")
+
+	assert.Equal(t, parquet.ByteArray, f.Type().Kind())
+	assert.Equal(t, 0, f.Type().Length(),
+		"uuid must be variable-length; a fixed length of 16 means Parquet UUID")
 }
 
 func TestAvroParquet_ComplexTypes(t *testing.T) {

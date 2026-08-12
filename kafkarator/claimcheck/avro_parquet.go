@@ -15,7 +15,7 @@ import (
 //
 //	Primitives : boolean, int, long, float, double, bytes, string
 //	Logical    : timestamp-millis/micros, local-timestamp-millis/micros,
-//	             date, time-millis/micros, uuid
+//	             date, time-millis/micros, uuid (→ UTF-8 string)
 //	record     : → nested Group
 //	array      : → parquet.List
 //	map        : → parquet.Map (string keys)
@@ -208,7 +208,7 @@ func avroLogicalToNode(logical string) (parquet.Node, error) {
 	case "time-micros":
 		return parquet.Time(parquet.Microsecond), nil
 	case "uuid":
-		return parquet.UUID(), nil
+		return parquet.String(), nil
 	default:
 		return nil, fmt.Errorf("unsupported avro logicalType: %q", logical)
 	}
