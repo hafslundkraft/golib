@@ -143,8 +143,7 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 			"TIME(isAdjustedToUTC=true,unit=MICROS)",
 		},
 		{
-			// Avro uuid annotates an RFC-4122 string, so it stays UTF-8 rather
-			// than becoming Parquet's FIXED_LEN_BYTE_ARRAY(16) UUID.
+			// Avro uuid annotates an RFC-4122 string
 			"uuid",
 			`{"type":"string","logicalType":"uuid"}`,
 			"STRING",
