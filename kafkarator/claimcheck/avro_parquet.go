@@ -208,8 +208,6 @@ func avroLogicalToNode(logical string) (parquet.Node, error) {
 	case "time-micros":
 		return parquet.Time(parquet.Microsecond), nil
 	case "uuid":
-		// Avro's uuid logical type annotates a string holding an RFC-4122 value,
-		// so UTF-8 is the faithful representation.
 		return parquet.String(), nil
 	default:
 		return nil, fmt.Errorf("unsupported avro logicalType: %q", logical)
