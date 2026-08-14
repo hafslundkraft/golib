@@ -250,7 +250,7 @@ func checkElements(value any, required bool, checker valueChecker) error {
 	if checker == nil && !canBeNil(items.Type().Elem()) {
 		return nil
 	}
-	for i := range items.Len() {
+	for i := 0; i < items.Len(); i++ {
 		item := items.Index(i).Interface()
 		if isNil(item) {
 			if required {
