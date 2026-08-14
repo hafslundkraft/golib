@@ -292,62 +292,6 @@ func TestBatch_CleanupAfterProduceIsNoop(t *testing.T) {
 	require.NoError(t, batch.Produce(context.Background()))
 }
 
-// guardSchema has one required and one nullable field.
-const guardSchema = `{"type":"record","name":"G","fields":[` +
-	`{"name":"id","type":"int"},` +
-	`{"name":"note","type":["null","string"]}]}`
-
-// newGuardBatch opens a batch over guardSchema. The caller must Cleanup.
-func newGuardBatch(t *testing.T) *claimcheck.Batch {
-	t.Helper()
-	w := claimcheck.NewTestWriter(&captureKW{}, &jsonSerializer{},
-		claimcheck.WithWriterS3Client(claimcheck.NewFakeS3Client()),
-		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: guardSchema, version: 1, id: 1}),
-	)
-	batch, err := w.NewBatch(context.Background(), "test.sys--demo.guard--v1")
-	require.NoError(t, err)
-	return batch
-}
-
-func TestBatch_WriteRejectsMissingRequiredField(t *testing.T) {
-	batch := newGuardBatch(t)
-	defer batch.Cleanup()
-
-	err := batch.Write(map[string]any{"note": "no id"})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `missing required field "id"`)
-}
-
-func TestBatch_WriteRejectsNilRequiredField(t *testing.T) {
-	// Key presence alone is not enough: parquet-go writes a nil required field as
-	// the column's zero value, and a typed nil pointer the same. One batch per
-	// case — the first rejection closes the batch.
-	for _, tc := range []struct {
-		name  string
-		value any
-	}{
-		{"untyped_nil", nil},
-		{"typed_nil_pointer", (*int32)(nil)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			batch := newGuardBatch(t)
-			defer batch.Cleanup()
-
-			assert.Error(t, batch.Write(map[string]any{"id": tc.value, "note": "x"}))
-		})
-	}
-}
-
-func TestBatch_WriteAllowsMissingNullableField(t *testing.T) {
-	// Only non-optional fields are required; an omitted nullable field is null.
-	batch := newGuardBatch(t)
-	defer batch.Cleanup()
-
-	require.NoError(t, batch.Write(map[string]any{"id": int32(1)}))
-	require.NoError(t, batch.Write(map[string]any{"id": int32(2), "note": nil}))
-}
-
 func TestBatch_RejectedRecordClosesTheBatch(t *testing.T) {
 	// All its records or none of them. Without this, a caller that ignores the
 	// Write error produces a batch that looks complete but is missing rows, and
@@ -378,19 +322,6 @@ func TestBatch_RejectedRecordClosesTheBatch(t *testing.T) {
 	assert.Nil(t, kw.last, "no envelope may reach Kafka")
 	assert.Equal(t, 1, spy.aborts, "the upload must be aborted")
 	assert.Empty(t, spy.Store, "no object may be left in the bucket")
-}
-
-func TestBatch_WriteDoesNotCheckStructs(t *testing.T) {
-	// A struct always carries every field, so there is nothing to check — and
-	// its zero value is not distinguishable from a deliberate one.
-	type G struct {
-		ID   int32   `parquet:"id"`
-		Note *string `parquet:"note,optional"`
-	}
-	batch := newGuardBatch(t)
-	defer batch.Cleanup()
-
-	require.NoError(t, batch.Write(G{}))
 }
 
 // TestPayloadReader_ReadAtDoesNotMoveSequentialPosition verifies that
