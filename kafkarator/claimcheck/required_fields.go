@@ -10,20 +10,22 @@ import (
 	parquet "github.com/parquet-go/parquet-go"
 )
 
-// Required-field validation for records written to a claim-check batch.
+// ErrRequiredField reports a record that omits a required schema field, or sets
+// one to nil, at any depth. Such a record cannot be written as it stands:
+// parquet-go writes a nil in a required column as the column's zero value, where
+// "" and 0 are indistinguishable from real data, and a nil inside a required
+// array corrupts the page it lands in, so the file reads back short a value and
+// other Parquet readers reject it outright.
 //
-// Every non-optional field must be present and not nil, at any depth. parquet-go
-// validates nothing: a nil in a required column is written as the column's zero
-// value, where "" and 0 are indistinguishable from real data, and a nil inside a
-// required array corrupts the page it lands in — the file then reads back short
-// a value, and other Parquet readers reject it outright.
-//
-// Checks are compiled per schema rather than derived per value, because reading
-// a node's type and fields allocates.
+// Match it with errors.Is to tell a malformed record apart from an
+// infrastructure failure: a batch poisoned by this error will fail the same way
+// for every later record, so retrying it cannot help.
+var ErrRequiredField = errors.New("claimcheck: required field")
 
-// checkRequired rejects a record that omits a required field, or sets one to
-// nil, anywhere in the schema. The Avro schema only builds the writer and never
-// validates rows, so this is the one place to catch it.
+// checkRequired applies the schema's compiled checks to one record, returning
+// [ErrRequiredField] for the first breach it finds. Neither the Avro schema,
+// which only builds the writer, nor parquet-go itself validates rows, so this is
+// the one place to catch it.
 func (b *Batch) checkRequired(record any) error {
 	return checkMembers(record, b.checks)
 }
@@ -69,6 +71,12 @@ func (e *requiredFieldError) Error() string {
 	return fmt.Sprintf("claimcheck: required field %q is nil", e.path())
 }
 
+// Is reports the error as [ErrRequiredField], so callers can match the class
+// without the type being exported.
+func (e *requiredFieldError) Is(target error) bool {
+	return target == ErrRequiredField
+}
+
 func (e *requiredFieldError) push(segment pathSegment) {
 	e.segments = append(e.segments, segment)
 }
@@ -101,7 +109,9 @@ func extend(err error, segment pathSegment) error {
 	return err
 }
 
-// compileSchema builds the checks for a schema's top-level fields.
+// compileSchema builds the checks for a schema's top-level fields, once per
+// batch. Compiling beats deriving the checks per value, because reading a node's
+// type and fields allocates.
 func compileSchema(schema *parquet.Schema) []fieldCheck {
 	return compileMembers(schema.Fields())
 }
@@ -163,7 +173,7 @@ func compileArray(node parquet.Node) valueChecker {
 	if check == nil {
 		return nil
 	}
-	return func(value any) error { return checkElements(value, check.required, check.checker) }
+	return func(value any) error { return checkElements(value, *check) }
 }
 
 func compileMap(node parquet.Node) valueChecker {
@@ -175,11 +185,13 @@ func compileMap(node parquet.Node) valueChecker {
 	if check == nil {
 		return nil
 	}
-	return func(v any) error { return checkMapValues(v, check.required, check.checker) }
+	return func(v any) error { return checkMapValues(v, *check) }
 }
 
 // listElement returns the element node of a LIST group — the single field of its
-// single repeated field — or nil if the group is not shaped that way.
+// single repeated field — or nil if the group is not shaped that way, which
+// disables checking below it. avro_parquet.go builds every list with
+// parquet.List, so an unexpected shape means the schema did not come from there.
 func listElement(node parquet.Node) parquet.Node {
 	repeated := node.Fields()
 	if len(repeated) != 1 {
@@ -193,7 +205,8 @@ func listElement(node parquet.Node) parquet.Node {
 }
 
 // mapValue returns the value node of a MAP group — the second field of its
-// single repeated key_value field — or nil if the group is not shaped that way.
+// single repeated key_value field — or nil if the group is not shaped that way,
+// which disables checking below it, as in [listElement].
 func mapValue(node parquet.Node) parquet.Node {
 	repeated := node.Fields()
 	if len(repeated) != 1 {
@@ -208,7 +221,9 @@ func mapValue(node parquet.Node) parquet.Node {
 
 // checkMembers validates the named members of a map[string]any — a record, or a
 // struct in the schema. Any other Go value is left alone, parquet-go reporting a
-// shape that contradicts the schema better than this could.
+// shape that contradicts the schema better than this could. That holds at every
+// depth, not only at the top level: a nested record supplied as a struct, or as
+// a map of any type other than map[string]any, goes unchecked.
 func checkMembers(value any, members []fieldCheck) error {
 	record, ok := value.(map[string]any)
 	if !ok {
@@ -241,58 +256,64 @@ func checkMembers(value any, members []fieldCheck) error {
 	return nil
 }
 
-// checkElements validates the elements of an array.
-func checkElements(value any, required bool, checker valueChecker) error {
+// checkElements validates the elements of an array against element, the check
+// compiled for the array's element node. A slice whose element type can never be
+// nil, and which carries no check below it, is skipped without being walked.
+func checkElements(value any, element valueCheck) error {
 	items := reflect.ValueOf(value)
 	if kind := items.Kind(); kind != reflect.Slice && kind != reflect.Array {
 		return nil
 	}
-	if checker == nil && !canBeNil(items.Type().Elem()) {
+	if element.checker == nil && !canBeNil(items.Type().Elem()) {
 		return nil
 	}
-	for i := 0; i < items.Len(); i++ {
+	for i := range items.Len() {
 		item := items.Index(i).Interface()
 		if isNil(item) {
-			if required {
+			if element.required {
 				return &requiredFieldError{
 					segments: []pathSegment{{position: true, name: strconv.Itoa(i)}},
 				}
 			}
 			continue
 		}
-		if checker == nil {
+		if element.checker == nil {
 			continue
 		}
-		if err := checker(item); err != nil {
+		if err := element.checker(item); err != nil {
 			return extend(err, pathSegment{position: true, name: strconv.Itoa(i)})
 		}
 	}
 	return nil
 }
 
-// checkMapValues validates the values of a map, naming each by its key.
-func checkMapValues(value any, required bool, checker valueChecker) error {
+// checkMapValues validates the values of a map against entry, the check compiled
+// for the map's value node, naming each value by its key.
+//
+// Map iteration order is randomized, so a map with more than one breach reports
+// an arbitrary one of them rather than the first by any stable ordering.
+func checkMapValues(value any, entry valueCheck) error {
 	pairs := reflect.ValueOf(value)
 	if pairs.Kind() != reflect.Map {
 		return nil
 	}
-	if checker == nil && !canBeNil(pairs.Type().Elem()) {
+	if entry.checker == nil && !canBeNil(pairs.Type().Elem()) {
 		return nil
 	}
 	for iter := pairs.MapRange(); iter.Next(); {
 		item := iter.Value().Interface()
 		if isNil(item) {
-			if required {
+			if entry.required {
 				return &requiredFieldError{
 					segments: []pathSegment{{position: true, name: fmt.Sprint(iter.Key().Interface())}},
 				}
 			}
 			continue
 		}
-		if checker == nil {
+		if entry.checker == nil {
 			continue
 		}
-		if err := checker(item); err != nil {
+		if err := entry.checker(item); err != nil {
 			return extend(err, pathSegment{position: true, name: fmt.Sprint(iter.Key().Interface())})
 		}
 	}

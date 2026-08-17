@@ -83,6 +83,10 @@ func TestBatch_WriteDoesNotCheckStructs(t *testing.T) {
 // an array element, under a map value, and under a nullable record. Each record
 // type is named only once — golib does not yet resolve named type references,
 // so a reused name cannot be written as one.
+//
+// counts is a map of scalars rather than of records, so nothing is compiled
+// below its values. That is what reaches the skip-without-walking path in
+// checkMapValues, which byName cannot.
 const nestedGuardSchema = `{"type":"record","name":"R","fields":[` +
 	`{"name":"id","type":"string"},` +
 	`{"name":"groups","type":{"type":"array","items":{"type":"record","name":"G","fields":[` +
@@ -90,6 +94,7 @@ const nestedGuardSchema = `{"type":"record","name":"R","fields":[` +
 	`{"name":"values","type":{"type":"array","items":"double"}}]}}},` +
 	`{"name":"byName","type":{"type":"map","values":{"type":"record","name":"M","fields":[` +
 	`{"name":"unit","type":"string"}]}}},` +
+	`{"name":"counts","type":{"type":"map","values":"long"}},` +
 	`{"name":"optGroup","type":["null",{"type":"record","name":"O","fields":[` +
 	`{"name":"unit","type":"string"}]}]},` +
 	`{"name":"optValues","type":["null",{"type":"array","items":["null","double"]}]}]}`
@@ -117,6 +122,7 @@ func nestedRecord(overrides map[string]any) map[string]any {
 		"id":     "a",
 		"groups": []any{nestedGroup()},
 		"byName": map[string]any{"k": map[string]any{"unit": "MW"}},
+		"counts": map[string]any{"k": int64(1)},
 	}
 	for name, value := range overrides {
 		record[name] = value
@@ -211,6 +217,62 @@ func TestBatch_WriteRejectsNestedRequiredField(t *testing.T) {
 			err := batch.Write(tc.record)
 
 			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+			assert.ErrorIs(t, err, claimcheck.ErrRequiredField)
+		})
+	}
+}
+
+func TestBatch_WriteRequiredFieldErrorIsDistinguishable(t *testing.T) {
+	// Callers need to tell a malformed record from an infrastructure failure: the
+	// first poisons the batch for good, so retrying it cannot help.
+	batch := newGuardBatch(t)
+	defer batch.Cleanup()
+
+	err := batch.Write(map[string]any{"note": "no id"})
+
+	require.ErrorIs(t, err, claimcheck.ErrRequiredField)
+	// The poisoned batch reports the same class from Produce, which uploads nothing.
+	assert.ErrorIs(t, batch.Produce(context.Background()), claimcheck.ErrRequiredField)
+}
+
+func TestBatch_WriteChecksTypedCollections(t *testing.T) {
+	// A collection whose element type can never be nil is skipped without being
+	// walked. The same field, typed so that it can hold a nil, must still be
+	// caught — otherwise the skip is swallowing breaches rather than saving work.
+	// Each pair below is one collection kind, taken both ways.
+	groupValues := func(values any) map[string]any {
+		return map[string]any{"groups": []any{map[string]any{"unit": "MW", "values": values}}}
+	}
+	for _, tc := range []struct {
+		name      string
+		overrides map[string]any
+		wantErr   string
+	}{
+		{name: "slice_of_non_nilable", overrides: groupValues([]float64{1.0, 2.0})},
+		{
+			name:      "slice_of_pointers",
+			overrides: groupValues([]*float64{nil}),
+			wantErr:   `required field "groups[0].values[0]" is nil`,
+		},
+		{name: "map_of_non_nilable", overrides: map[string]any{"counts": map[string]int64{"k": 1}}},
+		{
+			name:      "map_of_interfaces",
+			overrides: map[string]any{"counts": map[string]any{"k": nil}},
+			wantErr:   `required field "counts[k]" is nil`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			batch := newNestedBatch(t)
+			defer batch.Cleanup()
+
+			err := batch.Write(nestedRecord(tc.overrides))
+
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, claimcheck.ErrRequiredField)
 			assert.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
