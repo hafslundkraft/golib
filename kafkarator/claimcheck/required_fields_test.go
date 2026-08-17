@@ -38,9 +38,8 @@ func TestBatch_WriteRejectsMissingRequiredField(t *testing.T) {
 }
 
 func TestBatch_WriteRejectsNilRequiredField(t *testing.T) {
-	// Key presence alone is not enough: parquet-go writes a nil required field as
-	// the column's zero value, and a typed nil pointer the same. One batch per
-	// case — the first rejection closes the batch.
+	// A typed nil pointer counts as nil too. One batch per case — the first
+	// rejection closes the batch.
 	for _, tc := range []struct {
 		name  string
 		value any
@@ -85,8 +84,7 @@ func TestBatch_WriteDoesNotCheckStructs(t *testing.T) {
 // so a reused name cannot be written as one.
 //
 // counts is a map of scalars rather than of records, so nothing is compiled
-// below its values. That is what reaches the skip-without-walking path in
-// checkMapValues, which byName cannot.
+// below its values — the one shape that reaches the skip path in checkMapValues.
 const nestedGuardSchema = `{"type":"record","name":"R","fields":[` +
 	`{"name":"id","type":"string"},` +
 	`{"name":"groups","type":{"type":"array","items":{"type":"record","name":"G","fields":[` +
@@ -224,23 +222,21 @@ func TestBatch_WriteRejectsNestedRequiredField(t *testing.T) {
 }
 
 func TestBatch_WriteRequiredFieldErrorIsDistinguishable(t *testing.T) {
-	// Callers need to tell a malformed record from an infrastructure failure: the
-	// first poisons the batch for good, so retrying it cannot help.
 	batch := newGuardBatch(t)
 	defer batch.Cleanup()
 
 	err := batch.Write(map[string]any{"note": "no id"})
 
 	require.ErrorIs(t, err, claimcheck.ErrRequiredField)
-	// The poisoned batch reports the same class from Produce, which uploads nothing.
+	// Produce reports the same class, so a caller that only checks there still
+	// learns that retrying cannot help.
 	assert.ErrorIs(t, batch.Produce(context.Background()), claimcheck.ErrRequiredField)
 }
 
 func TestBatch_WriteChecksTypedCollections(t *testing.T) {
 	// A collection whose element type can never be nil is skipped without being
-	// walked. The same field, typed so that it can hold a nil, must still be
-	// caught — otherwise the skip is swallowing breaches rather than saving work.
-	// Each pair below is one collection kind, taken both ways.
+	// walked. The same field, typed so it can hold a nil, must still be caught —
+	// otherwise the skip is swallowing breaches rather than saving work.
 	groupValues := func(values any) map[string]any {
 		return map[string]any{"groups": []any{map[string]any{"unit": "MW", "values": values}}}
 	}

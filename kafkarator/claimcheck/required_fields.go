@@ -12,9 +12,9 @@ import (
 
 // ErrRequiredField reports a record that omits a required schema field, or sets
 // one to nil, at any depth. parquet-go writes such a record without complaint,
-// turning a nil in a required column into the column's zero value, where "" and
-// 0 are indistinguishable from real data — and inside a required array,
-// corrupting the page so the file will not read back at all.
+// producing a structurally valid file with the right row and element counts, in
+// which the nil holds whatever the write buffer happened to carry: the column's
+// zero value, indistinguishable from real data, or a value from an earlier record.
 //
 // Match it with errors.Is: a batch poisoned by this error fails the same way for
 // every later record, so retrying cannot help.

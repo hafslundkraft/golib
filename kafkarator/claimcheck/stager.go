@@ -200,7 +200,7 @@ func (s *stager) stage(ctx context.Context, topic string) (*Batch, error) {
 // Records can be any Go value whose fields map to the Avro schema registered
 // in Schema Registry — either a concrete struct with parquet field tags, or a
 // map[string]any keyed by field name. A map must contain a non-nil entry for
-// every required (non-nullable) schema field; see [Batch.Write].
+// every required (non-nullable) schema field, at any depth; see [Batch.Write].
 //
 // Batch is not safe for concurrent use. All Write, Produce, and Cleanup calls
 // must be made from the same goroutine.
@@ -286,11 +286,8 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 // Write buffers one record into the batch.
 //
 // A map[string]any is checked against the schema first, at every depth: a
-// required field that is absent, or present but nil, is an error, whether it sits
-// at the top level, inside a record, inside an array element, or under a map key.
-// The error names the path to it, such as timeseries_data[3].unit, and matches
-// [ErrRequiredField] under errors.Is — the one class of failure here that a
-// retry cannot clear.
+// required field that is absent, or present but nil, is [ErrRequiredField], whose
+// message names the path to it, such as timeseries_data[3].unit.
 //
 // Structs are not checked — every field of a struct is present by construction.
 //
