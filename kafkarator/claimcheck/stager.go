@@ -287,7 +287,7 @@ func (b *Batch) finalizeUpload(ctx context.Context) ([]byte, error) {
 //
 // A map[string]any is checked against the schema first, at every depth: a
 // required field that is absent, or present but nil, is [ErrRequiredField], whose
-// message names the path to it, such as timeseries_data[3].unit.
+// message names the path to it.
 //
 // Structs are not checked — every field of a struct is present by construction.
 //
