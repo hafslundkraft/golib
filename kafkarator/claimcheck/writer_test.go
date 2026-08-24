@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"math/big"
 	"testing"
 
 	parquet "github.com/parquet-go/parquet-go"
@@ -173,6 +174,111 @@ func TestBatch_WriteProduceAndReadRecords(t *testing.T) {
 	require.Len(t, got, 3)
 	assert.Equal(t, Event{1, "alice"}, got[0])
 	assert.Equal(t, Event{3, "carol"}, got[2])
+}
+
+func TestBatch_WriteProduceAndReadDecimals(t *testing.T) {
+	type Payment struct {
+		ID     int32  `parquet:"id"`
+		Amount []byte `parquet:"amount"`
+	}
+
+	const topic = "test.sys--demo.payments--v1"
+	schemaStr := `{"type":"record","name":"Payment","fields":[` +
+		`{"name":"id","type":"int"},` +
+		`{"name":"amount","type":{"type":"bytes","logicalType":"decimal","precision":9,"scale":2}}]}`
+
+	s3 := claimcheck.NewFakeS3Client()
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: schemaStr, version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	// Unscaled big-endian two's complement, the encoding both Avro and Parquet
+	// use: 123456 at scale 2 is 1234.56, and 0xCE is -50, i.e. -0.50.
+	input := []Payment{
+		{1, []byte{0x01, 0xE2, 0x40}},
+		{2, []byte{0xCE}},
+	}
+	for _, r := range input {
+		require.NoError(t, batch.Write(r))
+	}
+	require.NoError(t, batch.Produce(context.Background()))
+
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+
+	var got []Payment
+	for r, err := range claimcheck.Records[Payment](context.Background(), msg) {
+		require.NoError(t, err)
+		got = append(got, r)
+	}
+	require.Len(t, got, 2)
+	assert.Equal(t, input, got, "decimal bytes must survive the round-trip unchanged")
+
+	// The written file must advertise DECIMAL, not plain bytes, or downstream
+	// readers lose the scale.
+	pr, err := msg.Payload(context.Background())
+	require.NoError(t, err)
+	defer pr.Close() //nolint:errcheck // test cleanup
+
+	f, err := parquet.OpenFile(pr, pr.Size())
+	require.NoError(t, err)
+	var amount parquet.Field
+	for _, fld := range f.Schema().Fields() {
+		if fld.Name() == "amount" {
+			amount = fld
+		}
+	}
+	require.NotNil(t, amount, "amount field missing from written file")
+	assert.Equal(t, "DECIMAL(9,2)", amount.Type().String())
+}
+
+func TestBatch_WriteProduceAndReadFixedDecimals(t *testing.T) {
+	// Amount is []byte, not [16]byte: parquet-go writes a [N]byte field via
+	// reflect.Value.Bytes, which panics on the unaddressable array inside a
+	// struct passed by value. That applies to every fixed-backed column, not
+	// just decimals.
+	type Money struct {
+		Amount []byte `parquet:"amount"`
+	}
+
+	const topic = "test.sys--demo.money--v1"
+	schemaStr := `{"type":"record","name":"Money","fields":[` +
+		`{"name":"amount","type":{"type":"fixed","name":"Dec","size":16,` +
+		`"logicalType":"decimal","precision":38,"scale":9}}]}`
+
+	s3 := claimcheck.NewFakeS3Client()
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: schemaStr, version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	// 1234.560000000 at scale 9, unscaled and zero-padded to the fixed 16 bytes.
+	amount := make([]byte, 16)
+	big.NewInt(1234560000000).FillBytes(amount)
+	require.NoError(t, batch.Write(Money{amount}))
+	require.NoError(t, batch.Produce(context.Background()))
+
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+
+	var got []Money
+	for r, err := range claimcheck.Records[Money](context.Background(), msg) {
+		require.NoError(t, err)
+		got = append(got, r)
+	}
+	require.Len(t, got, 1)
+	assert.Equal(t, amount, got[0].Amount)
 }
 
 func TestBatch_KeyAndHeadersPropagated(t *testing.T) {

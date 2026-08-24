@@ -15,7 +15,8 @@ import (
 //
 //	Primitives : boolean, int, long, float, double, bytes, string
 //	Logical    : timestamp-millis/micros, local-timestamp-millis/micros,
-//	             date, time-millis/micros, uuid (→ UTF-8 string)
+//	             date, time-millis/micros, uuid (→ UTF-8 string),
+//	             decimal (bytes- or fixed-backed)
 //	record     : → nested Group
 //	array      : → parquet.List
 //	map        : → parquet.Map (string keys)
@@ -146,7 +147,7 @@ func avroUnionToNode(union []any) (parquet.Node, error) {
 // fixed) and logical type annotations.
 func avroComplexToNode(schema map[string]any) (parquet.Node, error) {
 	if logical, _ := schema["logicalType"].(string); logical != "" {
-		return avroLogicalToNode(logical)
+		return avroLogicalToNode(logical, schema)
 	}
 
 	baseType, _ := schema["type"].(string)
@@ -173,11 +174,11 @@ func avroComplexToNode(schema map[string]any) (parquet.Node, error) {
 		return parquet.String(), nil
 
 	case "fixed":
-		size, ok := schema["size"].(float64)
+		size, ok := avroIntAttr(schema, "size")
 		if !ok {
 			return nil, fmt.Errorf("avro fixed type missing or invalid \"size\"")
 		}
-		return parquet.Leaf(parquet.FixedLenByteArrayType(int(size))), nil
+		return parquet.Leaf(parquet.FixedLenByteArrayType(size)), nil
 
 	default:
 		// Could be a primitive wrapped in a {"type": "string"} dict.
@@ -189,9 +190,12 @@ func avroComplexToNode(schema map[string]any) (parquet.Node, error) {
 	}
 }
 
-// avroLogicalToNode maps Avro logicalType annotations to parquet Nodes.
-func avroLogicalToNode(logical string) (parquet.Node, error) {
+// avroLogicalToNode maps Avro logicalType annotations to parquet Nodes. schema
+// is the annotated type dict, which decimal needs for its precision and scale.
+func avroLogicalToNode(logical string, schema map[string]any) (parquet.Node, error) {
 	switch logical {
+	case "decimal":
+		return avroDecimalToNode(schema)
 	case "timestamp-millis":
 		return parquet.Timestamp(parquet.Millisecond), nil
 	case "timestamp-micros":
@@ -212,4 +216,50 @@ func avroLogicalToNode(logical string) (parquet.Node, error) {
 	default:
 		return nil, fmt.Errorf("unsupported avro logicalType: %q", logical)
 	}
+}
+
+// avroDecimalToNode maps an Avro decimal annotation to a parquet Decimal node.
+// Avro backs a decimal with either "bytes" (variable length) or "fixed" (size
+// bytes), and both hold the unscaled value as a big-endian two's-complement
+// integer — the same encoding Parquet uses, so the bytes pass through as-is.
+func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
+	precision, ok := avroIntAttr(schema, "precision")
+	if !ok {
+		return nil, fmt.Errorf("avro decimal missing or invalid \"precision\"")
+	}
+	if precision < 1 {
+		return nil, fmt.Errorf("avro decimal \"precision\" must be >= 1, got %d", precision)
+	}
+
+	// Avro treats scale as optional and defaults it to 0.
+	scale := 0
+	if _, present := schema["scale"]; present {
+		if scale, ok = avroIntAttr(schema, "scale"); !ok {
+			return nil, fmt.Errorf("avro decimal has invalid \"scale\"")
+		}
+	}
+	if scale < 0 || scale > precision {
+		return nil, fmt.Errorf(
+			"avro decimal \"scale\" must be between 0 and precision (%d), got %d", precision, scale)
+	}
+
+	switch baseType, _ := schema["type"].(string); baseType {
+	case "bytes":
+		return parquet.Decimal(scale, precision, parquet.ByteArrayType), nil
+	case "fixed":
+		size, ok := avroIntAttr(schema, "size")
+		if !ok {
+			return nil, fmt.Errorf("avro fixed decimal missing or invalid \"size\"")
+		}
+		return parquet.Decimal(scale, precision, parquet.FixedLenByteArrayType(size)), nil
+	default:
+		return nil, fmt.Errorf("avro decimal must be backed by \"bytes\" or \"fixed\", got %q", baseType)
+	}
+}
+
+// avroIntAttr reads an integer Avro schema attribute. JSON numbers decode as
+// float64, so every integer attribute arrives that way.
+func avroIntAttr(schema map[string]any, name string) (int, bool) {
+	v, ok := schema[name].(float64)
+	return int(v), ok
 }

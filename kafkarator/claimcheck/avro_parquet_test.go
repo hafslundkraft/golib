@@ -159,10 +159,94 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 	}
 
 	t.Run("unknown_logical_type_returns_error", func(t *testing.T) {
-		avroType := `{"type":"bytes","logicalType":"decimal","precision":9,"scale":2}`
+		avroType := `{"type":"fixed","name":"D","size":12,"logicalType":"duration"}`
 		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", avroType)))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "decimal")
+		assert.Contains(t, err.Error(), "duration")
+	})
+}
+
+func TestAvroParquet_Decimal(t *testing.T) {
+	t.Run("bytes_backed", func(t *testing.T) {
+		avroType := `{"type":"bytes","logicalType":"decimal","precision":9,"scale":2}`
+		schema := mustBuildSchema(t, avroRecord(avroField("amount", avroType)))
+		f := findField(t, schema, "amount")
+
+		assert.Equal(t, "DECIMAL(9,2)", f.Type().String())
+		assert.Equal(t, parquet.ByteArray, f.Type().Kind())
+		assert.Equal(t, 0, f.Type().Length(), "bytes-backed decimal must be variable-length")
+	})
+
+	t.Run("fixed_backed_keeps_size", func(t *testing.T) {
+		avroType := `{"type":"fixed","name":"Money","size":16,"logicalType":"decimal","precision":38,"scale":9}`
+		schema := mustBuildSchema(t, avroRecord(avroField("amount", avroType)))
+		f := findField(t, schema, "amount")
+
+		assert.Equal(t, "DECIMAL(38,9)", f.Type().String())
+		assert.Equal(t, parquet.FixedLenByteArray, f.Type().Kind())
+		assert.Equal(t, 16, f.Type().Length())
+	})
+
+	t.Run("scale_defaults_to_zero", func(t *testing.T) {
+		avroType := `{"type":"bytes","logicalType":"decimal","precision":4}`
+		schema := mustBuildSchema(t, avroRecord(avroField("count", avroType)))
+		assert.Equal(t, "DECIMAL(4,0)", findField(t, schema, "count").Type().String())
+	})
+
+	t.Run("nullable_decimal", func(t *testing.T) {
+		avroType := `{"type":"bytes","logicalType":"decimal","precision":9,"scale":2}`
+		schema := mustBuildSchema(t, avroRecord(avroField("amount", `["null",`+avroType+`]`)))
+		f := findField(t, schema, "amount")
+
+		assert.True(t, f.Optional())
+		assert.Equal(t, "DECIMAL(9,2)", f.Type().String())
+	})
+
+	t.Run("invalid_decimals_return_errors", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			avroType string
+			wantMsg  string
+		}{
+			{
+				"missing_precision",
+				`{"type":"bytes","logicalType":"decimal","scale":2}`,
+				"precision",
+			},
+			{
+				"zero_precision",
+				`{"type":"bytes","logicalType":"decimal","precision":0}`,
+				"precision",
+			},
+			{
+				"scale_exceeds_precision",
+				`{"type":"bytes","logicalType":"decimal","precision":4,"scale":5}`,
+				"scale",
+			},
+			{
+				"negative_scale",
+				`{"type":"bytes","logicalType":"decimal","precision":4,"scale":-1}`,
+				"scale",
+			},
+			{
+				"fixed_missing_size",
+				`{"type":"fixed","name":"D","logicalType":"decimal","precision":9,"scale":2}`,
+				"size",
+			},
+			{
+				"unsupported_backing_type",
+				`{"type":"long","logicalType":"decimal","precision":9,"scale":2}`,
+				"bytes",
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", tc.avroType)))
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantMsg)
+			})
+		}
 	})
 }
 
