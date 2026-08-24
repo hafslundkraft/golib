@@ -1,6 +1,7 @@
 package claimcheck_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -202,6 +203,24 @@ func TestAvroParquet_Decimal(t *testing.T) {
 		assert.Equal(t, "DECIMAL(9,2)", f.Type().String())
 	})
 
+	t.Run("precision_at_fixed_width_limit_is_accepted", func(t *testing.T) {
+		// The documented Parquet widths: 4 bytes hold 9 digits, 8 hold 18,
+		// 16 hold 38. One digit more must be rejected.
+		for _, tc := range []struct{ size, precision int }{{4, 9}, {8, 18}, {16, 38}} {
+			avroType := fmt.Sprintf(
+				`{"type":"fixed","name":"D","size":%d,"logicalType":"decimal","precision":%d,"scale":0}`,
+				tc.size, tc.precision)
+			_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", avroType)))
+			assert.NoError(t, err, "size %d should hold precision %d", tc.size, tc.precision)
+
+			over := fmt.Sprintf(
+				`{"type":"fixed","name":"D","size":%d,"logicalType":"decimal","precision":%d,"scale":0}`,
+				tc.size, tc.precision+1)
+			_, err = claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", over)))
+			assert.Error(t, err, "size %d must reject precision %d", tc.size, tc.precision+1)
+		}
+	})
+
 	t.Run("invalid_decimals_return_errors", func(t *testing.T) {
 		tests := []struct {
 			name     string
@@ -231,6 +250,34 @@ func TestAvroParquet_Decimal(t *testing.T) {
 			{
 				"fixed_missing_size",
 				`{"type":"fixed","name":"D","logicalType":"decimal","precision":9,"scale":2}`,
+				"size",
+			},
+			{
+				// size 0 divided by zero inside the parquet writer.
+				"fixed_zero_size",
+				`{"type":"fixed","name":"D","size":0,"logicalType":"decimal","precision":9,"scale":2}`,
+				"size",
+			},
+			{
+				// A negative size panicked inside the parquet writer.
+				"fixed_negative_size",
+				`{"type":"fixed","name":"D","size":-4,"logicalType":"decimal","precision":9,"scale":2}`,
+				"size",
+			},
+			{
+				"fixed_size_not_an_integer",
+				`{"type":"fixed","name":"D","size":4.7,"logicalType":"decimal","precision":9,"scale":2}`,
+				"size",
+			},
+			{
+				// 38 digits need 16 bytes; 1 byte holds 2.
+				"precision_exceeds_fixed_width",
+				`{"type":"fixed","name":"D","size":1,"logicalType":"decimal","precision":38,"scale":0}`,
+				"does not fit",
+			},
+			{
+				"fixed_size_absurdly_large",
+				`{"type":"fixed","name":"D","size":100000,"logicalType":"decimal","precision":9,"scale":2}`,
 				"size",
 			},
 			{
@@ -332,6 +379,17 @@ func TestAvroParquet_ComplexTypes(t *testing.T) {
 		f := findField(t, schema, "hash")
 		assert.Equal(t, parquet.FixedLenByteArray, f.Type().Kind())
 		assert.Equal(t, 16, f.Type().Length())
+	})
+
+	t.Run("invalid_fixed_size_returns_error", func(t *testing.T) {
+		// Each of these reached the parquet writer and panicked there before
+		// being rejected here: 0 divides by zero, negative trips a range check.
+		for _, size := range []string{"0", "-4", "4.7"} {
+			avroFixed := `{"type":"fixed","name":"F","size":` + size + `}`
+			_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("hash", avroFixed)))
+			require.Error(t, err, "size %s must be rejected", size)
+			assert.Contains(t, err.Error(), "size")
+		}
 	})
 
 	t.Run("unknown_complex_type_returns_error", func(t *testing.T) {

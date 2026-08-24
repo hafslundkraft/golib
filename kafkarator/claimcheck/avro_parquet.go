@@ -3,6 +3,8 @@ package claimcheck
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 
 	parquet "github.com/parquet-go/parquet-go"
 )
@@ -174,9 +176,12 @@ func avroComplexToNode(schema map[string]any) (parquet.Node, error) {
 		return parquet.String(), nil
 
 	case "fixed":
+		// A size of 0 divides by zero deep inside the parquet writer, and a
+		// negative one trips an out-of-range panic there; both must fail here.
 		size, ok := avroIntAttr(schema, "size")
-		if !ok {
-			return nil, fmt.Errorf("avro fixed type missing or invalid \"size\"")
+		if !ok || size < 1 {
+			return nil, fmt.Errorf(
+				"avro fixed type \"size\" must be a positive integer, got %v", schema["size"])
 		}
 		return parquet.Leaf(parquet.FixedLenByteArrayType(size)), nil
 
@@ -218,6 +223,13 @@ func avroLogicalToNode(logical string, schema map[string]any) (parquet.Node, err
 	}
 }
 
+// maxDecimalFixedSize bounds the fixed width a decimal may declare. 256 bytes
+// allows a precision of ~616 digits, far past any real decimal (Spark caps at
+// 38, Arrow at 76), and keeps the precision check below from doing unbounded
+// bignum work on a malformed schema. Plain Avro "fixed" is not capped — it
+// holds arbitrary byte blobs, where a large width is legitimate.
+const maxDecimalFixedSize = 256
+
 // avroDecimalToNode maps an Avro decimal annotation to a parquet Decimal node.
 // Avro backs a decimal with either "bytes" (variable length) or "fixed" (size
 // bytes), and both hold the unscaled value as a big-endian two's-complement
@@ -248,8 +260,15 @@ func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
 		return parquet.Decimal(scale, precision, parquet.ByteArrayType), nil
 	case "fixed":
 		size, ok := avroIntAttr(schema, "size")
-		if !ok {
-			return nil, fmt.Errorf("avro fixed decimal missing or invalid \"size\"")
+		if !ok || size < 1 || size > maxDecimalFixedSize {
+			return nil, fmt.Errorf(
+				"avro fixed decimal \"size\" must be an integer between 1 and %d, got %v",
+				maxDecimalFixedSize, schema["size"])
+		}
+		if maxPrecision := maxFixedPrecision(size); precision > maxPrecision {
+			return nil, fmt.Errorf(
+				"avro decimal \"precision\" %d does not fit in %d fixed bytes (max %d)",
+				precision, size, maxPrecision)
 		}
 		return parquet.Decimal(scale, precision, parquet.FixedLenByteArrayType(size)), nil
 	default:
@@ -258,8 +277,23 @@ func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
 }
 
 // avroIntAttr reads an integer Avro schema attribute. JSON numbers decode as
-// float64, so every integer attribute arrives that way.
+// float64, so every integer attribute arrives that way; a fractional value, or
+// one beyond int32, is not a valid Avro integer and must not be truncated into
+// one silently.
 func avroIntAttr(schema map[string]any, name string) (int, bool) {
 	v, ok := schema[name].(float64)
-	return int(v), ok
+	if !ok || v != math.Trunc(v) || v < math.MinInt32 || v > math.MaxInt32 {
+		return 0, false
+	}
+	return int(v), true
+}
+
+// maxFixedPrecision returns the largest decimal precision that size bytes of
+// big-endian two's-complement integer can hold: 4 bytes give 9 digits, 16 give
+// 38. The largest value in size bytes is 2^(8*size-1)-1, which is never all
+// nines, so the limit is always one digit fewer than that value has.
+func maxFixedPrecision(size int) int {
+	maxVal := new(big.Int).Lsh(big.NewInt(1), uint(8*size-1))
+	maxVal.Sub(maxVal, big.NewInt(1))
+	return len(maxVal.String()) - 1
 }
