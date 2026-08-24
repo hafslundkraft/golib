@@ -163,6 +163,14 @@ Records passed to `batch.Write` can be any value whose fields map to
 the registered payload schema — a concrete struct with `parquet:"..."`
 tags, or a `map[string]any`.
 
+When a record is a `map[string]any`, `batch.Write` validates required
+(non-nullable) schema fields recursively, including fields inside records,
+arrays, and maps. Missing or nil required fields return an error matching
+`claimcheck.ErrRequiredField`; the error message includes the field path. A
+validation error permanently poisons the batch, so later `Write` calls and
+`Produce` return the same error. Struct records are not checked because their
+fields are present by construction.
+
 Always `defer batch.Cleanup()`. It aborts the S3 multipart upload if
 `Produce` was never called (or errored) and is a no-op once `Produce`
 has succeeded.
