@@ -276,11 +276,6 @@ func TestAvroParquet_Decimal(t *testing.T) {
 				"does not fit",
 			},
 			{
-				"fixed_size_absurdly_large",
-				`{"type":"fixed","name":"D","size":100000,"logicalType":"decimal","precision":9,"scale":2}`,
-				"size",
-			},
-			{
 				"unsupported_backing_type",
 				`{"type":"long","logicalType":"decimal","precision":9,"scale":2}`,
 				"bytes",
