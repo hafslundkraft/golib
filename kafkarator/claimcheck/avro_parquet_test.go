@@ -211,13 +211,13 @@ func TestAvroParquet_Decimal(t *testing.T) {
 				`{"type":"fixed","name":"D","size":%d,"logicalType":"decimal","precision":%d,"scale":0}`,
 				tc.size, tc.precision)
 			_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", avroType)))
-			assert.NoError(t, err, "size %d should hold precision %d", tc.size, tc.precision)
+			require.NoError(t, err, "size %d should hold precision %d", tc.size, tc.precision)
 
 			over := fmt.Sprintf(
 				`{"type":"fixed","name":"D","size":%d,"logicalType":"decimal","precision":%d,"scale":0}`,
 				tc.size, tc.precision+1)
 			_, err = claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", over)))
-			assert.Error(t, err, "size %d must reject precision %d", tc.size, tc.precision+1)
+			require.Error(t, err, "size %d must reject precision %d", tc.size, tc.precision+1)
 		}
 	})
 

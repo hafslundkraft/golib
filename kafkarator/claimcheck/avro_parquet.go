@@ -293,7 +293,7 @@ func avroIntAttr(schema map[string]any, name string) (int, bool) {
 // 38. The largest value in size bytes is 2^(8*size-1)-1, which is never all
 // nines, so the limit is always one digit fewer than that value has.
 func maxFixedPrecision(size int) int {
-	maxVal := new(big.Int).Lsh(big.NewInt(1), uint(8*size-1))
+	maxVal := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(8*size-1)), nil)
 	maxVal.Sub(maxVal, big.NewInt(1))
 	return len(maxVal.String()) - 1
 }
