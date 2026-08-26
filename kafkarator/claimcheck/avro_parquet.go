@@ -265,9 +265,8 @@ func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
 	}
 }
 
-// avroIntAttr reads an integer Avro schema attribute, which arrives as float64
-// from the JSON decoder. A fractional or out-of-int32 value is not a valid Avro
-// integer, and must not be silently truncated into one.
+// avroIntAttr reads an Avro integer attribute from decoded JSON.
+// It rejects fractional and out-of-int32 values to avoid silent truncation.
 func avroIntAttr(schema map[string]any, name string) (int, bool) {
 	v, ok := schema[name].(float64)
 	if !ok || v != math.Trunc(v) || v < math.MinInt32 || v > math.MaxInt32 {
@@ -276,13 +275,8 @@ func avroIntAttr(schema map[string]any, name string) (int, bool) {
 	return int(v), true
 }
 
-// maxFixedPrecision returns the largest decimal precision size bytes can hold:
-// 4 bytes give 9 digits, 16 give 38.
-//
-// Two's complement spends one bit on the sign, leaving k = 8*size-1 value bits
-// and a largest value of 2^k-1. A precision of P must hold P nines, so it needs
-// 10^P <= 2^k, i.e. P <= k*log10(2). k*log10(2) is never whole — that would make
-// 2^k a power of ten — so no rounding sits near the boundary.
+// maxFixedPrecision returns the max decimal precision representable in size bytes.
+// Example: 4 bytes -> 9 digits, 16 bytes -> 38 digits.
 func maxFixedPrecision(size int) int {
 	return int(float64(8*size-1) * math.Log10(2))
 }
