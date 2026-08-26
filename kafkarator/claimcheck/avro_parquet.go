@@ -193,8 +193,7 @@ func avroComplexToNode(schema map[string]any) (parquet.Node, error) {
 	}
 }
 
-// avroLogicalToNode maps Avro logicalType annotations to parquet Nodes, given
-// the annotated type dict.
+// avroLogicalToNode maps Avro logicalType annotations to parquet nodes.
 func avroLogicalToNode(logical string, schema map[string]any) (parquet.Node, error) {
 	switch logical {
 	case "decimal":
@@ -221,9 +220,8 @@ func avroLogicalToNode(logical string, schema map[string]any) (parquet.Node, err
 	}
 }
 
-// avroDecimalToNode maps an Avro decimal annotation to a parquet Decimal node.
-// Avro stores the unscaled value the way Parquet does — big-endian two's
-// complement — so the bytes need no conversion.
+// avroDecimalToNode maps an Avro decimal annotation to a parquet decimal node.
+// Avro and Parquet both store unscaled values as big-endian two's complement.
 func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
 	precision, ok := avroIntAttr(schema, "precision")
 	if !ok {
@@ -233,7 +231,7 @@ func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
 		return nil, fmt.Errorf("avro decimal \"precision\" must be >= 1, got %d", precision)
 	}
 
-	// Avro makes scale optional, defaulting to 0.
+	// Avro scale is optional and defaults to 0.
 	scale := 0
 	if _, present := schema["scale"]; present {
 		if scale, ok = avroIntAttr(schema, "scale"); !ok {
