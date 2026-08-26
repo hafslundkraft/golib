@@ -281,7 +281,7 @@ func TestBatch_WriteProduceAndReadNullableDecimals(t *testing.T) {
 	require.Len(t, got, 2)
 	assert.Equal(t, input[0], got[0], "non-null decimal bytes must survive round-trip")
 	assert.Equal(t, input[1].ID, got[1].ID)
-	assert.Len(t, got[1].Amount, 0, "nullable decimal should decode as an empty byte slice when null")
+	assert.Empty(t, got[1].Amount, "nullable decimal should decode as an empty byte slice when null")
 }
 
 func TestBatch_WriteProduceAndReadFixedDecimals(t *testing.T) {
