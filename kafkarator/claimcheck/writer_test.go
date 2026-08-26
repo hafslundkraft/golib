@@ -238,6 +238,52 @@ func TestBatch_WriteProduceAndReadDecimals(t *testing.T) {
 	assert.Equal(t, "DECIMAL(9,2)", amount.Type().String())
 }
 
+func TestBatch_WriteProduceAndReadNullableDecimals(t *testing.T) {
+	type Payment struct {
+		ID     int32  `parquet:"id"`
+		Amount []byte `parquet:"amount"`
+	}
+
+	const topic = "test.sys--demo.payments-nullable--v1"
+	schemaStr := `{"type":"record","name":"Payment","fields":[` +
+		`{"name":"id","type":"int"},` +
+		`{"name":"amount","type":["null",{"type":"bytes","logicalType":"decimal","precision":9,"scale":2}]}` +
+		`]}`
+
+	s3 := claimcheck.NewFakeS3Client()
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: schemaStr, version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	input := []Payment{
+		{ID: 1, Amount: []byte{0x01, 0xE2, 0x40}},
+		{ID: 2, Amount: nil},
+	}
+	for _, r := range input {
+		require.NoError(t, batch.Write(r))
+	}
+	require.NoError(t, batch.Produce(context.Background()))
+
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+
+	var got []Payment
+	for r, err := range claimcheck.Records[Payment](context.Background(), msg) {
+		require.NoError(t, err)
+		got = append(got, r)
+	}
+	require.Len(t, got, 2)
+	assert.Equal(t, input[0], got[0], "non-null decimal bytes must survive round-trip")
+	assert.Equal(t, input[1].ID, got[1].ID)
+	assert.Len(t, got[1].Amount, 0, "nullable decimal should decode as an empty byte slice when null")
+}
+
 func TestBatch_WriteProduceAndReadFixedDecimals(t *testing.T) {
 	// Amount is []byte, not [16]byte: parquet-go writes a [N]byte field via
 	// reflect.Value.Bytes, which panics on the unaddressable array inside a

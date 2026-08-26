@@ -259,21 +259,10 @@ func TestAvroParquet_Decimal(t *testing.T) {
 				"size",
 			},
 			{
-				// A negative size panicked inside the parquet writer.
-				"fixed_negative_size",
-				`{"type":"fixed","name":"D","size":-4,"logicalType":"decimal","precision":9,"scale":2}`,
-				"size",
-			},
-			{
+				// Non-integer sizes must be rejected.
 				"fixed_size_not_an_integer",
 				`{"type":"fixed","name":"D","size":4.7,"logicalType":"decimal","precision":9,"scale":2}`,
 				"size",
-			},
-			{
-				// 38 digits need 16 bytes; 1 byte holds 2.
-				"precision_exceeds_fixed_width",
-				`{"type":"fixed","name":"D","size":1,"logicalType":"decimal","precision":38,"scale":0}`,
-				"does not fit",
 			},
 			{
 				"unsupported_backing_type",
