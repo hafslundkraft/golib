@@ -149,6 +149,13 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 			`{"type":"string","logicalType":"uuid"}`,
 			"STRING",
 		},
+		{
+			// Parquet has no interval type; the columns are checked in
+			// TestAvroParquet_Duration.
+			"duration",
+			`{"type":"fixed","name":"D","size":12,"logicalType":"duration"}`,
+			"group",
+		},
 	}
 
 	for _, tc := range tests {
@@ -160,10 +167,31 @@ func TestAvroParquet_LogicalTypes(t *testing.T) {
 	}
 
 	t.Run("unknown_logical_type_returns_error", func(t *testing.T) {
-		avroType := `{"type":"fixed","name":"D","size":12,"logicalType":"duration"}`
+		avroType := `{"type":"string","logicalType":"not-a-logical-type"}`
 		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("f", avroType)))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "duration")
+		assert.Contains(t, err.Error(), "not-a-logical-type")
+	})
+}
+
+func TestAvroParquet_Duration(t *testing.T) {
+	t.Run("expands_to_three_columns", func(t *testing.T) {
+		avroType := `{"type":"fixed","name":"D","size":12,"logicalType":"duration"}`
+		schema := mustBuildSchema(t, avroRecord(avroField("age", avroType)))
+		f := findField(t, schema, "age")
+
+		// The names are the cross-language contract; a mismatch writes silent zeros.
+		assert.Equal(t, []string{"Days", "Milliseconds", "Months"}, fieldNames(f.Fields()))
+		for _, part := range f.Fields() {
+			assert.Equal(t, "INT(32,false)", part.Type().String(), part.Name())
+		}
+	})
+
+	t.Run("wrong_size_returns_error", func(t *testing.T) {
+		avroType := `{"type":"fixed","name":"D","size":8,"logicalType":"duration"}`
+		_, err := claimcheck.AvroSchemaToParquet(avroRecord(avroField("age", avroType)))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "12")
 	})
 }
 
