@@ -25,7 +25,7 @@ import (
 //	fixed      : → FIXED_LEN_BYTE_ARRAY(size)
 //	["null", X]: → Optional X
 //
-// Parquet has no live interval type, so a duration becomes a group of three
+// Parquet has no native interval type, so a duration becomes a group of three
 // UINT32 columns named Months, Days and Milliseconds. Readers in other
 // languages must use these exact names.
 //
