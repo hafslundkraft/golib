@@ -137,8 +137,14 @@ func newPool(ctx context.Context, cfg *Config, host string) (*pgxpool.Pool, erro
 	return pool, nil
 }
 
+// connectionString builds the dsn for a host. sslmode=prefer encrypts the
+// connection when the server offers TLS, which cnpg does out of the box, and
+// falls back to cleartext when it does not. That matters because the bearer
+// token goes over the wire on every connection, and unlike a scram exchange it
+// is replayable by anyone who sees it. prefer does not verify the certificate,
+// so it needs no CA distributed to the workloads.
 func connectionString(cfg *Config, host string) string {
-	return fmt.Sprintf("postgres://%s@%s:5432/%s?sslmode=disable", cfg.User, host, cfg.Database)
+	return fmt.Sprintf("postgres://%s@%s:5432/%s?sslmode=prefer", cfg.User, host, cfg.Database)
 }
 
 func tokenProvider(
