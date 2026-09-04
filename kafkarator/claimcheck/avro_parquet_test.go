@@ -181,7 +181,7 @@ func TestAvroParquet_Duration(t *testing.T) {
 		f := findField(t, schema, "age")
 
 		// The names are the cross-language contract; a mismatch writes silent zeros.
-		assert.Equal(t, []string{"Days", "Milliseconds", "Months"}, fieldNames(f.Fields()))
+		assert.Equal(t, []string{"Months", "Days", "Milliseconds"}, fieldNames(f.Fields()))
 		for _, part := range f.Fields() {
 			assert.Equal(t, "INT(32,false)", part.Type().String(), part.Name())
 		}
