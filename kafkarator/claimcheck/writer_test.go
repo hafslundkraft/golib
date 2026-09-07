@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/hamba/avro/v2"
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -325,6 +326,50 @@ func TestBatch_WriteProduceAndReadFixedDecimals(t *testing.T) {
 	}
 	require.Len(t, got, 1)
 	assert.Equal(t, amount, got[0].Amount)
+}
+
+func TestBatch_WriteProduceAndReadDurations(t *testing.T) {
+	// Renaming the group's columns writes zeros without an error, so this
+	// round-trip is what catches it.
+	type Subscription struct {
+		ID   int32                `parquet:"id"`
+		Term avro.LogicalDuration `parquet:"term"`
+	}
+
+	const topic = "test.sys--demo.subscriptions--v1"
+	schemaStr := `{"type":"record","name":"Subscription","fields":[` +
+		`{"name":"id","type":"int"},` +
+		`{"name":"term","type":{"type":"fixed","name":"D","size":12,"logicalType":"duration"}}]}`
+
+	s3 := claimcheck.NewFakeS3Client()
+	kw := &captureKW{}
+	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
+		claimcheck.WithWriterS3Client(s3),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: schemaStr, version: 1, id: 1}),
+	)
+
+	batch, err := w.NewBatch(context.Background(), topic)
+	require.NoError(t, err)
+	defer batch.Cleanup()
+
+	input := []Subscription{
+		{ID: 1, Term: avro.LogicalDuration{Months: 12, Days: 0, Milliseconds: 0}},
+		{ID: 2, Term: avro.LogicalDuration{Months: 0, Days: 45, Milliseconds: 3600000}},
+	}
+	for _, r := range input {
+		require.NoError(t, batch.Write(r))
+	}
+	require.NoError(t, batch.Produce(context.Background()))
+
+	envelope := unmarshalEnvelope(t, kw.last.Value)
+	msg := claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+
+	var got []Subscription
+	for r, err := range claimcheck.Records[Subscription](context.Background(), msg) {
+		require.NoError(t, err)
+		got = append(got, r)
+	}
+	assert.Equal(t, input, got, "duration parts must survive the round-trip")
 }
 
 func TestBatch_KeyAndHeadersPropagated(t *testing.T) {

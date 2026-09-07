@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/hamba/avro/v2"
 	parquet "github.com/parquet-go/parquet-go"
 )
 
@@ -17,13 +18,17 @@ import (
 //	Primitives : boolean, int, long, float, double, bytes, string
 //	Logical    : timestamp-millis/micros, local-timestamp-millis/micros,
 //	             date, time-millis/micros, uuid (→ UTF-8 string),
-//	             decimal (bytes- or fixed-backed)
+//	             decimal (bytes- or fixed-backed), duration
 //	record     : → nested Group
 //	array      : → parquet.List
 //	map        : → parquet.Map (string keys)
 //	enum       : → UTF-8 string
 //	fixed      : → FIXED_LEN_BYTE_ARRAY(size)
 //	["null", X]: → Optional X
+//
+// Parquet has no native interval type, so a duration becomes a group of three
+// UINT32 columns named Months, Days and Milliseconds. Readers in other
+// languages must use these exact names.
 //
 // Multi-branch unions (other than ["null", X]) and unknown logicalTypes
 // return an error.
@@ -198,6 +203,8 @@ func avroLogicalToNode(logical string, schema map[string]any) (parquet.Node, err
 	switch logical {
 	case "decimal":
 		return avroDecimalToNode(schema)
+	case "duration":
+		return avroDurationToNode(schema)
 	case "timestamp-millis":
 		return parquet.Timestamp(parquet.Millisecond), nil
 	case "timestamp-micros":
@@ -261,6 +268,23 @@ func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
 	default:
 		return nil, fmt.Errorf("avro decimal must be backed by \"bytes\" or \"fixed\", got %q", baseType)
 	}
+}
+
+// avroDurationToNode maps an Avro duration, stored as fixed(12) holding three
+// little-endian uint32, to a group of three unsigned columns.
+//
+// The node is derived from avro.LogicalDuration, the type hamba/avro requires
+// for a duration, so the column names cannot drift from it: parquet-go matches
+// a group field to a struct by parquet tag or exact Go field name, and on a
+// miss writes zeros without an error.
+func avroDurationToNode(schema map[string]any) (parquet.Node, error) {
+	if baseType, _ := schema["type"].(string); baseType != "fixed" {
+		return nil, fmt.Errorf("avro duration must be backed by \"fixed\", got %q", baseType)
+	}
+	if size, ok := avroIntAttr(schema, "size"); !ok || size != 12 {
+		return nil, fmt.Errorf("avro duration \"size\" must be 12, got %v", schema["size"])
+	}
+	return parquet.SchemaOf(avro.LogicalDuration{}), nil
 }
 
 // avroIntAttr reads an Avro integer attribute from decoded JSON.
