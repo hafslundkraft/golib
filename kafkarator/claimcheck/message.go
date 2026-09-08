@@ -100,10 +100,7 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 		}
 		defer pr.Close() //nolint:errcheck // Close on PayloadReader is a no-op
 
-		// Opened here rather than left to parquet.NewGenericReader so the payload's
-		// own schema is available to compare against T; see ErrSchemaMismatch.
-		// Reading the row groups from this handle keeps the footer parse to one:
-		// each PayloadReader.ReadAt is an independent S3 range-GET.
+		// OpenFile provides the schema to validate against T; see checkModelSchema.
 		f, err := parquet.OpenFile(pr, pr.Size())
 		if err != nil {
 			span.RecordError(err)

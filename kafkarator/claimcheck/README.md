@@ -196,26 +196,27 @@ Processor options:
 
 Accessing the payload from a handler:
 
-- `claimcheck.Records[T](ctx, msg)` — typed row iterator. `T` must be a
-  struct whose exported fields carry `parquet:"..."` tags matching the
-  Parquet column names. This is the recommended API.
+- `claimcheck.Records[T](ctx, msg)` — typed row iterator, the recommended
+  API. Tag each field of `T` with the Parquet column it reads. Slices need
+  an extra `,list`:
 
-  An array field needs `parquet:"name,list"`. Parquet stores an array as a
-  three-level `LIST` group, which an untagged Go slice does not describe.
-  `T` may name a subset of the payload's columns; the rest are skipped.
+  ```go
+  type Row struct {
+      Name string   `parquet:"name"`
+      Tags []string `parquet:"tags,list"`
+  }
+  ```
 
-  Before reading, `Records` requires every column `T` reads to exist in the
-  payload under the same path, and returns an error matching
-  `claimcheck.ErrSchemaMismatch` otherwise — naming both the path `T` asked
-  for and the path the payload uses:
+  You can leave out columns you don't need, but every column `T` names must
+  exist in the payload. If one doesn't, `Records` yields an error matching
+  `claimcheck.ErrSchemaMismatch` and stops:
 
       T reads column "tags", but the payload stores it as "tags.list.element"
 
-  Without that check parquet-go reads the missing column as its zero value —
-  an empty slice, no error — in a row whose other fields are correct. Column
-  types are not compared: parquet-go converts between compatible widths and
-  errors on its own when it cannot. A `T` that is not a struct
-  (`map[string]any`) is rejected; use `msg.Payload` for schema-driven access.
+  The usual cause is a slice missing its `,list`.
+
+  `map[string]any` does not work as `T`. Use `Records[any]` to get each row
+  as a `map[string]any`.
 - `msg.PeekEnvelope(ctx)` — decode the envelope without fetching the
   S3 payload. Useful for logging / metrics.
 - `msg.Payload(ctx)` — low-level escape hatch returning a
