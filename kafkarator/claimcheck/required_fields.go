@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -73,9 +74,18 @@ func (e *requiredFieldError) push(segment pathSegment) {
 }
 
 func (e *requiredFieldError) path() string {
+	// Segments were pushed innermost first, on the way out of the walk.
+	outermostFirst := slices.Clone(e.segments)
+	slices.Reverse(outermostFirst)
+	return renderPath(outermostFirst)
+}
+
+// renderPath renders a field path outermost first, as "adresser[3].gate". A
+// position with no name renders as "[]", for a path through a schema rather than
+// through a value.
+func renderPath(segments []pathSegment) string {
 	var b strings.Builder
-	for i := len(e.segments) - 1; i >= 0; i-- {
-		segment := e.segments[i]
+	for _, segment := range segments {
 		if segment.position {
 			b.WriteByte('[')
 			b.WriteString(segment.name)

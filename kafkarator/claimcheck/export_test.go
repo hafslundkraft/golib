@@ -3,6 +3,7 @@ package claimcheck
 import (
 	"bytes"
 	"context"
+	"reflect"
 
 	parquet "github.com/parquet-go/parquet-go"
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
@@ -11,6 +12,18 @@ import (
 // AvroSchemaToParquet re-exported for tests only.
 func AvroSchemaToParquet(avroSchemaStr string) (*parquet.Schema, error) {
 	return avroSchemaToParquet(avroSchemaStr)
+}
+
+// CheckModelSchema compares a payload schema against the schema parquet-go would
+// derive from model, which stands in for the type parameter of [Records]; a value
+// rather than a type parameter so tests can drive it from a table. A nil model
+// stands for T = any. For use in tests only.
+func CheckModelSchema(file *parquet.Schema, model any) error {
+	modelType := reflect.TypeOf(model)
+	if modelType == nil {
+		modelType = reflect.TypeFor[any]()
+	}
+	return checkModelSchema(file, modelType)
 }
 
 // ClaimCheckRoleARN re-exported for tests only.

@@ -199,6 +199,20 @@ Accessing the payload from a handler:
 - `claimcheck.Records[T](ctx, msg)` — typed row iterator. `T` must be a
   struct whose exported fields carry `parquet:"..."` tags matching the
   Parquet column names. This is the recommended API.
+
+  An array field needs `parquet:"name,list"`. Parquet stores an array as a
+  three-level `LIST` group, which an untagged Go slice does not describe.
+  `T` may name a subset of the payload's columns; the rest are skipped.
+
+  Before reading, `Records` compares the payload's schema against the one
+  derived from `T` and returns an error matching
+  `claimcheck.ErrSchemaMismatch` if their shapes disagree, naming the field
+  path. Without that check parquet-go reads the mismatched column as its
+  zero value — an empty slice, no error — in a row whose other fields are
+  correct. Only shapes are compared: numeric widths are converted by
+  parquet-go, and an optional column may still be read into a non-pointer
+  field. A `T` that is not a struct (`map[string]any`) is rejected; use
+  `msg.Payload` for schema-driven access.
 - `msg.PeekEnvelope(ctx)` — decode the envelope without fetching the
   S3 payload. Useful for logging / metrics.
 - `msg.Payload(ctx)` — low-level escape hatch returning a
