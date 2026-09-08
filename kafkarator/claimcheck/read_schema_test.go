@@ -70,19 +70,19 @@ func TestCheckModelSchema(t *testing.T) {
 			name:       "slice_without_list_tag",
 			avroSchema: listSchema,
 			model:      listRowUntagged{},
-			wantErr:    `field "tags" does not match the payload schema: the payload holds a list, T describes a repeated column`,
+			wantErr:    `T reads column "tags", but the payload stores it as "tags.list.element"`,
 		},
 		{
 			name:       "field_the_payload_does_not_have",
 			avroSchema: listSchema,
 			model:      listRowMisspelled{},
-			wantErr:    `field "tag" does not match the payload schema: the payload has no such field`,
+			wantErr:    `T reads column "tag.list.element", which the payload does not have`,
 		},
 		{
 			name:       "nested_slice_names_the_full_path",
 			avroSchema: nestedListSchema,
 			model:      nestedRow{},
-			wantErr:    `field "inner.values" does not match the payload schema`,
+			wantErr:    `T reads column "inner.values", but the payload stores it as "inner.values.list.element"`,
 		},
 		{
 			name:       "any_reads_through_the_payloads_own_schema",

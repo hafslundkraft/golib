@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -73,19 +72,12 @@ func (e *requiredFieldError) push(segment pathSegment) {
 	e.segments = append(e.segments, segment)
 }
 
+// path renders the field path as "addresses[3].street". Segments were pushed
+// innermost first, on the way out of the walk, so it reads them in reverse.
 func (e *requiredFieldError) path() string {
-	// Segments were pushed innermost first, on the way out of the walk.
-	outermostFirst := slices.Clone(e.segments)
-	slices.Reverse(outermostFirst)
-	return renderPath(outermostFirst)
-}
-
-// renderPath renders a field path outermost first, as "adresser[3].gate". A
-// position with no name renders as "[]", for a path through a schema rather than
-// through a value.
-func renderPath(segments []pathSegment) string {
 	var b strings.Builder
-	for _, segment := range segments {
+	for i := len(e.segments) - 1; i >= 0; i-- {
+		segment := e.segments[i]
 		if segment.position {
 			b.WriteByte('[')
 			b.WriteString(segment.name)

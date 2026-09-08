@@ -204,15 +204,18 @@ Accessing the payload from a handler:
   three-level `LIST` group, which an untagged Go slice does not describe.
   `T` may name a subset of the payload's columns; the rest are skipped.
 
-  Before reading, `Records` compares the payload's schema against the one
-  derived from `T` and returns an error matching
-  `claimcheck.ErrSchemaMismatch` if their shapes disagree, naming the field
-  path. Without that check parquet-go reads the mismatched column as its
-  zero value — an empty slice, no error — in a row whose other fields are
-  correct. Only shapes are compared: numeric widths are converted by
-  parquet-go, and an optional column may still be read into a non-pointer
-  field. A `T` that is not a struct (`map[string]any`) is rejected; use
-  `msg.Payload` for schema-driven access.
+  Before reading, `Records` requires every column `T` reads to exist in the
+  payload under the same path, and returns an error matching
+  `claimcheck.ErrSchemaMismatch` otherwise — naming both the path `T` asked
+  for and the path the payload uses:
+
+      T reads column "tags", but the payload stores it as "tags.list.element"
+
+  Without that check parquet-go reads the missing column as its zero value —
+  an empty slice, no error — in a row whose other fields are correct. Column
+  types are not compared: parquet-go converts between compatible widths and
+  errors on its own when it cannot. A `T` that is not a struct
+  (`map[string]any`) is rejected; use `msg.Payload` for schema-driven access.
 - `msg.PeekEnvelope(ctx)` — decode the envelope without fetching the
   S3 payload. Useful for logging / metrics.
 - `msg.Payload(ctx)` — low-level escape hatch returning a
