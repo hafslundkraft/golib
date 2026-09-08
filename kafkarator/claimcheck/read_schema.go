@@ -60,6 +60,13 @@ func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 // schema derived from T disagree in shape. Physical types are left to parquet-go,
 // which converts between compatible widths; an optional column read into a
 // non-pointer field loses nulls but is long-established usage.
+//
+// parquet-go's own comparisons cannot stand in for this walk. [parquet.Convert]
+// returns a nil error for every mismatch below, filling a column it cannot map
+// with nulls — that is the silence this package exists to break.
+// [parquet.SameNodes] and [parquet.EqualNodes] are false even for a T that reads
+// correctly, because they require both schemas to name the same fields and so
+// reject column projection.
 func compareSchemas(file, model *parquet.Schema) error {
 	return compareGroups(file, model, nil)
 }

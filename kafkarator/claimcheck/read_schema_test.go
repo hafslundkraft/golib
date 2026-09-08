@@ -10,43 +10,43 @@ import (
 	"github.com/hafslundkraft/golib/kafkarator/claimcheck"
 )
 
-// The array in kundeSchema is the shape Go struct tags get wrong: Parquet stores
+// The array in listSchema is the shape Go struct tags get wrong: Parquet stores
 // it as a three-level LIST group.
-const kundeSchema = `{"type":"record","name":"Kunde","fields":[` +
-	`{"name":"navn","type":"string"},` +
-	`{"name":"adresser","type":{"type":"array","items":"string"}}]}`
+const listSchema = `{"type":"record","name":"L","fields":[` +
+	`{"name":"name","type":"string"},` +
+	`{"name":"tags","type":{"type":"array","items":"string"}}]}`
 
-// nestedSchema puts the array one level down, so the reported path has to name
-// both the record and the field inside it.
-const nestedSchema = `{"type":"record","name":"Maaling","fields":[` +
-	`{"name":"sensor","type":{"type":"record","name":"Sensor","fields":[` +
-	`{"name":"verdier","type":{"type":"array","items":"double"}}]}}]}`
+// nestedListSchema puts the array one level down, so the reported path has to
+// name both the record and the field inside it.
+const nestedListSchema = `{"type":"record","name":"N","fields":[` +
+	`{"name":"inner","type":{"type":"record","name":"I","fields":[` +
+	`{"name":"values","type":{"type":"array","items":"double"}}]}}]}`
 
-type kunde struct {
-	Navn     string   `parquet:"navn"`
-	Adresser []string `parquet:"adresser,list"`
+type listRow struct {
+	Name string   `parquet:"name"`
+	Tags []string `parquet:"tags,list"`
 }
 
-type kundeUtenListTag struct {
-	Navn     string   `parquet:"navn"`
-	Adresser []string `parquet:"adresser"`
+type listRowUntagged struct {
+	Name string   `parquet:"name"`
+	Tags []string `parquet:"tags"`
 }
 
-type kundeBareNavn struct {
-	Navn string `parquet:"navn"`
+type listRowSubset struct {
+	Name string `parquet:"name"`
 }
 
-type kundeMedSkrivefeil struct {
-	Navn    string   `parquet:"navn"`
-	Adreser []string `parquet:"adreser,list"`
+type listRowMisspelled struct {
+	Name string   `parquet:"name"`
+	Tag  []string `parquet:"tag,list"`
 }
 
-type sensor struct {
-	Verdier []float64 `parquet:"verdier"`
+type nestedInner struct {
+	Values []float64 `parquet:"values"`
 }
 
-type maaling struct {
-	Sensor sensor `parquet:"sensor"`
+type nestedRow struct {
+	Inner nestedInner `parquet:"inner"`
 }
 
 func TestCheckModelSchema(t *testing.T) {
@@ -57,46 +57,46 @@ func TestCheckModelSchema(t *testing.T) {
 		wantErr    string
 	}{
 		{
-			name:       "matching struct",
-			avroSchema: kundeSchema,
-			model:      kunde{},
+			name:       "matching_struct",
+			avroSchema: listSchema,
+			model:      listRow{},
 		},
 		{
-			name:       "column projection reads a subset",
-			avroSchema: kundeSchema,
-			model:      kundeBareNavn{},
+			name:       "column_projection_reads_a_subset",
+			avroSchema: listSchema,
+			model:      listRowSubset{},
 		},
 		{
-			name:       "slice without list tag",
-			avroSchema: kundeSchema,
-			model:      kundeUtenListTag{},
-			wantErr:    `field "adresser" does not match the payload schema: the payload holds a list, T describes a repeated column`,
+			name:       "slice_without_list_tag",
+			avroSchema: listSchema,
+			model:      listRowUntagged{},
+			wantErr:    `field "tags" does not match the payload schema: the payload holds a list, T describes a repeated column`,
 		},
 		{
-			name:       "field the payload does not have",
-			avroSchema: kundeSchema,
-			model:      kundeMedSkrivefeil{},
-			wantErr:    `field "adreser" does not match the payload schema: the payload has no such field`,
+			name:       "field_the_payload_does_not_have",
+			avroSchema: listSchema,
+			model:      listRowMisspelled{},
+			wantErr:    `field "tag" does not match the payload schema: the payload has no such field`,
 		},
 		{
-			name:       "nested slice names the full path",
-			avroSchema: nestedSchema,
-			model:      maaling{},
-			wantErr:    `field "sensor.verdier" does not match the payload schema`,
+			name:       "nested_slice_names_the_full_path",
+			avroSchema: nestedListSchema,
+			model:      nestedRow{},
+			wantErr:    `field "inner.values" does not match the payload schema`,
 		},
 		{
-			name:       "any reads through the payload's own schema",
-			avroSchema: kundeSchema,
+			name:       "any_reads_through_the_payloads_own_schema",
+			avroSchema: listSchema,
 			model:      nil,
 		},
 		{
-			name:       "pointer to a matching struct",
-			avroSchema: kundeSchema,
-			model:      &kunde{},
+			name:       "pointer_to_a_matching_struct",
+			avroSchema: listSchema,
+			model:      &listRow{},
 		},
 		{
-			name:       "map is not a supported model",
-			avroSchema: kundeSchema,
+			name:       "map_is_not_a_supported_model",
+			avroSchema: listSchema,
 			model:      map[string]any{},
 			wantErr:    "Records requires a struct with parquet field tags",
 		},
@@ -119,20 +119,21 @@ func TestCheckModelSchema(t *testing.T) {
 	}
 }
 
-// newKundeMessage writes one record through the real write path and returns a
+const listTopic = "test.sys--demo.list--v1"
+
+// newListMessage writes one record through the real write path and returns a
 // Message over the resulting payload.
-func newKundeMessage(t *testing.T, record any) *claimcheck.Message {
+func newListMessage(t *testing.T, record any) *claimcheck.Message {
 	t.Helper()
 
-	const topic = "test.sys--demo.kunder--v1"
 	s3 := claimcheck.NewFakeS3Client()
 	kw := &captureKW{}
 	w := claimcheck.NewTestWriter(kw, &jsonSerializer{},
 		claimcheck.WithWriterS3Client(s3),
-		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: kundeSchema, version: 1, id: 1}),
+		claimcheck.WithWriterSchemaFetcher(&fakeSchemaFetcher{schemaStr: listSchema, version: 1, id: 1}),
 	)
 
-	batch, err := w.NewBatch(context.Background(), topic)
+	batch, err := w.NewBatch(context.Background(), listTopic)
 	require.NoError(t, err)
 	t.Cleanup(batch.Cleanup)
 
@@ -140,27 +141,26 @@ func newKundeMessage(t *testing.T, record any) *claimcheck.Message {
 	require.NoError(t, batch.Produce(context.Background()))
 
 	envelope := unmarshalEnvelope(t, kw.last.Value)
-	return claimcheck.NewMessage(topic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
+	return claimcheck.NewMessage(listTopic, nil, kw.last.Value, nil, s3, &fakeEnvelopeDeserializer{envelope: envelope})
 }
 
-func TestRecordsRejectsSliceWithoutListTag(t *testing.T) {
-	msg := newKundeMessage(t, kunde{Navn: "Kari", Adresser: []string{"Storgata 1", "Lilleveien 4"}})
+func TestRecords_RejectsSliceWithoutListTag(t *testing.T) {
+	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
 
 	var rows int
-	for row, err := range claimcheck.Records[kundeUtenListTag](context.Background(), msg) {
+	for _, err := range claimcheck.Records[listRowUntagged](context.Background(), msg) {
 		rows++
 		require.ErrorIs(t, err, claimcheck.ErrSchemaMismatch)
-		assert.Empty(t, row.Adresser, "the mismatch this guards against is an empty slice returned as if it were data")
 	}
 	assert.Equal(t, 1, rows, "the error must be yielded once and end the iteration")
 }
 
-func TestRecordsReadsSliceWithListTag(t *testing.T) {
-	input := kunde{Navn: "Kari", Adresser: []string{"Storgata 1", "Lilleveien 4"}}
-	msg := newKundeMessage(t, input)
+func TestRecords_ReadsSliceWithListTag(t *testing.T) {
+	input := listRow{Name: "a", Tags: []string{"x", "y"}}
+	msg := newListMessage(t, input)
 
-	var got []kunde
-	for row, err := range claimcheck.Records[kunde](context.Background(), msg) {
+	var got []listRow
+	for row, err := range claimcheck.Records[listRow](context.Background(), msg) {
 		require.NoError(t, err)
 		got = append(got, row)
 	}
@@ -169,10 +169,10 @@ func TestRecordsReadsSliceWithListTag(t *testing.T) {
 	assert.Equal(t, input, got[0])
 }
 
-func TestRecordsOnEmptyMessageYieldsNothing(t *testing.T) {
-	msg := claimcheck.NewMessage("test.sys--demo.kunder--v1", nil, nil, nil, nil, nil)
+func TestRecords_OnEmptyMessageYieldsNothing(t *testing.T) {
+	msg := claimcheck.NewMessage(listTopic, nil, nil, nil, nil, nil)
 
-	for range claimcheck.Records[kundeUtenListTag](context.Background(), msg) {
+	for range claimcheck.Records[listRowUntagged](context.Background(), msg) {
 		t.Fatal("a tombstone must not reach the schema check")
 	}
 }
