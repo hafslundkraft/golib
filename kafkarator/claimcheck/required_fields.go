@@ -72,8 +72,6 @@ func (e *requiredFieldError) push(segment pathSegment) {
 	e.segments = append(e.segments, segment)
 }
 
-// path renders the field path as "addresses[3].street". Segments were pushed
-// innermost first, on the way out of the walk, so it reads them in reverse.
 func (e *requiredFieldError) path() string {
 	var b strings.Builder
 	for i := len(e.segments) - 1; i >= 0; i-- {
