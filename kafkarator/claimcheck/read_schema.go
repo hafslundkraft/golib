@@ -39,9 +39,14 @@ func (e *schemaMismatchError) Error() string {
 		return fmt.Sprintf(
 			"claimcheck: T reads column %q, which the payload does not have", e.want)
 	}
+	if len(e.have) == 1 {
+		return fmt.Sprintf(
+			"claimcheck: T reads column %q, but the payload stores it as %q",
+			e.want, e.have[0])
+	}
 	return fmt.Sprintf(
-		"claimcheck: T reads column %q, but the payload stores it as %q",
-		e.want, strings.Join(e.have, ", "))
+		"claimcheck: T reads column %q, but the payload stores it under %v",
+		e.want, e.have)
 }
 
 func (e *schemaMismatchError) Is(target error) bool { return target == ErrSchemaMismatch }
