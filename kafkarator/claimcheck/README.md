@@ -197,8 +197,8 @@ Processor options:
 Accessing the payload from a handler:
 
 - `claimcheck.Records[T](ctx, msg)` — typed row iterator, the recommended
-  API. Tag each field of `T` with the Parquet column it reads. Slices need
-  an extra `,list`:
+  API. Tag each field of `T` with the Parquet column it reads. Slices that
+  represent Parquet LISTs (e.g. `[]string`) need an extra `,list`:
 
   ```go
   type Row struct {
