@@ -211,7 +211,7 @@ Accessing the payload from a handler:
   exist in the payload. If one doesn't, `Records` yields an error matching
   `claimcheck.ErrSchemaMismatch` and stops:
 
-      T reads column "tags", but the payload stores it as "tags.list.element"
+      claimcheck: T reads column "tags", but the payload stores it as "tags.list.element"
 
   The usual cause is a slice missing its `,list`.
 
