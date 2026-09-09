@@ -11,16 +11,12 @@ import (
 
 // ErrSchemaMismatch reports a column T reads that the payload does not store
 // under that path. parquet-go derives the reader's schema from T alone and never
-// consults the file, so such a column is read as the zero value in silence, in a
-// row whose other fields are correct.
+// consults the file, so without this check the column reads as the zero value in
+// silence. The error names the path T asked for and the paths the payload stores
+// under the same top-level field; either side may be the wrong one.
 //
 // The common case is an array field missing its ",list" tag: Parquet stores an
-// array under "field.list.element", an untagged Go slice asks for "field", and
-// the read yields an empty slice with no error.
-//
-// The error names the path T asked for and the paths the payload stores under
-// the same top-level field. Either side may be the wrong one: T may never have
-// matched, or the payload's schema may have moved on since T was written.
+// array under "field.list.element", an untagged Go slice asks for "field".
 //
 // Match it with errors.Is.
 var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
@@ -28,8 +24,8 @@ var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 type schemaMismatchError struct {
 	// want is the column path T reads, as "field.list.element".
 	want string
-	// have is the payload's column paths under want's first segment; empty when
-	// the payload has no such field.
+	// have is the payload's paths under want's first segment; empty when the
+	// payload has no such field.
 	have []string
 }
 
@@ -51,11 +47,9 @@ func (e *schemaMismatchError) Error() string {
 func (e *schemaMismatchError) Is(target error) bool { return target == ErrSchemaMismatch }
 
 // checkModelSchema compares the payload's schema against the one parquet-go will
-// derive from T.
-//
-// An interface T is read through the file's own schema: nothing to compare. Any
-// other non-struct T, map[string]any in particular, has no derivable schema and
-// makes parquet-go panic rather than return an error, so it is rejected here.
+// derive from T. An interface T is read through the file's own schema: nothing to
+// compare. Any other non-struct T, map[string]any in particular, has no derivable
+// schema and makes parquet-go panic, so it is rejected here.
 func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 	if model.Kind() == reflect.Interface {
 		return nil
@@ -74,17 +68,15 @@ func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 
 // checkColumns requires every leaf column T reads to exist in the payload under
 // the same path. Containment rather than equality, since a payload column T does
-// not name is projection and legal. Comparing leaf paths is enough because a path
-// carries the structure above it — a list's ".list.element", a map's
-// ".key_value.value", a record's field names.
+// not name is legal projection. Leaf paths suffice because a path carries the
+// structure above it: a list's ".list.element", a map's ".key_value.value".
 //
 // Physical types are deliberately not compared: parquet-go converts between
 // compatible widths and errors loudly when it cannot ("STRING to DOUBLE").
 //
-// parquet-go's own comparisons cannot stand in: [parquet.Convert] returns a nil
-// error for every mismatch here, filling the column with nulls, and
-// [parquet.SameNodes] / [parquet.EqualNodes] require both schemas to name the
-// same fields, so they reject legal projection.
+// parquet-go's own comparisons cannot stand in: [parquet.Convert] returns nil for
+// every mismatch here, and [parquet.SameNodes] / [parquet.EqualNodes] reject
+// legal projection.
 func checkColumns(file, model *parquet.Schema) error {
 	fileColumns := file.Columns()
 
@@ -104,7 +96,7 @@ func checkColumns(file, model *parquet.Schema) error {
 }
 
 // columnsUnder returns the payload's column paths below one top-level field, so
-// the error can show where the payload actually keeps it.
+// the error can show where the payload keeps it.
 func columnsUnder(columns [][]string, field string) []string {
 	var under []string
 	for _, column := range columns {
