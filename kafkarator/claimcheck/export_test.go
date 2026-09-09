@@ -9,7 +9,7 @@ import (
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
 )
 
-// AvroSchemaToParquet re-exported for tests only.
+// AvroSchemaToParquet re-exports the schema converter for tests.
 func AvroSchemaToParquet(avroSchemaStr string) (*parquet.Schema, error) {
 	return avroSchemaToParquet(avroSchemaStr)
 }
@@ -24,7 +24,7 @@ func CheckModelSchema(file *parquet.Schema, model any) error {
 	return checkModelSchema(file, modelType)
 }
 
-// ClaimCheckRoleARN re-exported for tests only.
+// ClaimCheckRoleARN re-exports the role ARN helper for tests.
 func ClaimCheckRoleARN(system, env, bucket, access string) (string, error) {
 	return claimCheckRoleARN(system, env, bucket, access)
 }

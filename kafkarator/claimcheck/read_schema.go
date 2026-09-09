@@ -45,11 +45,9 @@ func (e *schemaMismatchError) Error() string {
 
 func (e *schemaMismatchError) Is(target error) bool { return target == ErrSchemaMismatch }
 
-// checkModelSchema compares the payload's schema with the one parquet-go builds
-// from T. An interface T is skipped: it reads through the file's own schema, so
-// there is nothing to compare. Other non-struct types, map[string]any above all,
-// have no schema to build, and parquet-go panics on them instead of returning an
-// error. They are rejected here.
+// checkModelSchema compares the payload schema with the one parquet-go builds
+// from T. Interfaces use the file schema and are skipped; other non-struct
+// models are rejected because parquet-go cannot build a schema for them.
 func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 	if model.Kind() == reflect.Interface {
 		return nil
@@ -66,16 +64,9 @@ func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 	return checkColumns(file, parquet.SchemaOf(reflect.Zero(model).Interface()))
 }
 
-// checkColumns requires every column T reads to exist in the payload at the same
-// path. Containment, not equality: a payload column T leaves out is legal column
-// projection. Leaf paths are enough to compare, since a leaf path spells out the
-// structure above it ("tags.list.element" for a list of strings).
-//
-// Physical types are left to parquet-go, which converts compatible widths and
-// errors clearly when it cannot convert.
-//
-// Neither [parquet.Convert] (zero-fills missing columns) nor [parquet.SameNodes]
-// (requires equal field counts) can be used here.
+// checkColumns requires every leaf column T reads to exist in the payload.
+// Missing payload columns are allowed because T may read a projection. Physical
+// type compatibility is handled by parquet-go.
 func checkColumns(file, model *parquet.Schema) error {
 	fileColumns := file.Columns()
 
@@ -94,8 +85,7 @@ func checkColumns(file, model *parquet.Schema) error {
 	return nil
 }
 
-// columnsUnder returns the payload's column paths under one top-level field. The
-// error uses them to show where the payload stores that field.
+// columnsUnder returns payload column paths under one top-level field for errors.
 func columnsUnder(columns [][]string, field string) []string {
 	var under []string
 	for _, column := range columns {
