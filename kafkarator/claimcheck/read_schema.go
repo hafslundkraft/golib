@@ -9,22 +9,21 @@ import (
 	parquet "github.com/parquet-go/parquet-go"
 )
 
-// ErrSchemaMismatch reports a column T reads that the payload does not store
-// under that path. parquet-go derives the reader's schema from T alone and never
-// consults the file, so without this check the column reads as the zero value in
-// silence. The error names the path T asked for and the paths the payload stores
-// under the same top-level field; either side may be the wrong one.
+// ErrSchemaMismatch means T reads a column the payload does not have at that
+// path. parquet-go builds the reader's schema from T, never from the file.
+// Without this check, the column reads as the zero value with no error.
 //
-// The common case is an array field missing its ",list" tag: Parquet stores an
-// array under "field.list.element", an untagged Go slice asks for "field".
+// The usual cause is a slice field missing its ",list" tag. Parquet stores a list
+// under "field.list.element"; an untagged Go slice asks for "field". The error
+// shows both paths, since either side can be the outdated one.
 //
 // Match it with errors.Is.
 var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 
 type schemaMismatchError struct {
-	// want is the column path T reads, as "field.list.element".
+	// want is the column path T reads, such as "field.list.element".
 	want string
-	// have is the payload's paths under want's first segment; empty when the
+	// have holds the payload's paths under want's first segment. Empty if the
 	// payload has no such field.
 	have []string
 }
@@ -46,10 +45,11 @@ func (e *schemaMismatchError) Error() string {
 
 func (e *schemaMismatchError) Is(target error) bool { return target == ErrSchemaMismatch }
 
-// checkModelSchema compares the payload's schema against the one parquet-go will
-// derive from T. An interface T is read through the file's own schema: nothing to
-// compare. Any other non-struct T, map[string]any in particular, has no derivable
-// schema and makes parquet-go panic, so it is rejected here.
+// checkModelSchema compares the payload's schema with the one parquet-go builds
+// from T. An interface T is skipped: it reads through the file's own schema, so
+// there is nothing to compare. Other non-struct types, map[string]any above all,
+// have no schema to build, and parquet-go panics on them instead of returning an
+// error. They are rejected here.
 func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 	if model.Kind() == reflect.Interface {
 		return nil
@@ -66,17 +66,17 @@ func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 	return checkColumns(file, parquet.SchemaOf(reflect.Zero(model).Interface()))
 }
 
-// checkColumns requires every leaf column T reads to exist in the payload under
-// the same path. Containment rather than equality, since a payload column T does
-// not name is legal projection. Leaf paths suffice because a path carries the
-// structure above it: a list's ".list.element", a map's ".key_value.value".
+// checkColumns requires every column T reads to exist in the payload at the same
+// path. Containment, not equality: a payload column T leaves out is legal column
+// projection. Leaf paths are enough to compare, since a leaf path spells out the
+// structure above it: ".list.element" for a list, ".key_value.value" for a map.
 //
-// Physical types are deliberately not compared: parquet-go converts between
-// compatible widths and errors loudly when it cannot ("STRING to DOUBLE").
+// Physical types are not compared. parquet-go converts between compatible widths,
+// and errors clearly when it cannot ("STRING to DOUBLE").
 //
-// parquet-go's own comparisons cannot stand in: [parquet.Convert] returns nil for
-// every mismatch here, and [parquet.SameNodes] / [parquet.EqualNodes] reject
-// legal projection.
+// parquet-go's own comparisons cannot stand in. [parquet.Convert] returns nil for
+// these mismatches. [parquet.SameNodes] and [parquet.EqualNodes] require both
+// schemas to name the same fields, which rules out projection.
 func checkColumns(file, model *parquet.Schema) error {
 	fileColumns := file.Columns()
 
@@ -95,8 +95,8 @@ func checkColumns(file, model *parquet.Schema) error {
 	return nil
 }
 
-// columnsUnder returns the payload's column paths below one top-level field, so
-// the error can show where the payload keeps it.
+// columnsUnder returns the payload's column paths under one top-level field. The
+// error uses them to show where the payload stores that field.
 func columnsUnder(columns [][]string, field string) []string {
 	var under []string
 	for _, column := range columns {
