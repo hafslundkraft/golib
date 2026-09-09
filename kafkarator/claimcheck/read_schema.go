@@ -69,14 +69,13 @@ func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 // checkColumns requires every column T reads to exist in the payload at the same
 // path. Containment, not equality: a payload column T leaves out is legal column
 // projection. Leaf paths are enough to compare, since a leaf path spells out the
-// structure above it: ".list.element" for a list, ".key_value.value" for a map.
+// structure above it ("tags.list.element" for a list of strings).
 //
-// Physical types are not compared. parquet-go converts between compatible widths,
-// and errors clearly when it cannot ("STRING to DOUBLE").
+// Physical types are left to parquet-go, which converts compatible widths and
+// errors clearly when it cannot convert.
 //
-// parquet-go's own comparisons cannot stand in. [parquet.Convert] returns nil for
-// these mismatches. [parquet.SameNodes] and [parquet.EqualNodes] require both
-// schemas to name the same fields, which rules out projection.
+// Neither [parquet.Convert] (zero-fills missing columns) nor [parquet.SameNodes]
+// (requires equal field counts) can be used here.
 func checkColumns(file, model *parquet.Schema) error {
 	fileColumns := file.Columns()
 
