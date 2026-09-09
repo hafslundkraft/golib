@@ -58,7 +58,7 @@ func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 	if model.Kind() != reflect.Struct {
 		return fmt.Errorf(
 			"claimcheck: Records requires a struct with parquet field tags, got %s;"+
-				" use msg.Payload for schema-driven access to the raw Parquet bytes",
+				" use Records[any] for schema-driven rows, or msg.Payload to access the raw Parquet bytes",
 			model)
 	}
 	return checkColumns(file, parquet.SchemaOf(reflect.Zero(model).Interface()))
