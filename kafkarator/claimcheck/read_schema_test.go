@@ -68,6 +68,25 @@ type nestedRow struct {
 	Inner nestedInner `parquet:"inner"`
 }
 
+// groupListSchema is an array of records, so the leaf sits past the LIST wrapper.
+const groupListSchema = `{"type":"record","name":"G","fields":[` +
+	`{"name":"groups","type":{"type":"array","items":{"type":"record","name":"Group","fields":[` +
+	`{"name":"value","type":"string"},` +
+	`{"name":"count","type":"long"}]}}}]}`
+
+type group struct {
+	Value string `parquet:"value"`
+	Count int64  `parquet:"count"`
+}
+
+type groupRow struct {
+	Groups []group `parquet:"groups,list"`
+}
+
+type groupRowUntagged struct {
+	Groups []group `parquet:"groups"`
+}
+
 func TestCheckModelSchema(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -113,6 +132,19 @@ func TestCheckModelSchema(t *testing.T) {
 			avroSchema: nestedListSchema,
 			model:      nestedRow{},
 			wantErr:    `Records[claimcheck_test.nestedRow] reads column "inner.values", but the payload stores it as "inner.values.list.element"`,
+		},
+		{
+			name:       "struct_slice_with_list_tag",
+			avroSchema: groupListSchema,
+			model:      groupRow{},
+		},
+		{
+			// "groups.value" is not a prefix of "groups.list.element.value" the
+			// way "tags" is of "tags.list.element": the leaf sits past the wrapper.
+			name:       "struct_slice_without_list_tag",
+			avroSchema: groupListSchema,
+			model:      groupRowUntagged{},
+			wantErr:    `Records[claimcheck_test.groupRowUntagged] reads column "groups.value", but the payload stores it as "groups.list.element.value"`,
 		},
 		{
 			name:       "any_reads_through_the_payloads_own_schema",
@@ -197,6 +229,25 @@ func TestRecords_ReadsSliceWithListTag(t *testing.T) {
 
 	require.Len(t, got, 1)
 	assert.Equal(t, input, got[0])
+}
+
+// Records[any] is the escape hatch the schema-mismatch error points at: it reads
+// through the payload's own schema, so the list comes back whole without a
+// ",list" tag.
+func TestRecords_AnyReadsThroughThePayloadSchema(t *testing.T) {
+	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
+
+	var got []any
+	for row, err := range claimcheck.Records[any](context.Background(), msg) {
+		require.NoError(t, err)
+		got = append(got, row)
+	}
+
+	require.Len(t, got, 1)
+	assert.Equal(t, map[string]any{
+		"name": "a",
+		"tags": []any{"x", "y"},
+	}, got[0])
 }
 
 func TestRecords_OnEmptyMessageYieldsNothing(t *testing.T) {

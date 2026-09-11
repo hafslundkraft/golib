@@ -81,8 +81,12 @@ func checkColumns(payload, reader *parquet.Schema, readerType string) error {
 	payloadColumns := payload.Columns()
 
 	have := make(map[string]bool, len(payloadColumns))
+	reshaped := make(map[string][]string, len(payloadColumns))
 	for _, column := range payloadColumns {
-		have[strings.Join(column, ".")] = true
+		path := strings.Join(column, ".")
+		have[path] = true
+		field := withoutListWrappers(column)
+		reshaped[field] = append(reshaped[field], path)
 	}
 
 	for _, column := range reader.Columns() {
@@ -90,29 +94,25 @@ func checkColumns(payload, reader *parquet.Schema, readerType string) error {
 		if have[path] {
 			continue
 		}
-		if reshaped := reshapedAs(payloadColumns, path); len(reshaped) > 0 {
-			return &schemaMismatchError{rowType: readerType, want: path, have: reshaped}
+		if paths := reshaped[withoutListWrappers(column)]; len(paths) > 0 {
+			return &schemaMismatchError{rowType: readerType, want: path, have: paths}
 		}
 	}
 	return nil
 }
 
-// reshapedAs returns the payload paths that hold the same field as want, but in
-// a different shape. Those are the paths that are a strict ancestor or descendant
-// of want: "tags" and "tags.list.element" are the same field, wrapped in a LIST
-// group on one side only, while "tag" and "tags" are simply two different fields.
-func reshapedAs(payloadColumns [][]string, want string) []string {
-	var reshaped []string
-	for _, column := range payloadColumns {
-		path := strings.Join(column, ".")
-		if isAncestor(path, want) || isAncestor(want, path) {
-			reshaped = append(reshaped, path)
+// withoutListWrappers drops the "list.element" groups Parquet puts around a
+// repeated field, so the same field compares equal whichever side carries the
+// wrapper: "groups.list.element.value" and "groups.value" both reduce to
+// "groups.value".
+func withoutListWrappers(column []string) string {
+	trimmed := make([]string, 0, len(column))
+	for i := 0; i < len(column); i++ {
+		if column[i] == "list" && i+1 < len(column) && column[i+1] == "element" {
+			i++
+			continue
 		}
+		trimmed = append(trimmed, column[i])
 	}
-	return reshaped
-}
-
-// isAncestor reports whether prefix is a group that encloses path.
-func isAncestor(prefix, path string) bool {
-	return strings.HasPrefix(path, prefix+".")
+	return strings.Join(trimmed, ".")
 }
