@@ -15,13 +15,13 @@ func AvroSchemaToParquet(avroSchemaStr string) (*parquet.Schema, error) {
 }
 
 // CheckModelSchema validates the payload schema against model, the stand-in for
-// the type parameter of [Records]. A nil model stands for T = any.
-func CheckModelSchema(file *parquet.Schema, model any) error {
+// the type parameter of [Records]. A nil model stands for Records[any].
+func CheckModelSchema(payload *parquet.Schema, model any) error {
 	modelType := reflect.TypeOf(model)
 	if modelType == nil {
 		modelType = reflect.TypeFor[any]()
 	}
-	return checkModelSchema(file, modelType)
+	return checkModelSchema(payload, modelType)
 }
 
 // ClaimCheckRoleARN re-exports the role ARN helper for tests.

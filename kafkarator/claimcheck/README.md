@@ -207,11 +207,11 @@ Accessing the payload from a handler:
   }
   ```
 
-  You can leave out columns you don't need, but every column `T` names must
-  exist in the payload. If one doesn't, `Records` yields an error matching
+  You can leave out columns you don't need. If `T` and the payload store the
+  same field at different paths, `Records` yields an error matching
   `claimcheck.ErrSchemaMismatch` and stops:
 
-      claimcheck: T reads column "tags", but the payload stores it as "tags.list.element"
+      claimcheck: Records[main.Row] reads column "tags", but the payload stores it as "tags.list.element"
 
   The usual cause is a slice missing its `,list`.
 

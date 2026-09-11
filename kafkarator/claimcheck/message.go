@@ -100,7 +100,8 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 		}
 		defer pr.Close() //nolint:errcheck // Close on PayloadReader is a no-op
 
-		// OpenFile provides the schema to validate against T; see checkModelSchema.
+		// OpenFile provides the payload schema to validate T against; see
+		// checkModelSchema.
 		f, err := parquet.OpenFile(pr, pr.Size())
 		if err != nil {
 			span.RecordError(err)

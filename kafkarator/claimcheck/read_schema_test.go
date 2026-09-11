@@ -41,6 +41,25 @@ type listRowMisspelled struct {
 	Tag  []string `parquet:"tag,list"`
 }
 
+// listRowEvolved is a consumer that has picked up an optional field the producer
+// added after the payload in listSchema was written.
+type listRowEvolved struct {
+	Name  string   `parquet:"name"`
+	Tags  []string `parquet:"tags,list"`
+	Email *string  `parquet:"email,optional"`
+}
+
+// nestedRowEvolved adds the optional field inside an existing group, so the
+// payload does have columns under "inner".
+type nestedInnerEvolved struct {
+	Values []float64 `parquet:"values,list"`
+	Unit   *string   `parquet:"unit,optional"`
+}
+
+type nestedRowEvolved struct {
+	Inner nestedInnerEvolved `parquet:"inner"`
+}
+
 type nestedInner struct {
 	Values []float64 `parquet:"values"`
 }
@@ -70,19 +89,30 @@ func TestCheckModelSchema(t *testing.T) {
 			name:       "slice_without_list_tag",
 			avroSchema: listSchema,
 			model:      listRowUntagged{},
-			wantErr:    `T reads column "tags", but the payload stores it as "tags.list.element"`,
+			wantErr:    `Records[claimcheck_test.listRowUntagged] reads column "tags", but the payload stores it as "tags.list.element"`,
 		},
 		{
+			// Indistinguishable from a field the producer has not added yet, so
+			// it reads as the zero value rather than failing the whole message.
 			name:       "field_the_payload_does_not_have",
 			avroSchema: listSchema,
 			model:      listRowMisspelled{},
-			wantErr:    `T reads column "tag.list.element", which the payload does not have`,
+		},
+		{
+			name:       "optional_field_added_after_the_payload_was_written",
+			avroSchema: listSchema,
+			model:      listRowEvolved{},
+		},
+		{
+			name:       "optional_field_added_inside_an_existing_group",
+			avroSchema: nestedListSchema,
+			model:      nestedRowEvolved{},
 		},
 		{
 			name:       "nested_slice_names_the_full_path",
 			avroSchema: nestedListSchema,
 			model:      nestedRow{},
-			wantErr:    `T reads column "inner.values", but the payload stores it as "inner.values.list.element"`,
+			wantErr:    `Records[claimcheck_test.nestedRow] reads column "inner.values", but the payload stores it as "inner.values.list.element"`,
 		},
 		{
 			name:       "any_reads_through_the_payloads_own_schema",

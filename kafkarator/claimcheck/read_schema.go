@@ -4,51 +4,55 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	parquet "github.com/parquet-go/parquet-go"
 )
 
-// ErrSchemaMismatch means T reads a column the payload does not have at that
-// path. parquet-go builds the reader's schema from T, never from the file.
-// Without this check, the column reads as the zero value with no error.
+// ErrSchemaMismatch means the row struct passed to [Records] and the payload
+// keep the same field at different column paths. parquet-go builds the reader
+// schema from the struct alone, so a field like that quietly reads as the zero
+// value instead of failing.
 //
-// The usual cause is a slice field missing its ",list" tag. Parquet stores a list
-// under "field.list.element"; an untagged Go slice asks for "field". The error
-// shows both paths, since either side can be the outdated one.
+// The usual cause is a slice field missing its ",list" tag. Parquet keeps a list
+// at "field.list.element", but an untagged Go slice asks for "field". The error
+// prints both paths, because either side could be the outdated one. Maps need no
+// tag: parquet-go wraps a Go map in the same "key_value" group the payload uses.
+//
+// If the payload has no sign of the column at all, that is not a mismatch. It is
+// a field added to the schema after the payload was written, and reading it as
+// the zero value is what makes schema evolution work.
 //
 // Match it with errors.Is.
 var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 
 type schemaMismatchError struct {
-	// want is the column path T reads, such as "field.list.element".
+	// rowType is the name of the Go struct the reader schema was built from.
+	rowType string
+	// want is the column path the struct reads, such as "field.list.element".
 	want string
-	// have holds the payload's paths under want's first segment. Empty if the
-	// payload has no such field.
+	// have lists the payload paths that keep the same field in a different shape.
 	have []string
 }
 
 func (e *schemaMismatchError) Error() string {
-	if len(e.have) == 0 {
-		return fmt.Sprintf(
-			"claimcheck: T reads column %q, which the payload does not have", e.want)
-	}
-	if len(e.have) == 1 {
-		return fmt.Sprintf(
-			"claimcheck: T reads column %q, but the payload stores it as %q",
-			e.want, e.have[0])
+	quoted := make([]string, len(e.have))
+	for i, path := range e.have {
+		quoted[i] = strconv.Quote(path)
 	}
 	return fmt.Sprintf(
-		"claimcheck: T reads column %q, but the payload stores it under %v",
-		e.want, e.have)
+		"claimcheck: Records[%s] reads column %q, but the payload stores it as %s",
+		e.rowType, e.want, strings.Join(quoted, " or "))
 }
 
 func (e *schemaMismatchError) Is(target error) bool { return target == ErrSchemaMismatch }
 
-// checkModelSchema compares the payload schema with the one parquet-go builds
-// from T. Interfaces use the file schema and are skipped; other non-struct
-// models are rejected because parquet-go cannot build a schema for them.
-func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
+// checkModelSchema compares the payload schema with the schema parquet-go builds
+// from model, the type [Records] was instantiated with. An interface model is
+// skipped, because it reads through the payload's own schema. Any other
+// non-struct model is rejected: parquet-go cannot build a schema for it.
+func checkModelSchema(payload *parquet.Schema, model reflect.Type) error {
 	if model.Kind() == reflect.Interface {
 		return nil
 	}
@@ -61,37 +65,54 @@ func checkModelSchema(file *parquet.Schema, model reflect.Type) error {
 				" use Records[any] for schema-driven rows, or msg.Payload to access the raw Parquet bytes",
 			model)
 	}
-	return checkColumns(file, parquet.SchemaOf(reflect.Zero(model).Interface()))
+	reader := parquet.SchemaOf(reflect.Zero(model).Interface())
+	return checkColumns(payload, reader, model.String())
 }
 
-// checkColumns requires every leaf column T reads to exist in the payload.
-// Missing payload columns are allowed because T may read a projection. Physical
-// type compatibility is handled by parquet-go.
-func checkColumns(file, model *parquet.Schema) error {
-	fileColumns := file.Columns()
+// checkColumns fails when the reader schema and the payload put the same field
+// in a different shape. Two other cases are fine and pass: the payload keeps the
+// column somewhere unrelated (the reader is reading a subset of the columns), or
+// the payload does not have the column at all (it was written before the field
+// existed). parquet-go itself checks that the physical types match.
+//
+// readerType is the name of the Go struct reader was built from, used in the
+// error message.
+func checkColumns(payload, reader *parquet.Schema, readerType string) error {
+	payloadColumns := payload.Columns()
 
-	have := make(map[string]bool, len(fileColumns))
-	for _, column := range fileColumns {
+	have := make(map[string]bool, len(payloadColumns))
+	for _, column := range payloadColumns {
 		have[strings.Join(column, ".")] = true
 	}
 
-	for _, column := range model.Columns() {
+	for _, column := range reader.Columns() {
 		path := strings.Join(column, ".")
 		if have[path] {
 			continue
 		}
-		return &schemaMismatchError{want: path, have: columnsUnder(fileColumns, column[0])}
+		if reshaped := reshapedAs(payloadColumns, path); len(reshaped) > 0 {
+			return &schemaMismatchError{rowType: readerType, want: path, have: reshaped}
+		}
 	}
 	return nil
 }
 
-// columnsUnder returns payload column paths under one top-level field for errors.
-func columnsUnder(columns [][]string, field string) []string {
-	var under []string
-	for _, column := range columns {
-		if column[0] == field {
-			under = append(under, strings.Join(column, "."))
+// reshapedAs returns the payload paths that hold the same field as want, but in
+// a different shape. Those are the paths that are a strict ancestor or descendant
+// of want: "tags" and "tags.list.element" are the same field, wrapped in a LIST
+// group on one side only, while "tag" and "tags" are simply two different fields.
+func reshapedAs(payloadColumns [][]string, want string) []string {
+	var reshaped []string
+	for _, column := range payloadColumns {
+		path := strings.Join(column, ".")
+		if isAncestor(path, want) || isAncestor(want, path) {
+			reshaped = append(reshaped, path)
 		}
 	}
-	return under
+	return reshaped
+}
+
+// isAncestor reports whether prefix is a group that encloses path.
+func isAncestor(prefix, path string) bool {
+	return strings.HasPrefix(path, prefix+".")
 }
