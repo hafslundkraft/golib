@@ -196,9 +196,27 @@ Processor options:
 
 Accessing the payload from a handler:
 
-- `claimcheck.Records[T](ctx, msg)` — typed row iterator. `T` must be a
-  struct whose exported fields carry `parquet:"..."` tags matching the
-  Parquet column names. This is the recommended API.
+- `claimcheck.Records[T](ctx, msg)` — typed row iterator, the recommended
+  API. Tag each field of `T` with the Parquet column it reads. Slices that
+  represent Parquet LISTs (e.g. `[]string`) need an extra `,list`:
+
+  ```go
+  type Row struct {
+      Name string   `parquet:"name"`
+      Tags []string `parquet:"tags,list"`
+  }
+  ```
+
+  You can leave out columns you don't need. If `T` and the payload store the
+  same field at different paths, `Records` yields an error matching
+  `claimcheck.ErrSchemaMismatch` and stops:
+
+      claimcheck: Records[main.Row] reads column "tags", but the payload stores it as "tags.list.element"
+
+  The usual cause is a slice missing its `,list`.
+
+  `map[string]any` does not work as `T`. Use `Records[any]` to get each row
+  as a `map[string]any`.
 - `msg.PeekEnvelope(ctx)` — decode the envelope without fetching the
   S3 payload. Useful for logging / metrics.
 - `msg.Payload(ctx)` — low-level escape hatch returning a
