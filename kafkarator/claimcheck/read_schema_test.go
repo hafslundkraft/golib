@@ -2,6 +2,7 @@ package claimcheck_test
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,6 +88,22 @@ type groupRowUntagged struct {
 	Groups []group `parquet:"groups"`
 }
 
+// scalarTagsSchema is the reverse of listSchema: the producer stores one value
+// where the consumer in listRowUntagged expects many.
+const scalarTagsSchema = `{"type":"record","name":"S","fields":[` +
+	`{"name":"name","type":"string"},` +
+	`{"name":"tags","type":"string"}]}`
+
+// matrixSchema nests one LIST inside another, so the wrappers stack.
+const matrixSchema = `{"type":"record","name":"M","fields":[` +
+	`{"name":"matrix","type":{"type":"array","items":{"type":"array","items":"double"}}}]}`
+
+// matrixRow cannot read matrixSchema: a ",list" tag only wraps the outermost
+// slice, so the inner one asks for a column the payload does not have.
+type matrixRow struct {
+	Matrix [][]float64 `parquet:"matrix,list"`
+}
+
 func TestCheckModelSchema(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -145,6 +162,20 @@ func TestCheckModelSchema(t *testing.T) {
 			avroSchema: groupListSchema,
 			model:      groupRowUntagged{},
 			wantErr:    `Records[claimcheck_test.groupRowUntagged] reads column "groups.value", but the payload stores it as "groups.list.element.value"`,
+		},
+		{
+			// Both sides put "tags" at the same path, and parquet-go fills the
+			// slice with the single value. Nothing is lost, so nothing to reject.
+			name:       "slice_where_the_payload_stores_a_scalar",
+			avroSchema: scalarTagsSchema,
+			model:      listRowUntagged{},
+		},
+		{
+			name:       "list_inside_a_list",
+			avroSchema: matrixSchema,
+			model:      matrixRow{},
+			wantErr: `Records[claimcheck_test.matrixRow] reads column "matrix.list.element",` +
+				` but the payload stores it as "matrix.list.element.list.element"`,
 		},
 		{
 			name:       "any_reads_through_the_payloads_own_schema",
@@ -248,6 +279,20 @@ func TestRecords_AnyReadsThroughThePayloadSchema(t *testing.T) {
 		"name": "a",
 		"tags": []any{"x", "y"},
 	}, got[0])
+}
+
+// Only the empty interface reads through the payload schema. An interface with
+// methods gets the model-type error, not a decode failure further down: a row
+// decoded into a map cannot satisfy it.
+func TestRecords_RejectsInterfaceWithMethods(t *testing.T) {
+	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
+
+	var rows int
+	for _, err := range claimcheck.Records[io.Reader](context.Background(), msg) {
+		rows++
+		require.ErrorContains(t, err, "Records requires a struct with parquet field tags, got io.Reader")
+	}
+	assert.Equal(t, 1, rows, "the error must be yielded once and end the iteration")
 }
 
 func TestRecords_OnEmptyMessageYieldsNothing(t *testing.T) {

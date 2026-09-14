@@ -49,11 +49,13 @@ func (e *schemaMismatchError) Error() string {
 func (e *schemaMismatchError) Is(target error) bool { return target == ErrSchemaMismatch }
 
 // checkModelSchema compares the payload schema with the schema parquet-go builds
-// from model, the type [Records] was instantiated with. An interface model is
-// skipped, because it reads through the payload's own schema. Any other
-// non-struct model is rejected: parquet-go cannot build a schema for it.
+// from model, the type [Records] was instantiated with. The empty interface is
+// skipped, because Records[any] reads through the payload's own schema. Any
+// other model is rejected unless it is a struct: parquet-go cannot build a
+// schema for it, and a row decoded into a map cannot satisfy an interface that
+// has methods.
 func checkModelSchema(payload *parquet.Schema, model reflect.Type) error {
-	if model.Kind() == reflect.Interface {
+	if model.Kind() == reflect.Interface && model.NumMethod() == 0 {
 		return nil
 	}
 	for model.Kind() == reflect.Pointer {

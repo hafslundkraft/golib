@@ -61,7 +61,8 @@ func (m *Message) Payload(ctx context.Context) (*PayloadReader, error) {
 
 // Records yields each record in the payload decoded into a T. T must be a
 // struct whose exported fields carry `parquet:"..."` tags matching the Parquet
-// column names.
+// column names, or any, which decodes each row into a map[string]any through
+// the payload's own schema. Anything else is rejected with an error.
 //
 // Go does not allow generic methods, so this is a package-level function:
 //
