@@ -347,11 +347,12 @@ func TestRecords_RejectsInterfaceWithMethods(t *testing.T) {
 // panics on a pointer this deep rather than returning an error.
 func TestRecords_RejectsDoublePointerWithoutPanicking(t *testing.T) {
 	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
+	wantErr := "Records requires a struct with parquet field tags, got **claimcheck_test.listRow"
 
 	var rows int
 	for _, err := range claimcheck.Records[**listRow](context.Background(), msg) {
 		rows++
-		require.ErrorContains(t, err, "Records requires a struct with parquet field tags, got **claimcheck_test.listRow")
+		require.ErrorContains(t, err, wantErr)
 	}
 	assert.Equal(t, 1, rows, "the error must be yielded once and end the iteration")
 }
