@@ -86,39 +86,35 @@ func checkModelSchema(payload *parquet.Schema, model reflect.Type) error {
 // readerType is the name of the Go struct reader was built from, used in the
 // error message.
 func checkColumns(payload, reader *parquet.Schema, readerType string) error {
-	payloadColumns := payload.Columns()
+	payloadColumns := leafColumns(payload)
 
 	have := make(map[string]bool, len(payloadColumns))
-	columns := make([]payloadColumn, 0, len(payloadColumns))
 	for _, column := range payloadColumns {
-		path := strings.Join(column, ".")
-		have[path] = true
-		columns = append(columns, payloadColumn{path: path, field: withoutListWrappers(column)})
+		have[column.path] = true
 	}
 
-	for _, column := range reader.Columns() {
-		path := strings.Join(column, ".")
-		if have[path] {
+	for _, want := range leafColumns(reader) {
+		if have[want.path] {
 			continue
 		}
-		if paths := reshapedIn(columns, withoutListWrappers(column)); len(paths) > 0 {
-			return &schemaMismatchError{rowType: readerType, want: path, have: paths}
+		if paths := reshapedIn(payloadColumns, want.field); len(paths) > 0 {
+			return &schemaMismatchError{rowType: readerType, want: want.path, have: paths}
 		}
 	}
 	return nil
 }
 
-// payloadColumn is one leaf column of the payload, in the two shapes the
-// comparison needs: the full path for the error message, and the path without
-// LIST wrappers for matching.
-type payloadColumn struct{ path, field string }
+// leafColumn is one leaf column of a schema, in the two shapes the comparison
+// needs: the full path for the error message, and the path without LIST wrappers
+// for matching.
+type leafColumn struct{ path, field string }
 
 // reshapedIn returns the payload paths that keep the field a reader column
 // reads, but in another shape. The names have to match once the LIST wrappers
 // are gone, or one has to sit under the other: a reader asking for a scalar
 // "customer" reads the same field as a payload storing "customer.name", it just
 // disagrees about whether it is a leaf or a group.
-func reshapedIn(payload []payloadColumn, field string) []string {
+func reshapedIn(payload []leafColumn, field string) []string {
 	var paths []string
 	for _, column := range payload {
 		if column.field == field || under(column.field, field) || under(field, column.field) {
@@ -132,18 +128,50 @@ func reshapedIn(payload []payloadColumn, field string) []string {
 // keeps it to whole path segments, so "tag" does not count as under "tags".
 func under(outer, inner string) bool { return strings.HasPrefix(inner, outer+".") }
 
-// withoutListWrappers drops the "list.element" groups Parquet puts around a
-// repeated field, so the same field compares equal whichever side carries the
-// wrapper: "groups.list.element.value" and "groups.value" both reduce to
-// "groups.value".
-func withoutListWrappers(column []string) string {
-	trimmed := make([]string, 0, len(column))
-	for i := 0; i < len(column); i++ {
-		if column[i] == "list" && i+1 < len(column) && column[i+1] == "element" {
-			i++
-			continue
+// leafColumns walks the schema and returns one entry per leaf column. The field
+// name drops the "list.element" levels Parquet puts around a repeated field, so
+// the same field compares equal whichever side carries the wrapper:
+// "groups.list.element.value" and "groups.value" both reduce to "groups.value".
+//
+// The wrappers are found through the LIST annotation on the group, not through
+// the "list" and "element" names, which are also valid names for ordinary
+// fields.
+func leafColumns(schema *parquet.Schema) []leafColumn {
+	var columns []leafColumn
+
+	var walk func(node parquet.Node, path, field string)
+	walk = func(node parquet.Node, path, field string) {
+		if node.Leaf() {
+			columns = append(columns, leafColumn{path: path, field: field})
+			return
 		}
-		trimmed = append(trimmed, column[i])
+		if isListGroup(node) {
+			// A LIST group holds one repeated level holding one element. Both
+			// levels belong in the column path, neither in the field name.
+			for _, list := range node.Fields() {
+				for _, element := range list.Fields() {
+					walk(element, dotted(dotted(path, list.Name()), element.Name()), field)
+				}
+			}
+			return
+		}
+		for _, child := range node.Fields() {
+			walk(child, dotted(path, child.Name()), dotted(field, child.Name()))
+		}
 	}
-	return strings.Join(trimmed, ".")
+
+	walk(schema, "", "")
+	return columns
+}
+
+func isListGroup(node parquet.Node) bool {
+	logicalType := node.Type().LogicalType()
+	return logicalType != nil && logicalType.List != nil
+}
+
+func dotted(path, name string) string {
+	if path == "" {
+		return name
+	}
+	return path + "." + name
 }

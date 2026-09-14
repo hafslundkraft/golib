@@ -128,6 +128,68 @@ type customerRowScalar struct {
 	Customer string `parquet:"customer"`
 }
 
+// wrapperNamesSchema nests ordinary records that happen to be named "list" and
+// "element", the names Parquet gives the levels of a LIST group.
+const wrapperNamesSchema = `{"type":"record","name":"W","fields":[` +
+	`{"name":"outer","type":{"type":"record","name":"Outer","fields":[` +
+	`{"name":"list","type":{"type":"record","name":"L","fields":[` +
+	`{"name":"element","type":{"type":"record","name":"E","fields":[` +
+	`{"name":"name","type":"string"}]}}]}}]}}]}`
+
+type wrapperElement struct {
+	Name string `parquet:"name"`
+}
+
+type wrapperList struct {
+	Element wrapperElement `parquet:"element"`
+}
+
+type wrapperOuter struct {
+	List wrapperList `parquet:"list"`
+}
+
+type wrapperRow struct {
+	Outer wrapperOuter `parquet:"outer"`
+}
+
+// outerNameRow reads "outer.name", which wrapperNamesSchema does not have. It
+// only looks like the leaf of a LIST group.
+type outerName struct {
+	Name string `parquet:"name"`
+}
+
+type outerNameRow struct {
+	Outer outerName `parquet:"outer"`
+}
+
+// groupRowAhead is a consumer on a newer schema version than the payload: every
+// field it adds is one the producer has not started writing yet, in each of the
+// shapes evolution can take.
+type groupAhead struct {
+	Value string `parquet:"value"`
+	Count int64  `parquet:"count"`
+	// new scalar inside the element of a LIST
+	Quality *string `parquet:"quality,optional"`
+	// new group inside the element of a LIST
+	Source groupSource `parquet:"source"`
+}
+
+type groupSource struct {
+	System *string `parquet:"system,optional"`
+}
+
+type groupRowAhead struct {
+	Groups []groupAhead `parquet:"groups,list"`
+	// new scalar, new group and new list at the top level
+	Tenant  *string      `parquet:"tenant,optional"`
+	Address groupAddress `parquet:"address"`
+	Labels  []string     `parquet:"labels,list"`
+}
+
+type groupAddress struct {
+	City *string `parquet:"city,optional"`
+}
+
 func TestCheckModelSchema(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -216,6 +278,25 @@ func TestCheckModelSchema(t *testing.T) {
 			model:      customerRow{},
 			wantErr: `Records[claimcheck_test.customerRow] reads column "customer.name",` +
 				` but the payload stores it as "customer"`,
+		},
+		{
+			name:       "records_named_like_list_wrappers",
+			avroSchema: wrapperNamesSchema,
+			model:      wrapperRow{},
+		},
+		{
+			// "outer.name" is absent, not reshaped: the payload's "list" and
+			// "element" levels are ordinary records, not a LIST wrapper.
+			name:       "field_added_below_records_named_like_list_wrappers",
+			avroSchema: wrapperNamesSchema,
+			model:      outerNameRow{},
+		},
+		{
+			// Schema evolution in every shape at once. None of these fields has
+			// any column in the payload, so none of them is a reshaped field.
+			name:       "consumer_ahead_of_the_producer",
+			avroSchema: groupListSchema,
+			model:      groupRowAhead{},
 		},
 		{
 			name:       "any_reads_through_the_payloads_own_schema",
