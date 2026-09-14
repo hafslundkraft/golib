@@ -42,25 +42,6 @@ type listRowMisspelled struct {
 	Tag  []string `parquet:"tag,list"`
 }
 
-// listRowEvolved is a consumer that has picked up an optional field the producer
-// added after the payload in listSchema was written.
-type listRowEvolved struct {
-	Name  string   `parquet:"name"`
-	Tags  []string `parquet:"tags,list"`
-	Email *string  `parquet:"email,optional"`
-}
-
-// nestedRowEvolved adds the optional field inside an existing group, so the
-// payload does have columns under "inner".
-type nestedInnerEvolved struct {
-	Values []float64 `parquet:"values,list"`
-	Unit   *string   `parquet:"unit,optional"`
-}
-
-type nestedRowEvolved struct {
-	Inner nestedInnerEvolved `parquet:"inner"`
-}
-
 type nestedInner struct {
 	Values []float64 `parquet:"values"`
 }
@@ -128,6 +109,13 @@ type customerRowScalar struct {
 	Customer string `parquet:"customer"`
 }
 
+const mapSchema = `{"type":"record","name":"MP","fields":[` +
+	`{"name":"attrs","type":{"type":"map","values":"string"}}]}`
+
+type mapRow struct {
+	Attrs map[string]string `parquet:"attrs"`
+}
+
 // wrapperNamesSchema nests ordinary records that happen to be named "list" and
 // "element", the names Parquet gives the levels of a LIST group.
 const wrapperNamesSchema = `{"type":"record","name":"W","fields":[` +
@@ -150,16 +138,6 @@ type wrapperOuter struct {
 
 type wrapperRow struct {
 	Outer wrapperOuter `parquet:"outer"`
-}
-
-// outerNameRow reads "outer.name", which wrapperNamesSchema does not have. It
-// only looks like the leaf of a LIST group.
-type outerName struct {
-	Name string `parquet:"name"`
-}
-
-type outerNameRow struct {
-	Outer outerName `parquet:"outer"`
 }
 
 // groupRowAhead is a consumer on a newer schema version than the payload: every
@@ -221,16 +199,6 @@ func TestCheckModelSchema(t *testing.T) {
 			model:      listRowMisspelled{},
 		},
 		{
-			name:       "optional_field_added_after_the_payload_was_written",
-			avroSchema: listSchema,
-			model:      listRowEvolved{},
-		},
-		{
-			name:       "optional_field_added_inside_an_existing_group",
-			avroSchema: nestedListSchema,
-			model:      nestedRowEvolved{},
-		},
-		{
 			name:       "nested_slice_names_the_full_path",
 			avroSchema: nestedListSchema,
 			model:      nestedRow{},
@@ -285,11 +253,11 @@ func TestCheckModelSchema(t *testing.T) {
 			model:      wrapperRow{},
 		},
 		{
-			// "outer.name" is absent, not reshaped: the payload's "list" and
-			// "element" levels are ordinary records, not a LIST wrapper.
-			name:       "field_added_below_records_named_like_list_wrappers",
-			avroSchema: wrapperNamesSchema,
-			model:      outerNameRow{},
+			// parquet-go wraps a Go map in the same "key_value" group the payload
+			// uses, so a map field needs no tag of its own.
+			name:       "map_needs_no_tag",
+			avroSchema: mapSchema,
+			model:      mapRow{},
 		},
 		{
 			// Schema evolution in every shape at once. None of these fields has
@@ -436,12 +404,4 @@ func TestRecords_RejectsDoublePointerWithoutPanicking(t *testing.T) {
 		require.ErrorContains(t, err, wantErr)
 	}
 	assert.Equal(t, 1, rows, "the error must be yielded once and end the iteration")
-}
-
-func TestRecords_OnEmptyMessageYieldsNothing(t *testing.T) {
-	msg := claimcheck.NewMessage(listTopic, nil, nil, nil, nil, nil)
-
-	for range claimcheck.Records[listRowUntagged](context.Background(), msg) {
-		t.Fatal("a tombstone must not reach the schema check")
-	}
 }

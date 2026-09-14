@@ -11,25 +11,17 @@ import (
 )
 
 // ErrSchemaMismatch means the row struct passed to [Records] and the payload
-// keep the same field at different column paths. parquet-go builds the reader
-// schema from the struct alone, so a field like that quietly reads as the zero
-// value instead of failing.
+// keep the same field at different column paths, so the field would quietly read
+// as the zero value. Match it with errors.Is.
 //
-// The usual cause is a slice field missing its ",list" tag. Parquet keeps a list
-// at "field.list.element", but an untagged Go slice asks for "field". The error
-// prints both paths, because either side could be the outdated one. Maps need no
-// tag: parquet-go wraps a Go map in the same "key_value" group the payload uses.
-//
-// A struct field reading a column the payload keeps as a group is the same kind
-// of mistake: "customer" against a payload storing "customer.name".
-//
-// If the payload has no sign of the column at all, that is not a mismatch. It is
-// a field added to the schema after the payload was written, and reading it as
-// the zero value is what makes schema evolution work.
-//
-// Match it with errors.Is.
+// The usual cause is a slice field missing its ",list" tag: Parquet keeps a list
+// at "field.list.element", but an untagged Go slice asks for "field". Maps need
+// no tag. A struct field reading a column the payload keeps as a group is the
+// same kind of mistake: "customer" against a payload storing "customer.name".
 var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 
+// schemaMismatchError prints both column paths, because either side could be
+// the outdated one.
 type schemaMismatchError struct {
 	// rowType is the name of the Go struct the reader schema was built from.
 	rowType string
@@ -49,7 +41,7 @@ func (e *schemaMismatchError) Error() string {
 		e.rowType, e.want, strings.Join(quoted, " or "))
 }
 
-func (e *schemaMismatchError) Is(target error) bool { return target == ErrSchemaMismatch }
+func (e *schemaMismatchError) Unwrap() error { return ErrSchemaMismatch }
 
 // checkModelSchema compares the payload schema with the schema parquet-go builds
 // from model, the type [Records] was instantiated with. The empty interface is
