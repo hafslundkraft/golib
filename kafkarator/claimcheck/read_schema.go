@@ -20,6 +20,9 @@ import (
 // prints both paths, because either side could be the outdated one. Maps need no
 // tag: parquet-go wraps a Go map in the same "key_value" group the payload uses.
 //
+// A struct field reading a column the payload keeps as a group is the same kind
+// of mistake: "customer" against a payload storing "customer.name".
+//
 // If the payload has no sign of the column at all, that is not a mismatch. It is
 // a field added to the schema after the payload was written, and reading it as
 // the zero value is what makes schema evolution work.
@@ -58,16 +61,19 @@ func checkModelSchema(payload *parquet.Schema, model reflect.Type) error {
 	if model.Kind() == reflect.Interface && model.NumMethod() == 0 {
 		return nil
 	}
-	for model.Kind() == reflect.Pointer {
-		model = model.Elem()
+	// parquet-go's generic reader takes a struct or a single pointer to one, and
+	// panics on anything else, so a deeper pointer has to be rejected here.
+	row := model
+	if row.Kind() == reflect.Pointer {
+		row = row.Elem()
 	}
-	if model.Kind() != reflect.Struct {
+	if row.Kind() != reflect.Struct {
 		return fmt.Errorf(
 			"claimcheck: Records requires a struct with parquet field tags, got %s;"+
 				" use Records[any] for schema-driven rows, or msg.Payload to access the raw Parquet bytes",
 			model)
 	}
-	reader := parquet.SchemaOf(reflect.Zero(model).Interface())
+	reader := parquet.SchemaOf(reflect.Zero(row).Interface())
 	return checkColumns(payload, reader, model.String())
 }
 
@@ -83,12 +89,11 @@ func checkColumns(payload, reader *parquet.Schema, readerType string) error {
 	payloadColumns := payload.Columns()
 
 	have := make(map[string]bool, len(payloadColumns))
-	reshaped := make(map[string][]string, len(payloadColumns))
+	columns := make([]payloadColumn, 0, len(payloadColumns))
 	for _, column := range payloadColumns {
 		path := strings.Join(column, ".")
 		have[path] = true
-		field := withoutListWrappers(column)
-		reshaped[field] = append(reshaped[field], path)
+		columns = append(columns, payloadColumn{path: path, field: withoutListWrappers(column)})
 	}
 
 	for _, column := range reader.Columns() {
@@ -96,12 +101,36 @@ func checkColumns(payload, reader *parquet.Schema, readerType string) error {
 		if have[path] {
 			continue
 		}
-		if paths := reshaped[withoutListWrappers(column)]; len(paths) > 0 {
+		if paths := reshapedIn(columns, withoutListWrappers(column)); len(paths) > 0 {
 			return &schemaMismatchError{rowType: readerType, want: path, have: paths}
 		}
 	}
 	return nil
 }
+
+// payloadColumn is one leaf column of the payload, in the two shapes the
+// comparison needs: the full path for the error message, and the path without
+// LIST wrappers for matching.
+type payloadColumn struct{ path, field string }
+
+// reshapedIn returns the payload paths that keep the field a reader column
+// reads, but in another shape. The names have to match once the LIST wrappers
+// are gone, or one has to sit under the other: a reader asking for a scalar
+// "customer" reads the same field as a payload storing "customer.name", it just
+// disagrees about whether it is a leaf or a group.
+func reshapedIn(payload []payloadColumn, field string) []string {
+	var paths []string
+	for _, column := range payload {
+		if column.field == field || under(column.field, field) || under(field, column.field) {
+			paths = append(paths, column.path)
+		}
+	}
+	return paths
+}
+
+// under reports whether the field path inner is nested below outer. The dot
+// keeps it to whole path segments, so "tag" does not count as under "tags".
+func under(outer, inner string) bool { return strings.HasPrefix(inner, outer+".") }
 
 // withoutListWrappers drops the "list.element" groups Parquet puts around a
 // repeated field, so the same field compares equal whichever side carries the

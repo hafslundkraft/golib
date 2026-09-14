@@ -104,6 +104,30 @@ type matrixRow struct {
 	Matrix [][]float64 `parquet:"matrix,list"`
 }
 
+// customerSchema has a plain nested record: the payload keeps "customer" as a
+// group, not as a leaf.
+const customerSchema = `{"type":"record","name":"C","fields":[` +
+	`{"name":"customer","type":{"type":"record","name":"Cust","fields":[` +
+	`{"name":"name","type":"string"},{"name":"id","type":"long"}]}}]}`
+
+// flatCustomerSchema is the reverse: "customer" is a leaf.
+const flatCustomerSchema = `{"type":"record","name":"F","fields":[` +
+	`{"name":"customer","type":"string"}]}`
+
+type customerInner struct {
+	Name string `parquet:"name"`
+	ID   int64  `parquet:"id"`
+}
+
+type customerRow struct {
+	Customer customerInner `parquet:"customer"`
+}
+
+// customerRowScalar reads the group as a leaf, so nothing it asks for exists.
+type customerRowScalar struct {
+	Customer string `parquet:"customer"`
+}
+
 func TestCheckModelSchema(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -178,6 +202,22 @@ func TestCheckModelSchema(t *testing.T) {
 				` but the payload stores it as "matrix.list.element.list.element"`,
 		},
 		{
+			// Neither side shares a leaf path, so only the ancestor tells this
+			// apart from a field the producer has not added yet.
+			name:       "scalar_where_the_payload_stores_a_group",
+			avroSchema: customerSchema,
+			model:      customerRowScalar{},
+			wantErr: `Records[claimcheck_test.customerRowScalar] reads column "customer",` +
+				` but the payload stores it as "customer.id" or "customer.name"`,
+		},
+		{
+			name:       "group_where_the_payload_stores_a_scalar",
+			avroSchema: flatCustomerSchema,
+			model:      customerRow{},
+			wantErr: `Records[claimcheck_test.customerRow] reads column "customer.name",` +
+				` but the payload stores it as "customer"`,
+		},
+		{
 			name:       "any_reads_through_the_payloads_own_schema",
 			avroSchema: listSchema,
 			model:      nil,
@@ -186,6 +226,14 @@ func TestCheckModelSchema(t *testing.T) {
 			name:       "pointer_to_a_matching_struct",
 			avroSchema: listSchema,
 			model:      &listRow{},
+		},
+		{
+			// parquet-go reads into a struct or a single pointer to one, and
+			// panics on a deeper pointer.
+			name:       "pointer_to_a_pointer_is_not_a_supported_model",
+			avroSchema: listSchema,
+			model:      new(*listRow),
+			wantErr:    "Records requires a struct with parquet field tags, got **claimcheck_test.listRow",
 		},
 		{
 			name:       "map_is_not_a_supported_model",
@@ -291,6 +339,19 @@ func TestRecords_RejectsInterfaceWithMethods(t *testing.T) {
 	for _, err := range claimcheck.Records[io.Reader](context.Background(), msg) {
 		rows++
 		require.ErrorContains(t, err, "Records requires a struct with parquet field tags, got io.Reader")
+	}
+	assert.Equal(t, 1, rows, "the error must be yielded once and end the iteration")
+}
+
+// The model check has to run before parquet-go builds its reader: the reader
+// panics on a pointer this deep rather than returning an error.
+func TestRecords_RejectsDoublePointerWithoutPanicking(t *testing.T) {
+	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
+
+	var rows int
+	for _, err := range claimcheck.Records[**listRow](context.Background(), msg) {
+		rows++
+		require.ErrorContains(t, err, "Records requires a struct with parquet field tags, got **claimcheck_test.listRow")
 	}
 	assert.Equal(t, 1, rows, "the error must be yielded once and end the iteration")
 }
