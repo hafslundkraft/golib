@@ -15,9 +15,9 @@ import (
 // as the zero value. Match it with errors.Is.
 //
 // The usual cause is a slice field missing its ",list" tag: Parquet keeps a list
-// at "field.list.element", but an untagged Go slice asks for "field". Maps need
-// no tag. A struct field reading a column the payload keeps as a group is the
-// same kind of mistake: "customer" against a payload storing "customer.name".
+// at "tags.list.element", but an untagged Go slice asks for "tags". Maps need no
+// tag. A struct field reading a column the payload keeps as a group is the same
+// kind of mistake: "customer" against a payload storing "customer.name".
 var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 
 // schemaMismatchError prints both column paths, because either side could be
@@ -25,7 +25,7 @@ var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 type schemaMismatchError struct {
 	// rowType is the name of the Go struct the reader schema was built from.
 	rowType string
-	// want is the column path the struct reads, such as "field.list.element".
+	// want is the column path the struct reads, such as "tags.list.element".
 	want string
 	// have lists the payload paths that keep the same field in a different shape.
 	have []string
@@ -96,16 +96,17 @@ func checkColumns(payload, reader *parquet.Schema, readerType string) error {
 	return nil
 }
 
-// leafColumn is one leaf column of a schema, in the two shapes the comparison
-// needs: the full path for the error message, and the path without LIST wrappers
-// for matching.
+// leafColumn is one column of a schema, under both names the comparison needs:
+// path is the full column path, shown in the error message, and field is the
+// same path with the LIST wrappers stripped, used for matching.
 type leafColumn struct{ path, field string }
 
-// reshapedIn returns the payload paths that keep the field a reader column
-// reads, but in another shape. The names have to match once the LIST wrappers
-// are gone, or one has to sit under the other: a reader asking for a scalar
-// "customer" reads the same field as a payload storing "customer.name", it just
-// disagrees about whether it is a leaf or a group.
+// reshapedIn returns the payload paths that hold the same field as a reader
+// column, but in a different shape. There are two ways to be the same field:
+// the names match once the LIST wrappers are gone, or one path sits inside the
+// other. A reader asking for a plain "customer" wants the same field as a
+// payload storing "customer.name"; it just expects a leaf where the payload has
+// a group.
 func reshapedIn(payload []leafColumn, field string) []string {
 	var paths []string
 	for _, column := range payload {
@@ -116,18 +117,18 @@ func reshapedIn(payload []leafColumn, field string) []string {
 	return paths
 }
 
-// under reports whether the field path inner is nested below outer. The dot
-// keeps it to whole path segments, so "tag" does not count as under "tags".
+// under reports whether the path inner sits inside outer. The dot keeps this to
+// whole path segments, so "tags" does not count as sitting inside "tag".
 func under(outer, inner string) bool { return strings.HasPrefix(inner, outer+".") }
 
-// leafColumns walks the schema and returns one entry per leaf column. The field
-// name drops the "list.element" levels Parquet puts around a repeated field, so
+// leafColumns walks the schema and returns one entry per leaf, because the
+// leaves are the columns: a group holds no data of its own. The field name
+// leaves out the "list.element" levels Parquet wraps a repeated field in, so
 // the same field compares equal whichever side carries the wrapper:
-// "groups.list.element.value" and "groups.value" both reduce to "groups.value".
+// "tags.list.element" and "tags" both come out as "tags".
 //
-// The wrappers are found through the LIST annotation on the group, not through
-// the "list" and "element" names, which are also valid names for ordinary
-// fields.
+// A LIST group is recognized by its annotation, not by the names "list" and
+// "element", which are legal names for ordinary fields too.
 func leafColumns(schema *parquet.Schema) []leafColumn {
 	var columns []leafColumn
 
@@ -138,8 +139,8 @@ func leafColumns(schema *parquet.Schema) []leafColumn {
 			return
 		}
 		if isListGroup(node) {
-			// A LIST group holds one repeated level holding one element. Both
-			// levels belong in the column path, neither in the field name.
+			// A LIST group holds one repeated level, which holds one element.
+			// Both levels belong in the column path, neither in the field name.
 			for _, list := range node.Fields() {
 				for _, element := range list.Fields() {
 					walk(element, dotted(dotted(path, list.Name()), element.Name()), field)
