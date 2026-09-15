@@ -3,7 +3,7 @@ module github.com/hafslundkraft/golib/examples
 go 1.27.1
 
 require (
-	github.com/confluentinc/confluent-kafka-go/v2 v2.15.0
+	github.com/confluentinc/confluent-kafka-go/v2 v2.15.1
 	github.com/hafslundkraft/golib/kafkarator v0.2.0
 	github.com/hafslundkraft/golib/kafkarator/claimcheck v0.0.0
 	github.com/hafslundkraft/golib/telemetry v0.0.0
@@ -110,7 +110,7 @@ require (
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
