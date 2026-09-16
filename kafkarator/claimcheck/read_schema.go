@@ -43,12 +43,18 @@ func (e *schemaMismatchError) Error() string {
 
 func (e *schemaMismatchError) Unwrap() error { return ErrSchemaMismatch }
 
-// checkModelSchema compares the payload schema with the schema parquet-go builds
-// from model, the type [Records] was instantiated with. The empty interface is
-// skipped, because Records[any] reads through the payload's own schema. Any
-// other model is rejected unless it is a struct: parquet-go cannot build a
-// schema for it, and a row decoded into a map cannot satisfy an interface that
-// has methods.
+// checkModelSchema checks that model can read a row of the payload: it must be a
+// struct, or one pointer to a struct, and the payload must not keep any of its
+// columns under a different path. It catches mistakes like these:
+//
+//	Tags []string `parquet:"tags"`      // payload has "tags.list.element": the ",list" tag is missing
+//	Cust Customer `parquet:"customer"`  // payload has "customer.name": a group, not one value
+//
+// A column the payload does not have, or keeps somewhere unrelated, is fine.
+//
+// The empty interface passes unchecked, because such a row becomes a map built
+// from the payload's own schema. An interface with methods does not: a map
+// cannot satisfy it.
 func checkModelSchema(payload *parquet.Schema, model reflect.Type) error {
 	if model.Kind() == reflect.Interface && model.NumMethod() == 0 {
 		return nil
@@ -62,21 +68,21 @@ func checkModelSchema(payload *parquet.Schema, model reflect.Type) error {
 	if row.Kind() != reflect.Struct {
 		return fmt.Errorf(
 			"claimcheck: Records requires a struct with parquet field tags, got %s;"+
-				" use Records[any] for schema-driven rows, or msg.Payload to access the raw Parquet bytes",
+				" use Records[any] to decode each row into a map using the payload schema,"+
+				" or msg.Payload to access the raw Parquet bytes",
 			model)
 	}
 	reader := parquet.SchemaOf(reflect.Zero(row).Interface())
 	return checkColumns(payload, reader, model.String())
 }
 
-// checkColumns fails when the reader schema and the payload put the same field
-// in a different shape. Two other cases are fine and pass: the payload keeps the
-// column somewhere unrelated (the reader is reading a subset of the columns), or
-// the payload does not have the column at all (it was written before the field
-// existed). parquet-go itself checks that the physical types match.
+// checkColumns compares two schemas column for column and returns
+// [ErrSchemaMismatch] if they keep the same field in a different shape. Two
+// other cases pass: the payload does not have the column at all, or it keeps it
+// somewhere unrelated. parquet-go itself checks that the physical types match.
 //
-// readerType is the name of the Go struct reader was built from, used in the
-// error message.
+// readerType names the Go struct reader was built from, and only shows up in
+// the error message.
 func checkColumns(payload, reader *parquet.Schema, readerType string) error {
 	payloadColumns := leafColumns(payload)
 
@@ -101,8 +107,9 @@ func checkColumns(payload, reader *parquet.Schema, readerType string) error {
 // same path with the LIST wrappers stripped, used for matching.
 type leafColumn struct{ path, field string }
 
-// reshapedIn returns the payload paths that hold the same field as a reader
-// column, but in a different shape. There are two ways to be the same field:
+// reshapedIn takes a field name with the LIST wrappers stripped and returns the
+// paths of every payload column that holds the same field, but in a different
+// shape. There are two ways to be the same field:
 // the names match once the LIST wrappers are gone, or one path sits inside the
 // other. A reader asking for a plain "customer" wants the same field as a
 // payload storing "customer.name"; it just expects a leaf where the payload has
