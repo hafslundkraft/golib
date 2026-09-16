@@ -352,9 +352,9 @@ func TestAvroParquet_ComplexTypes(t *testing.T) {
 
 	t.Run("array_of_strings", func(t *testing.T) {
 		schema := mustBuildSchema(t, avroRecord(
-			avroField("tags", `{"type":"array","items":"string"}`),
+			avroField("emails", `{"type":"array","items":"string"}`),
 		))
-		f := findField(t, schema, "tags")
+		f := findField(t, schema, "emails")
 		// parquet-go List() uses three-level encoding: the outer node is a
 		// LIST group, not directly Repeated. Check the logical type string.
 		assert.Equal(t, "LIST", f.Type().String())

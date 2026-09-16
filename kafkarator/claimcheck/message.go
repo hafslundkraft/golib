@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"reflect"
 
 	parquet "github.com/parquet-go/parquet-go"
 	"go.opentelemetry.io/otel/attribute"
@@ -60,7 +61,8 @@ func (m *Message) Payload(ctx context.Context) (*PayloadReader, error) {
 
 // Records yields each record in the payload decoded into a T. T must be a
 // struct whose exported fields carry `parquet:"..."` tags matching the Parquet
-// column names.
+// column names, or any, which decodes each row into a map[string]any through
+// the payload's own schema. Anything else is rejected with an error.
 //
 // Go does not allow generic methods, so this is a package-level function:
 //
@@ -99,7 +101,30 @@ func Records[T any](ctx context.Context, m *Message) iter.Seq2[T, error] {
 		}
 		defer pr.Close() //nolint:errcheck // Close on PayloadReader is a no-op
 
-		r := parquet.NewGenericReader[T](pr)
+		// OpenFile provides the payload schema to validate T against; see
+		// checkModelSchema.
+		f, err := parquet.OpenFile(pr, pr.Size())
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			yield(zero, fmt.Errorf("claimcheck: open parquet file: %w", err))
+			return
+		}
+
+		if err := checkModelSchema(f.Schema(), reflect.TypeFor[T]()); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			yield(zero, err)
+			return
+		}
+
+		// A payload with no row groups holds no rows: nothing to yield, nothing wrong.
+		rowGroups := f.RowGroups()
+		if len(rowGroups) == 0 {
+			return
+		}
+
+		r := parquet.NewGenericRowGroupReader[T](parquet.MultiRowGroup(rowGroups...))
 		defer r.Close() //nolint:errcheck // parquet.GenericReader.Close flushes nothing on read
 
 		buf := make([]T, 64)
