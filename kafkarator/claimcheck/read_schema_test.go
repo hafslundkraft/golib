@@ -152,7 +152,7 @@ func checkModel(t *testing.T, avroSchema string, model any) error {
 	schema, err := claimcheck.AvroSchemaToParquet(avroSchema)
 	require.NoError(t, err)
 
-	return claimcheck.CheckModelSchema(schema, model)
+	return claimcheck.CheckModelSchema(schema, model) //nolint:wrapcheck // test helper, wrapping adds no value
 }
 
 func TestCheckModelSchema(t *testing.T) {
