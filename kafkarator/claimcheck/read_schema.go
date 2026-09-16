@@ -15,8 +15,8 @@ import (
 // as the zero value. Match it with errors.Is.
 //
 // The usual cause is a slice field missing its ",list" tag: Parquet keeps a list
-// at "tags.list.element", but an untagged Go slice asks for "tags". Maps need no
-// tag. A struct field reading a column the payload keeps as a group is the same
+// at "emails.list.element", but an untagged Go slice asks for "emails". Maps need
+// no tag. A struct field reading a column the payload keeps as a group is the same
 // kind of mistake: "customer" against a payload storing "customer.name".
 var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 
@@ -25,7 +25,7 @@ var ErrSchemaMismatch = errors.New("claimcheck: schema mismatch")
 type schemaMismatchError struct {
 	// rowType is the name of the Go struct the reader schema was built from.
 	rowType string
-	// want is the column path the struct reads, such as "tags.list.element".
+	// want is the column path the struct reads, such as "emails.list.element".
 	want string
 	// have lists the payload paths that keep the same field in a different shape.
 	have []string
@@ -47,8 +47,8 @@ func (e *schemaMismatchError) Unwrap() error { return ErrSchemaMismatch }
 // struct, or one pointer to a struct, and the payload must not keep any of its
 // columns under a different path. It catches mistakes like these:
 //
-//	Tags []string `parquet:"tags"`      // payload has "tags.list.element": the ",list" tag is missing
-//	Cust Customer `parquet:"customer"`  // payload has "customer.name": a group, not one value
+//	Emails []string `parquet:"emails"`    // payload has "emails.list.element": the ",list" tag is missing
+//	Cust   Customer `parquet:"customer"`  // payload has "customer.name": a group, not one value
 //
 // A column the payload does not have, or keeps somewhere unrelated, is fine.
 //
@@ -125,14 +125,14 @@ func reshapedIn(payload []leafColumn, field string) []string {
 }
 
 // under reports whether the path inner sits inside outer. The dot keeps this to
-// whole path segments, so "tags" does not count as sitting inside "tag".
+// whole path segments, so "emails" does not count as sitting inside "email".
 func under(outer, inner string) bool { return strings.HasPrefix(inner, outer+".") }
 
 // leafColumns walks the schema and returns one entry per leaf, because the
 // leaves are the columns: a group holds no data of its own. The field name
 // leaves out the "list.element" levels Parquet wraps a repeated field in, so
 // the same field compares equal whichever side carries the wrapper:
-// "tags.list.element" and "tags" both come out as "tags".
+// "emails.list.element" and "emails" both come out as "emails".
 //
 // A LIST group is recognized by its annotation, not by the names "list" and
 // "element", which are legal names for ordinary fields too.

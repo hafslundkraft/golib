@@ -202,8 +202,8 @@ Accessing the payload from a handler:
 
   ```go
   type Row struct {
-      Name string   `parquet:"name"`
-      Tags []string `parquet:"tags,list"`
+      Name   string   `parquet:"name"`
+      Emails []string `parquet:"emails,list"`
   }
   ```
 
@@ -211,7 +211,7 @@ Accessing the payload from a handler:
   same field at different paths, `Records` yields an error matching
   `claimcheck.ErrSchemaMismatch` and stops:
 
-      claimcheck: Records[main.Row] reads column "tags", but the payload stores it as "tags.list.element"
+      claimcheck: Records[main.Row] reads column "emails", but the payload stores it as "emails.list.element"
 
   The usual cause is a slice missing its `,list`.
 

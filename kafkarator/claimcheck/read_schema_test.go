@@ -15,7 +15,7 @@ import (
 // listSchema holds an array, which Parquet stores as a three-level LIST group.
 const listSchema = `{"type":"record","name":"L","fields":[` +
 	`{"name":"name","type":"string"},` +
-	`{"name":"tags","type":{"type":"array","items":"string"}}]}`
+	`{"name":"emails","type":{"type":"array","items":"string"}}]}`
 
 // nestedListSchema puts the array one level down, so the reported path names
 // the enclosing record too.
@@ -24,18 +24,18 @@ const nestedListSchema = `{"type":"record","name":"N","fields":[` +
 	`{"name":"values","type":{"type":"array","items":"double"}}]}}]}`
 
 type listRow struct {
-	Name string   `parquet:"name"`
-	Tags []string `parquet:"tags,list"`
+	Name   string   `parquet:"name"`
+	Emails []string `parquet:"emails,list"`
 }
 
 type listRowUntagged struct {
-	Name string   `parquet:"name"`
-	Tags []string `parquet:"tags"`
+	Name   string   `parquet:"name"`
+	Emails []string `parquet:"emails"`
 }
 
 type listRowMisspelled struct {
-	Name string   `parquet:"name"`
-	Tag  []string `parquet:"tag,list"`
+	Name  string   `parquet:"name"`
+	Email []string `parquet:"email,list"`
 }
 
 type nestedRow struct {
@@ -63,11 +63,11 @@ type groupRowUntagged struct {
 	Groups []group `parquet:"groups"`
 }
 
-// scalarTagsSchema is the reverse of listSchema: one value where
+// scalarEmailsSchema is the reverse of listSchema: one value where
 // listRowUntagged expects many.
-const scalarTagsSchema = `{"type":"record","name":"S","fields":[` +
+const scalarEmailsSchema = `{"type":"record","name":"S","fields":[` +
 	`{"name":"name","type":"string"},` +
-	`{"name":"tags","type":"string"}]}`
+	`{"name":"emails","type":"string"}]}`
 
 // matrixSchema nests one LIST inside another, so the wrappers stack.
 const matrixSchema = `{"type":"record","name":"M","fields":[` +
@@ -176,11 +176,11 @@ func TestCheckModelSchema(t *testing.T) {
 			name:         "slice_without_list_tag",
 			avroSchema:   listSchema,
 			model:        listRowUntagged{},
-			wantErr:      `Records[claimcheck_test.listRowUntagged] reads column "tags", but the payload stores it as "tags.list.element"`,
+			wantErr:      `Records[claimcheck_test.listRowUntagged] reads column "emails", but the payload stores it as "emails.list.element"`,
 			wantMismatch: true,
 		},
 		{
-			// "tag" is a prefix of the payload's "tags" without being a path
+			// "email" is a prefix of the payload's "emails" without being a path
 			// segment of it, so it stays a field the payload does not have.
 			name:       "field_the_payload_does_not_have",
 			avroSchema: listSchema,
@@ -199,7 +199,7 @@ func TestCheckModelSchema(t *testing.T) {
 			model:      groupRow{},
 		},
 		{
-			// Unlike "tags" vs "tags.list.element", "groups.value" is no prefix of
+			// Unlike "emails" vs "emails.list.element", "groups.value" is no prefix of
 			// "groups.list.element.value": the leaf sits past the wrapper.
 			name:         "struct_slice_without_list_tag",
 			avroSchema:   groupListSchema,
@@ -208,10 +208,10 @@ func TestCheckModelSchema(t *testing.T) {
 			wantMismatch: true,
 		},
 		{
-			// Both sides put "tags" at the same path, and parquet-go fills the
+			// Both sides put "emails" at the same path, and parquet-go fills the
 			// slice from the single value. Nothing lost, so nothing to reject.
 			name:       "slice_where_the_payload_stores_a_scalar",
-			avroSchema: scalarTagsSchema,
+			avroSchema: scalarEmailsSchema,
 			model:      listRowUntagged{},
 		},
 		{
@@ -296,13 +296,13 @@ func TestCheckModelSchema(t *testing.T) {
 // take: a scalar, a group and a list.
 const producerAheadSchema = `{"type":"record","name":"L","fields":[` +
 	`{"name":"name","type":"string"},` +
-	`{"name":"tags","type":{"type":"array","items":"string"}},` +
+	`{"name":"emails","type":{"type":"array","items":"string"}},` +
 	`{"name":"tenant","type":["null","string"]},` +
 	`{"name":"address","type":{"type":"record","name":"A","fields":[` +
 	`{"name":"city","type":["null","string"]}]}},` +
 	`{"name":"labels","type":{"type":"array","items":"string"}}]}`
 
-// producerDroppedListSchema is listSchema after the producer removed "tags".
+// producerDroppedListSchema is listSchema after the producer removed "emails".
 const producerDroppedListSchema = `{"type":"record","name":"L","fields":[` +
 	`{"name":"name","type":"string"}]}`
 
@@ -340,7 +340,7 @@ func TestCheckModelSchema_SchemaEvolution(t *testing.T) {
 			model:      groupRowAhead{},
 		},
 		{
-			// "tags" is gone, so the slice reads as nil rather than failing the
+			// "emails" is gone, so the slice reads as nil rather than failing the
 			// message.
 			name:       "producer_removed_a_field_the_consumer_reads",
 			avroSchema: producerDroppedListSchema,
@@ -402,13 +402,13 @@ func onlyError[T any](t *testing.T, msg *claimcheck.Message) error {
 }
 
 func TestRecords_RejectsSliceWithoutListTag(t *testing.T) {
-	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
+	msg := newListMessage(t, listRow{Name: "a", Emails: []string{"x", "y"}})
 
 	require.ErrorIs(t, onlyError[listRowUntagged](t, msg), claimcheck.ErrSchemaMismatch)
 }
 
 func TestRecords_ReadsSliceWithListTag(t *testing.T) {
-	input := listRow{Name: "a", Tags: []string{"x", "y"}}
+	input := listRow{Name: "a", Emails: []string{"x", "y"}}
 	msg := newListMessage(t, input)
 
 	var got []listRow
@@ -424,7 +424,7 @@ func TestRecords_ReadsSliceWithListTag(t *testing.T) {
 // Records[any] is the escape hatch the schema-mismatch error points at: it reads
 // through the payload's own schema, so the list comes back whole untagged.
 func TestRecords_AnyReadsThroughThePayloadSchema(t *testing.T) {
-	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
+	msg := newListMessage(t, listRow{Name: "a", Emails: []string{"x", "y"}})
 
 	var got []any
 	for row, err := range claimcheck.Records[any](context.Background(), msg) {
@@ -434,8 +434,8 @@ func TestRecords_AnyReadsThroughThePayloadSchema(t *testing.T) {
 
 	require.Len(t, got, 1)
 	assert.Equal(t, map[string]any{
-		"name": "a",
-		"tags": []any{"x", "y"},
+		"name":   "a",
+		"emails": []any{"x", "y"},
 	}, got[0])
 }
 
@@ -443,7 +443,7 @@ func TestRecords_AnyReadsThroughThePayloadSchema(t *testing.T) {
 // interface reads through the payload schema; a row decoded into a map cannot
 // satisfy methods. A pointer this deep makes the reader panic, not error.
 func TestRecords_RejectsUnsupportedModels(t *testing.T) {
-	msg := newListMessage(t, listRow{Name: "a", Tags: []string{"x", "y"}})
+	msg := newListMessage(t, listRow{Name: "a", Emails: []string{"x", "y"}})
 
 	require.ErrorContains(t, onlyError[io.Reader](t, msg),
 		"Records requires a struct with parquet field tags, got io.Reader")
