@@ -107,6 +107,7 @@ defer processor.Close(ctx)
 processed, err := processor.ProcessNext(ctx)
 ```
 
+> **If the handler returns an error:** nothing is committed, but the processor has already read past the batch. Calling `ProcessNext` again continues with the next messages, and the failed messages are skipped. To get them redelivered, close the processor and create a new one.
 
 #### ChannelReader
 In order to use the deserializer, a schema for the topic must be available in the schema registry. Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when the reader commits the high watermark is sacrificed; each message is committed automatically.

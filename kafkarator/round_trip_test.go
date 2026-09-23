@@ -434,6 +434,42 @@ func TestReaderAutoOffsetResetEarliestReadsExistingMessage(t *testing.T) {
 	require.NoError(t, commit(ctx))
 }
 
+func TestReaderUncommittedMessageIsRedelivered(t *testing.T) {
+	ctx := context.Background()
+	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
+
+	tel := newMockTelemetry()
+	conn, err := NewConnection(&config, tel)
+	require.NoError(t, err)
+
+	writer, err := conn.Writer()
+	require.NoError(t, err)
+	defer writer.Close(ctx)
+
+	require.NoError(t, writer.Write(ctx, &Message{Topic: topic, Key: []byte("k"), Value: []byte("v1")}))
+	require.NoError(t, writer.Flush(ctx))
+	time.Sleep(testTopicCreateDelay)
+
+	reader, err := conn.Reader(topic)
+	require.NoError(t, err)
+	msgs, _, err := retryRead(ctx, reader, 1, testTimeout)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	// Outlast librdkafka's default auto.commit.interval.ms (5s), then close without committing.
+	time.Sleep(6 * time.Second)
+	require.NoError(t, reader.Close(ctx))
+
+	reader2, err := conn.Reader(topic)
+	require.NoError(t, err)
+	defer reader2.Close(ctx)
+
+	msgs, _, err = retryRead(ctx, reader2, 1, testTimeout)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1, "uncommitted message should be redelivered to the same consumer group")
+	assert.Equal(t, []byte("v1"), msgs[0].Value)
+}
+
 func TestReaderAutoOffsetResetLatestSkipsExistingThenReadsNewMessage(t *testing.T) {
 	ctx := context.Background()
 	topic := fmt.Sprintf("kafkarator-it-%s", generateID())
