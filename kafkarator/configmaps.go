@@ -88,6 +88,8 @@ func applyConsumerConfig(
 ) {
 	conf["group.id"] = groupID
 	conf["auto.offset.reset"] = string(autoOffsetReset)
+	// Offsets are committed explicitly via CommitFunc
+	conf["enable.auto.commit"] = false
 
 	if maxPollIntervalMs <= 0 {
 		maxPollIntervalMs = DefaultMaxPollIntervalMs
