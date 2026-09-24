@@ -4,6 +4,9 @@ on:
     branches-ignore:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   detect-modules:
     runs-on: ubuntu-latest
