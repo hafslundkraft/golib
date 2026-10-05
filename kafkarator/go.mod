@@ -3,7 +3,7 @@ module github.com/hafslundkraft/golib/kafkarator
 go 1.26.0
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.2
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1
 	github.com/confluentinc/confluent-kafka-go/v2 v2.15.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
