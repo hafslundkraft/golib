@@ -2,11 +2,20 @@ package snowflake
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/snowflakedb/gosnowflake"
 	"golang.org/x/oauth2"
+
+	"github.com/hafslundkraft/golib/identity"
 )
 
 type failingTokenSource struct{}
@@ -67,6 +76,49 @@ func TestConfigWithTokenLeavesTemplateAlone(t *testing.T) {
 	if c.cfg.Token != "" {
 		t.Errorf("template Token = %q, want it left empty", c.cfg.Token)
 	}
+}
+
+// TestConnectorRequestsAccountAudience goes through a real WorkloadCredential
+// against a fake IdP, because the resource option is opaque outside identity.
+// Without it the token gets Snowflake's shared default audience, which every
+// account accepts.
+func TestConnectorRequestsAccountAudience(t *testing.T) {
+	gotResource := make(chan string, 1)
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		gotResource <- r.PostForm.Get("resource")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"t","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer idp.Close()
+
+	tokenFile := filepath.Join(t.TempDir(), "idp-token")
+	if err := os.WriteFile(tokenFile, []byte(fakeJWT(time.Now().Add(time.Hour))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := newConnector(context.Background(), &Config{
+		Account:    "acme",
+		Credential: &identity.WorkloadCredential{TokenFile: tokenFile, TokenURL: idp.URL},
+	})
+	if _, err := c.configWithToken(); err != nil {
+		t.Fatalf("configWithToken: %v", err)
+	}
+
+	if got, want := <-gotResource, "acme.snowflakecomputing.com"; got != want {
+		t.Errorf("resource = %q, want %q", got, want)
+	}
+}
+
+// fakeJWT builds an unsigned JWT carrying only an exp claim, which is all
+// identity reads from the projected Kubernetes token.
+func fakeJWT(exp time.Time) string {
+	enc := base64.RawURLEncoding
+	payload := fmt.Sprintf(`{"exp":%d}`, exp.Unix())
+	return enc.EncodeToString([]byte(`{"alg":"none"}`)) + "." + enc.EncodeToString([]byte(payload)) + ".sig"
 }
 
 func TestConfigWithTokenPropagatesFailure(t *testing.T) {

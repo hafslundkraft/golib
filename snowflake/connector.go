@@ -11,7 +11,7 @@ import (
 	"github.com/hafslundkraft/golib/identity"
 )
 
-// connector hands database/sql a freshly exchanged token every time the pool opens
+// connector hands database/sql a current token every time the pool opens
 // a physical connection. gosnowflake takes the token as a plain Config field rather
 // than as a callback the way pgx does, so this is the only place left to refresh it.
 type connector struct {
@@ -26,15 +26,11 @@ var _ driver.Connector = (*connector)(nil)
 // must outlive the pool.
 func newConnector(ctx context.Context, cfg *Config) *connector {
 	sfCfg := gosnowflake.Config{
-		Account:                  cfg.Account,
+		Account: cfg.Account,
+		// Empty leaves the Snowflake user's default warehouse in effect.
+		Warehouse:                cfg.Warehouse,
 		Authenticator:            gosnowflake.AuthTypeWorkloadIdentityFederation,
 		WorkloadIdentityProvider: "OIDC",
-	}
-	// An empty warehouse is left unset rather than assigned, so the Snowflake
-	// user's own default applies when the platform injected none. Assigning ""
-	// would instead run the session with no warehouse at all.
-	if cfg.Warehouse != "" {
-		sfCfg.Warehouse = cfg.Warehouse
 	}
 
 	return &connector{
@@ -43,9 +39,10 @@ func newConnector(ctx context.Context, cfg *Config) *connector {
 	}
 }
 
-// Connect opens one physical connection with a freshly exchanged token. database/sql
-// calls this whenever the pool grows, which is what lets a long-lived *sql.DB keep
-// working: no connection is ever opened with a token older than itself.
+// Connect opens one physical connection with a current token. database/sql calls
+// this whenever the pool grows, which is what lets a long-lived *sql.DB keep
+// working: no connection is ever opened with an expired token. The token source
+// caches, so connections opened close together may share one token.
 func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
 	cfg, err := c.configWithToken()
 	if err != nil {

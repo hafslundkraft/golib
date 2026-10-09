@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/github/v/tag/hafslundkraft/golib?filter=snowflake/v*&label=version)
 
 Connect to Snowflake from a Happi workload using the workload's own platform
-identity. 
+identity.
 
 The Kubernetes token the Happi operator projects into your pod is exchanged at the
 platform IdP for a token scoped to your Snowflake account, which Snowflake accepts
@@ -63,8 +63,8 @@ func main() {
 
 `New` returns an ordinary `*sql.DB`, so everything after it is standard
 `database/sql`. Set it up once at startup and keep it for the lifetime of the
-process: the pool exchanges a fresh token for every connection it opens, and
-retires connections well inside that token's lifetime.
+process: every connection the pool opens gets a current token, and connections
+are retired regularly so the pool keeps reconnecting with current tokens.
 
 Tables are addressed as `DATABASE.SCHEMA.TABLE`, so a session database and schema
 are rarely needed.

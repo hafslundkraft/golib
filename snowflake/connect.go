@@ -19,10 +19,10 @@ const (
 	envWarehouse = "SNOWFLAKE_WAREHOUSE"
 )
 
-// Connections are recycled well inside the lifetime of the token they were opened
-// with, so Snowflake never gets as far as re-authenticating a session whose token
-// has expired. Retiring idle connections also stops a quiet pool from holding the
-// warehouse awake, which costs credits.
+// Connections are recycled regularly, so a long-lived pool keeps reconnecting with
+// current tokens instead of relying on sessions opened long ago. Retiring idle
+// connections also stops a quiet pool from holding the warehouse awake, which
+// costs credits.
 const (
 	connMaxLifetime = 30 * time.Minute
 	connMaxIdleTime = 5 * time.Minute
@@ -70,7 +70,7 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 }
 
 // New opens a connection pool to Snowflake and verifies it with a ping. Every
-// connection the pool opens authenticates with a freshly exchanged token, so the
+// connection the pool opens authenticates with a current token, so the
 // returned pool can be set up once at startup and used for the process's lifetime.
 //
 // The context is retained by the pool for token refreshes and must not be canceled
