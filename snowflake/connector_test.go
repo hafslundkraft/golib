@@ -24,6 +24,12 @@ func (failingTokenSource) Token() (*oauth2.Token, error) {
 	return nil, errors.New("idp unreachable")
 }
 
+type failingCredential struct{}
+
+func (failingCredential) TokenSource(_ context.Context, _ ...func(*identity.TokenOptions)) oauth2.TokenSource {
+	return failingTokenSource{}
+}
+
 func TestNewConnector(t *testing.T) {
 	tests := map[string]struct {
 		warehouse     string
@@ -35,7 +41,7 @@ func TestNewConnector(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			c := newConnector(context.Background(), &Config{
+			c := newConnector(&Config{
 				Account:    "acme",
 				Warehouse:  tc.warehouse,
 				Credential: fakeCredential{token: "token-1"},
@@ -58,12 +64,12 @@ func TestNewConnector(t *testing.T) {
 }
 
 func TestConfigWithTokenLeavesTemplateAlone(t *testing.T) {
-	c := newConnector(context.Background(), &Config{
+	c := newConnector(&Config{
 		Account:    "acme",
 		Credential: fakeCredential{token: "token-1"},
 	})
 
-	cfg, err := c.configWithToken()
+	cfg, err := c.configWithToken(context.Background())
 	if err != nil {
 		t.Fatalf("configWithToken: %v", err)
 	}
@@ -100,11 +106,11 @@ func TestConnectorRequestsAccountAudience(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := newConnector(context.Background(), &Config{
+	c := newConnector(&Config{
 		Account:    "acme",
 		Credential: &identity.WorkloadCredential{TokenFile: tokenFile, TokenURL: idp.URL},
 	})
-	if _, err := c.configWithToken(); err != nil {
+	if _, err := c.configWithToken(context.Background()); err != nil {
 		t.Fatalf("configWithToken: %v", err)
 	}
 
@@ -122,9 +128,41 @@ func fakeJWT(exp time.Time) string {
 }
 
 func TestConfigWithTokenPropagatesFailure(t *testing.T) {
-	c := &connector{tokenSource: failingTokenSource{}}
+	c := &connector{credential: failingCredential{}}
 
-	if _, err := c.configWithToken(); err == nil {
+	if _, err := c.configWithToken(context.Background()); err == nil {
 		t.Fatal("expected an error when the token exchange fails, got none")
+	}
+}
+
+// TestConfigWithTokenHonorsDialContext covers why the token source is built per
+// call: a canceled dial must stop the exchange instead of it running under some
+// context captured when the pool was created.
+func TestConfigWithTokenHonorsDialContext(t *testing.T) {
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"t","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer idp.Close()
+
+	tokenFile := filepath.Join(t.TempDir(), "idp-token")
+	if err := os.WriteFile(tokenFile, []byte(fakeJWT(time.Now().Add(time.Hour))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := newConnector(&Config{
+		Account:    "acme",
+		Credential: &identity.WorkloadCredential{TokenFile: tokenFile, TokenURL: idp.URL},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.configWithToken(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+
+	// A canceled earlier dial must not poison later ones.
+	if _, err := c.configWithToken(context.Background()); err != nil {
+		t.Errorf("configWithToken after a canceled dial: %v", err)
 	}
 }

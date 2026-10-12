@@ -68,10 +68,9 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 // connection the pool opens authenticates with a current token, so the
 // returned pool can be set up once at startup and used for the process's lifetime.
 //
-// The context is retained by the pool for token refreshes and must not be canceled
-// while the pool is still in use.
+// The context only bounds the initial ping; the pool does not retain it.
 func New(ctx context.Context, cfg *Config) (*sql.DB, error) {
-	db := sql.OpenDB(newConnector(ctx, cfg))
+	db := sql.OpenDB(newConnector(cfg))
 	db.SetConnMaxLifetime(connMaxLifetime)
 
 	if err := db.PingContext(ctx); err != nil {
