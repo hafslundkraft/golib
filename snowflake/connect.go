@@ -20,13 +20,8 @@ const (
 )
 
 // Connections are recycled regularly, so a long-lived pool keeps reconnecting with
-// current tokens instead of relying on sessions opened long ago. Retiring idle
-// connections also stops a quiet pool from holding the warehouse awake, which
-// costs credits.
-const (
-	connMaxLifetime = 30 * time.Minute
-	connMaxIdleTime = 5 * time.Minute
-)
+// current tokens instead of relying on sessions opened long ago.
+const connMaxLifetime = 30 * time.Minute
 
 // Config holds the parameters needed to connect to Snowflake.
 type Config struct {
@@ -78,7 +73,6 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 func New(ctx context.Context, cfg *Config) (*sql.DB, error) {
 	db := sql.OpenDB(newConnector(ctx, cfg))
 	db.SetConnMaxLifetime(connMaxLifetime)
-	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
