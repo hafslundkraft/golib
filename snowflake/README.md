@@ -14,7 +14,8 @@ snowflake: true
 ```
 
 The operator then creates your Snowflake service user, binds it to your service
-account, and injects the environment variables the package needs.
+account, and injects the environment variables the package needs: `SNOWFLAKE_ACCOUNT`
+(required) and `SNOWFLAKE_WAREHOUSE` (optional).
 
 You also need read access to the tables you query. Add your workload to the access
 list (ACL) in the producer's data product manifest.
@@ -61,16 +62,19 @@ func main() {
 ```
 
 `New` returns an ordinary `*sql.DB`, so everything after it is standard
-`database/sql`. Set it up once at startup and keep it for the lifetime of the
-process: every connection the pool opens gets a current token, and connections
-are retired regularly so the pool keeps reconnecting with current tokens.
+`database/sql`.
 
-Tables are addressed as `DATABASE.SCHEMA.TABLE`, so a session database and schema
-are rarely needed.
+Tables are addressed as `DATABASE.SCHEMA.TABLE`.
+
+## Connection lifetime
+
+Set up the `*sql.DB` once at startup and keep it for the lifetime of the process.
+Every connection the pool opens gets a fresh token, and connections are retired
+after 30 minutes, so no connection outlives its login.
 
 ## Choosing a warehouse
 
-The operator injects a warehouse, so most workloads do not set one. An
+The operator injects a default warehouse, so most workloads do not set one. An
 `Application` can override it in its manifest:
 
 ```yaml
