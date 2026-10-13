@@ -75,8 +75,9 @@ Tables are addressed as `DATABASE.SCHEMA.TABLE`.
 ## Connection lifetime
 
 Set up the `*sql.DB` once at startup and keep it for the lifetime of the process.
-Every connection the pool opens gets a fresh token, and connections are retired
-after an hour, so no connection outlives its login.
+Every connection the pool opens gets a fresh token. After an hour, `database/sql`
+retires a connection when it is returned to the pool rather than reusing it; an
+in-flight query or transaction may keep the connection longer.
 
 If you run many queries in parallel, raise `db.SetMaxIdleConns`: `database/sql`
 keeps only two idle connections by default, and every new connection costs a
