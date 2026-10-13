@@ -5,6 +5,12 @@
 Connect to Snowflake from a Happi workload. There are no secrets to configure: the
 connection uses the identity the Happi operator gives your pod.
 
+## Installation
+
+```bash
+go get github.com/hafslundkraft/golib/snowflake
+```
+
 ## Prerequisites
 
 Your manifest must request Snowflake access:
