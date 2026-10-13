@@ -2,12 +2,8 @@
 
 ![Version](https://img.shields.io/github/v/tag/hafslundkraft/golib?filter=snowflake/v*&label=version)
 
-Connect to Snowflake from a Happi workload using the workload's own platform
-identity.
-
-The Kubernetes token the Happi operator projects into your pod is exchanged at the
-platform IdP for a token scoped to your Snowflake account, which Snowflake accepts
-as a workload identity credential.
+Connect to Snowflake from a Happi workload. There are no secrets to configure: the
+connection uses the identity the Happi operator gives your pod.
 
 ## Prerequisites
 
@@ -18,7 +14,10 @@ snowflake: true
 ```
 
 The operator then creates your Snowflake service user, binds it to your service
-account, and injects the environment variables below.
+account, and injects the environment variables the package needs.
+
+You also need read access to the tables you query. Add your workload to the access
+list (ACL) in the producer's data product manifest.
 
 ## Minimal example
 
@@ -84,32 +83,3 @@ A `HappiJob` has no such manifest field, so pass it to `NewConfig` instead:
 ```go
 cfg, err := snowflake.NewConfig(os.Getenv, cred, snowflake.WithWarehouse("WH_SOMETHING_BIGGER"))
 ```
-
-## Environment variables
-
-| Config field        | Environment variable   | Required / When                 | Description                                   |
-|---------------------|------------------------|---------------------------------|-----------------------------------------------|
-| `Config.Account`    | `SNOWFLAKE_ACCOUNT`    | Required (injected by operator) | Snowflake account identifier                  |
-| `Config.Warehouse`  | `SNOWFLAKE_WAREHOUSE`  | Optional (injected by operator) | Warehouse the session runs against            |
-
-The token exchange itself is handled by
-[identity](../identity), which reads `HAPPI_IDP_ISSUER_URL` and the projected
-Kubernetes token. `NewConfig` takes `os.Getenv` as a parameter rather than calling
-it directly, so the configuration can be tested without touching the environment.
-
-## Troubleshooting
-
-**`missing SNOWFLAKE_ACCOUNT environment variable`**
-You are running outside a Happi pod, or the manifest does not request Snowflake.
-Set the variables yourself for local development.
-
-**`HAPPI_IDP_ISSUER_URL not set` from `NewWorkloadCredential`**
-Same cause — the operator injects this alongside the Snowflake variables.
-
-**`exchange token for snowflake: ... 401`**
-The IdP did not recognise the workload. Usually means the service account differs
-from the one the Snowflake service user is bound to.
-
-**`ping snowflake: ...` with an authentication error**
-The token reached Snowflake but was rejected. Check that the service user's
-`OIDC_AUDIENCE_LIST` contains `<account>.snowflakecomputing.com`.
