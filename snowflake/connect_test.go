@@ -74,14 +74,3 @@ func TestNewConfig(t *testing.T) {
 		})
 	}
 }
-
-func TestConfigAudience(t *testing.T) {
-	cfg := &Config{Account: "acme"}
-
-	// Snowflake's default audience is the shared snowflakecomputing.com, which every
-	// account accepts. Scoping it to this account is what keeps a token minted here
-	// from authenticating against someone else's.
-	if got, want := cfg.audience(), "acme.snowflakecomputing.com"; got != want {
-		t.Errorf("audience() = %q, want %q", got, want)
-	}
-}

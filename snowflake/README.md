@@ -70,7 +70,11 @@ Tables are addressed as `DATABASE.SCHEMA.TABLE`.
 
 Set up the `*sql.DB` once at startup and keep it for the lifetime of the process.
 Every connection the pool opens gets a fresh token, and connections are retired
-after 30 minutes, so no connection outlives its login.
+after an hour, so no connection outlives its login.
+
+If you run many queries in parallel, raise `db.SetMaxIdleConns`: `database/sql`
+keeps only two idle connections by default, and every new connection costs a
+token exchange and a Snowflake login.
 
 ## Choosing a warehouse
 

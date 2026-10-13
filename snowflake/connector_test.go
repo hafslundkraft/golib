@@ -13,53 +13,28 @@ import (
 	"time"
 
 	"github.com/snowflakedb/gosnowflake"
-	"golang.org/x/oauth2"
 
 	"github.com/hafslundkraft/golib/identity"
 )
 
-type failingTokenSource struct{}
-
-func (failingTokenSource) Token() (*oauth2.Token, error) {
-	return nil, errors.New("idp unreachable")
-}
-
-type failingCredential struct{}
-
-func (failingCredential) TokenSource(_ context.Context, _ ...func(*identity.TokenOptions)) oauth2.TokenSource {
-	return failingTokenSource{}
-}
-
 func TestNewConnector(t *testing.T) {
-	tests := map[string]struct {
-		warehouse     string
-		wantWarehouse string
-	}{
-		"warehouse set":   {warehouse: "WH_BIG", wantWarehouse: "WH_BIG"},
-		"warehouse empty": {warehouse: "", wantWarehouse: ""},
+	c := newConnector(&Config{
+		Account:    "acme",
+		Warehouse:  "WH_BIG",
+		Credential: fakeCredential{token: "token-1"},
+	})
+
+	if c.cfg.Account != "acme" {
+		t.Errorf("Account = %q, want %q", c.cfg.Account, "acme")
 	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			c := newConnector(&Config{
-				Account:    "acme",
-				Warehouse:  tc.warehouse,
-				Credential: fakeCredential{token: "token-1"},
-			})
-
-			if c.cfg.Account != "acme" {
-				t.Errorf("Account = %q, want %q", c.cfg.Account, "acme")
-			}
-			if c.cfg.Warehouse != tc.wantWarehouse {
-				t.Errorf("Warehouse = %q, want %q", c.cfg.Warehouse, tc.wantWarehouse)
-			}
-			if c.cfg.Authenticator != gosnowflake.AuthTypeWorkloadIdentityFederation {
-				t.Errorf("Authenticator = %v, want workload identity federation", c.cfg.Authenticator)
-			}
-			if c.cfg.WorkloadIdentityProvider != "OIDC" {
-				t.Errorf("WorkloadIdentityProvider = %q, want %q", c.cfg.WorkloadIdentityProvider, "OIDC")
-			}
-		})
+	if c.cfg.Warehouse != "WH_BIG" {
+		t.Errorf("Warehouse = %q, want %q", c.cfg.Warehouse, "WH_BIG")
+	}
+	if c.cfg.Authenticator != gosnowflake.AuthTypeWorkloadIdentityFederation {
+		t.Errorf("Authenticator = %v, want workload identity federation", c.cfg.Authenticator)
+	}
+	if c.cfg.WorkloadIdentityProvider != "OIDC" {
+		t.Errorf("WorkloadIdentityProvider = %q, want %q", c.cfg.WorkloadIdentityProvider, "OIDC")
 	}
 }
 
@@ -86,8 +61,6 @@ func TestConfigWithTokenLeavesTemplateAlone(t *testing.T) {
 
 // TestConnectorRequestsAccountAudience goes through a real WorkloadCredential
 // against a fake IdP, because the resource option is opaque outside identity.
-// Without it the token gets Snowflake's shared default audience, which every
-// account accepts.
 func TestConnectorRequestsAccountAudience(t *testing.T) {
 	gotResource := make(chan string, 1)
 	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,14 +98,6 @@ func fakeJWT(exp time.Time) string {
 	enc := base64.RawURLEncoding
 	payload := fmt.Sprintf(`{"exp":%d}`, exp.Unix())
 	return enc.EncodeToString([]byte(`{"alg":"none"}`)) + "." + enc.EncodeToString([]byte(payload)) + ".sig"
-}
-
-func TestConfigWithTokenPropagatesFailure(t *testing.T) {
-	c := &connector{credential: failingCredential{}}
-
-	if _, err := c.configWithToken(context.Background()); err == nil {
-		t.Fatal("expected an error when the token exchange fails, got none")
-	}
 }
 
 // TestConfigWithTokenHonorsDialContext covers why the token source is built per

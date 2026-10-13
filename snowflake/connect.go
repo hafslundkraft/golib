@@ -19,9 +19,11 @@ const (
 	envWarehouse = "SNOWFLAKE_WAREHOUSE"
 )
 
-// Connections are recycled regularly, so a long-lived pool keeps reconnecting with
-// current tokens instead of relying on sessions opened long ago.
-const connMaxLifetime = 30 * time.Minute
+// A Snowflake session can be renewed only until its master token expires (about
+// four hours); after that the driver must log in again, and an open connection
+// holds only the token it was opened with. An hour keeps every login on a fresh
+// token with room for long queries and transactions.
+const connMaxLifetime = time.Hour
 
 // Config holds the parameters needed to connect to Snowflake.
 type Config struct {
@@ -44,6 +46,7 @@ func WithWarehouse(warehouse string) Option {
 
 // NewConfig reads connection parameters from environment variables that are
 // automatically set on pods with Snowflake access provisioned through the platform.
+// SNOWFLAKE_ACCOUNT is required; SNOWFLAKE_WAREHOUSE is optional.
 func NewConfig(env func(string) string, cred identity.Credential, opts ...Option) (*Config, error) {
 	account := env(envAccount)
 	if account == "" {
@@ -52,9 +55,7 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 
 	cfg := &Config{
 		Account: account,
-		// An unset warehouse is left empty rather than defaulted here: the operator
-		// owns that default, and repeating it would let the two drift without any
-		// error to notice it by.
+		// The operator injects its default warehouse when the manifest sets none.
 		Warehouse:  env(envWarehouse),
 		Credential: cred,
 	}
@@ -64,11 +65,12 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 	return cfg, nil
 }
 
-// New opens a connection pool to Snowflake and verifies it with a ping. Every
-// connection the pool opens authenticates with a current token, so the
-// returned pool can be set up once at startup and used for the process's lifetime.
+// New opens a connection pool to Snowflake and logs in once with a ping, so a
+// failing token exchange or login is reported here rather than on the first query.
+// Every connection the pool opens authenticates with a fresh token, so the returned
+// pool can be set up once at startup and used for the process's lifetime.
 //
-// The context only bounds the initial ping; the pool does not retain it.
+// ctx bounds only the initial ping; canceling it later does not affect the pool.
 func New(ctx context.Context, cfg *Config) (*sql.DB, error) {
 	db := sql.OpenDB(newConnector(cfg))
 	db.SetConnMaxLifetime(connMaxLifetime)
@@ -80,12 +82,9 @@ func New(ctx context.Context, cfg *Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// audience is the value Snowflake requires in the token's aud claim, sent as the
-// RFC 8707 resource parameter when the Kubernetes token is exchanged. It is derived
-// rather than configured because the operator writes the same string into the
-// service user's OIDC_AUDIENCE_LIST. Snowflake's default audience is the shared
-// snowflakecomputing.com, which every Snowflake account accepts, so a token minted
-// without it would authenticate against someone else's account.
+// audience is the aud claim Snowflake requires, requested as the RFC 8707 resource
+// when the Kubernetes token is exchanged. It must match the OIDC_AUDIENCE_LIST the
+// operator sets on the service user, which it derives from the account the same way.
 func (c *Config) audience() string {
 	return c.Account + ".snowflakecomputing.com"
 }

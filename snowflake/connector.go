@@ -10,9 +10,8 @@ import (
 	"github.com/hafslundkraft/golib/identity"
 )
 
-// connector hands database/sql a current token every time the pool opens
-// a physical connection. gosnowflake takes the token as a plain Config field rather
-// than as a callback the way pgx does, so this is the only place left to refresh it.
+// connector gives every new connection a fresh token. gosnowflake takes the token
+// as a plain Config field, not a callback, so this is where it gets refreshed.
 type connector struct {
 	cfg        gosnowflake.Config
 	credential identity.Credential
@@ -25,7 +24,7 @@ var _ driver.Connector = (*connector)(nil)
 func newConnector(cfg *Config) *connector {
 	sfCfg := gosnowflake.Config{
 		Account: cfg.Account,
-		// Empty leaves the Snowflake user's default warehouse in effect.
+		// Empty leaves the default warehouse of the workload's Snowflake user in effect.
 		Warehouse:                cfg.Warehouse,
 		Authenticator:            gosnowflake.AuthTypeWorkloadIdentityFederation,
 		WorkloadIdentityProvider: "OIDC",
@@ -39,8 +38,7 @@ func newConnector(cfg *Config) *connector {
 }
 
 // Connect opens one physical connection with a fresh token. database/sql calls
-// this whenever the pool grows, which is what lets a long-lived *sql.DB keep
-// working: no connection is ever opened with an expired token.
+// it whenever the pool needs a new connection.
 func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
 	cfg, err := c.configWithToken(ctx)
 	if err != nil {
@@ -49,7 +47,7 @@ func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
 
 	conn, err := gosnowflake.NewConnector(gosnowflake.SnowflakeDriver{}, cfg).Connect(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("open snowflake connection: %w", err)
+		return nil, fmt.Errorf("connect: %w", err)
 	}
 	return conn, nil
 }
@@ -59,18 +57,13 @@ func (c *connector) Driver() driver.Driver {
 	return gosnowflake.SnowflakeDriver{}
 }
 
-// configWithToken copies the template and stamps a fresh token onto the copy.
-// The copy matters: database/sql calls Connect concurrently as the pool grows, and
-// a shared config would have those calls overwriting each other's token.
-//
-// The token source is built per call so the exchange runs under the dial context:
-// a canceled dial stops it, and no context has to outlive the pool. That gives up
-// token caching, which costs one exchange per physical connection; with
-// connections recycled every connMaxLifetime that is rare.
+// configWithToken returns a copy of c.cfg with a fresh token. It copies because
+// database/sql calls Connect concurrently. The token source is built per call so
+// a canceled dial stops the exchange, at the cost of one exchange per connection.
 func (c *connector) configWithToken(ctx context.Context) (gosnowflake.Config, error) {
 	token, err := c.credential.TokenSource(ctx, identity.WithResource(c.resource)).Token()
 	if err != nil {
-		return gosnowflake.Config{}, fmt.Errorf("exchange token for snowflake: %w", err)
+		return gosnowflake.Config{}, fmt.Errorf("exchange token: %w", err)
 	}
 
 	cfg := c.cfg
