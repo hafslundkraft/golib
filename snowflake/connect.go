@@ -65,13 +65,13 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 	return cfg, nil
 }
 
-// New opens a connection pool to Snowflake and logs in once with a ping, so a
+// Open opens a connection pool to Snowflake and logs in once with a ping, so a
 // failing token exchange or login is reported here rather than on the first query.
 // Every connection the pool opens authenticates with a fresh token, so the returned
 // pool can be set up once at startup and used for the process's lifetime.
 //
 // ctx bounds only the initial ping; canceling it later does not affect the pool.
-func New(ctx context.Context, cfg *Config) (*sql.DB, error) {
+func Open(ctx context.Context, cfg *Config) (*sql.DB, error) {
 	db := sql.OpenDB(newConnector(cfg))
 	db.SetConnMaxLifetime(connMaxLifetime)
 

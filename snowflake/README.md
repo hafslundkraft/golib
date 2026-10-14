@@ -53,7 +53,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db, err := snowflake.New(ctx, cfg)
+	db, err := snowflake.Open(ctx, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func main() {
 }
 ```
 
-`New` returns an ordinary `*sql.DB`, so everything after it is standard
+`Open` returns an ordinary `*sql.DB`, so everything after it is standard
 `database/sql`.
 
 Tables are addressed as `DATABASE.SCHEMA.TABLE`.
