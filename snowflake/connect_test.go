@@ -29,6 +29,8 @@ func TestNewConfig(t *testing.T) {
 		wantErr       bool
 		wantAccount   string
 		wantWarehouse string
+		wantDatabase  string
+		wantSchema    string
 	}{
 		"account and warehouse injected": {
 			env:           map[string]string{envAccount: "acme", envWarehouse: "WH_SMALL"},
@@ -45,6 +47,18 @@ func TestNewConfig(t *testing.T) {
 			opts:          []Option{WithWarehouse("WH_BIG")},
 			wantAccount:   "acme",
 			wantWarehouse: "WH_BIG",
+		},
+		"options set database and schema": {
+			env:          map[string]string{envAccount: "acme"},
+			opts:         []Option{WithDatabase("INGEST"), WithSchema("MY_SCHEMA")},
+			wantAccount:  "acme",
+			wantDatabase: "INGEST",
+			wantSchema:   "MY_SCHEMA",
+		},
+		"schema without database": {
+			env:     map[string]string{envAccount: "acme"},
+			opts:    []Option{WithSchema("MY_SCHEMA")},
+			wantErr: true,
 		},
 		"missing account": {
 			env:     map[string]string{envWarehouse: "WH_SMALL"},
@@ -70,6 +84,12 @@ func TestNewConfig(t *testing.T) {
 			}
 			if cfg.Warehouse != tc.wantWarehouse {
 				t.Errorf("Warehouse = %q, want %q", cfg.Warehouse, tc.wantWarehouse)
+			}
+			if cfg.Database != tc.wantDatabase {
+				t.Errorf("Database = %q, want %q", cfg.Database, tc.wantDatabase)
+			}
+			if cfg.Schema != tc.wantSchema {
+				t.Errorf("Schema = %q, want %q", cfg.Schema, tc.wantSchema)
 			}
 		})
 	}

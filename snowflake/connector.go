@@ -26,6 +26,8 @@ func newConnector(cfg *Config) *connector {
 		Account: cfg.Account,
 		// Empty leaves the default warehouse of the workload's Snowflake user in effect.
 		Warehouse:                cfg.Warehouse,
+		Database:                 cfg.Database,
+		Schema:                   cfg.Schema,
 		Authenticator:            gosnowflake.AuthTypeWorkloadIdentityFederation,
 		WorkloadIdentityProvider: "OIDC",
 	}

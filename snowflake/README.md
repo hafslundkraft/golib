@@ -70,7 +70,8 @@ func main() {
 `Open` returns an ordinary `*sql.DB`, so everything after it is standard
 `database/sql`.
 
-Tables are addressed as `DATABASE.SCHEMA.TABLE`.
+Tables are addressed as `DATABASE.SCHEMA.TABLE`, unless you set a default
+database and schema (see below).
 
 ## Connection lifetime
 
@@ -98,3 +99,22 @@ A `HappiJob` has no such manifest field, so pass it to `NewConfig` instead:
 ```go
 cfg, err := snowflake.NewConfig(os.Getenv, cred, snowflake.WithWarehouse("WH_SOMETHING_BIGGER"))
 ```
+
+## Default database and schema
+
+Set a default database and schema to query tables by name alone:
+
+```go
+cfg, err := snowflake.NewConfig(os.Getenv, cred,
+	snowflake.WithDatabase("INGEST"),
+	snowflake.WithSchema("MY_SCHEMA"),
+)
+// ...
+db.QueryRowContext(ctx, "SELECT COUNT(*) FROM MY_TABLE")
+```
+
+You can set the database alone and query `SCHEMA.TABLE`. `WithSchema` requires
+`WithDatabase`; `NewConfig` returns an error otherwise.
+
+Without them, tables must be fully qualified. Setting a default does not grant
+access: your workload still needs read access to the tables, as above.

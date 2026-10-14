@@ -8,6 +8,7 @@ package snowflake
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -29,6 +30,8 @@ const connMaxLifetime = time.Hour
 type Config struct {
 	Account    string
 	Warehouse  string
+	Database   string
+	Schema     string
 	Credential identity.Credential
 }
 
@@ -41,6 +44,23 @@ type Option func(*Config)
 func WithWarehouse(warehouse string) Option {
 	return func(cfg *Config) {
 		cfg.Warehouse = warehouse
+	}
+}
+
+// WithDatabase sets the session's default database, so queries can name tables
+// without the database prefix. Without it, tables must be fully qualified.
+func WithDatabase(database string) Option {
+	return func(cfg *Config) {
+		cfg.Database = database
+	}
+}
+
+// WithSchema sets the session's default schema, so queries can name tables
+// without the schema prefix. It requires [WithDatabase], since a schema resolves
+// within a database; [NewConfig] returns an error otherwise.
+func WithSchema(schema string) Option {
+	return func(cfg *Config) {
+		cfg.Schema = schema
 	}
 }
 
@@ -61,6 +81,9 @@ func NewConfig(env func(string) string, cred identity.Credential, opts ...Option
 	}
 	for _, opt := range opts {
 		opt(cfg)
+	}
+	if cfg.Schema != "" && cfg.Database == "" {
+		return nil, errors.New("WithSchema requires WithDatabase")
 	}
 	return cfg, nil
 }

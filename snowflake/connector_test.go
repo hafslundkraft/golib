@@ -21,6 +21,8 @@ func TestNewConnector(t *testing.T) {
 	c := newConnector(&Config{
 		Account:    "acme",
 		Warehouse:  "WH_BIG",
+		Database:   "INGEST",
+		Schema:     "MY_SCHEMA",
 		Credential: fakeCredential{token: "token-1"},
 	})
 
@@ -29,6 +31,12 @@ func TestNewConnector(t *testing.T) {
 	}
 	if c.cfg.Warehouse != "WH_BIG" {
 		t.Errorf("Warehouse = %q, want %q", c.cfg.Warehouse, "WH_BIG")
+	}
+	if c.cfg.Database != "INGEST" {
+		t.Errorf("Database = %q, want %q", c.cfg.Database, "INGEST")
+	}
+	if c.cfg.Schema != "MY_SCHEMA" {
+		t.Errorf("Schema = %q, want %q", c.cfg.Schema, "MY_SCHEMA")
 	}
 	if c.cfg.Authenticator != gosnowflake.AuthTypeWorkloadIdentityFederation {
 		t.Errorf("Authenticator = %v, want workload identity federation", c.cfg.Authenticator)
