@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/hamba/avro/v2"
+	"github.com/confluentinc/confluent-avro-go/v2"
 	parquet "github.com/parquet-go/parquet-go"
 )
 
@@ -273,10 +273,10 @@ func avroDecimalToNode(schema map[string]any) (parquet.Node, error) {
 // avroDurationToNode maps an Avro duration, stored as fixed(12) holding three
 // little-endian uint32, to a group of three unsigned columns.
 //
-// The node is derived from avro.LogicalDuration, the type hamba/avro requires
-// for a duration, so the column names cannot drift from it: parquet-go matches
-// a group field to a struct by parquet tag or exact Go field name, and on a
-// miss writes zeros without an error.
+// The node is derived from avro.LogicalDuration, the type confluent-avro-go
+// requires for a duration, so the column names cannot drift from it: parquet-go
+// matches a group field to a struct by parquet tag or exact Go field name, and
+// on a miss writes zeros without an error.
 func avroDurationToNode(schema map[string]any) (parquet.Node, error) {
 	if baseType, _ := schema["type"].(string); baseType != "fixed" {
 		return nil, fmt.Errorf("avro duration must be backed by \"fixed\", got %q", baseType)

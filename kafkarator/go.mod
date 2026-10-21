@@ -5,9 +5,9 @@ go 1.26.0
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1
+	github.com/confluentinc/confluent-avro-go/v2 v2.32.0
 	github.com/confluentinc/confluent-kafka-go/v2 v2.16.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/hamba/avro/v2 v2.31.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.44.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
