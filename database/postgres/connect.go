@@ -154,7 +154,7 @@ func tokenProvider(
 	cred identity.Credential,
 	resourceID string,
 ) func(context.Context) (string, error) {
-	tokenSource := cred.TokenSource(ctx,
+	tokenSource := cred.TokenSource(context.WithoutCancel(ctx),
 		identity.WithScopes(writeScope),
 		identity.WithResource(resourceID),
 	)
