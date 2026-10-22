@@ -110,6 +110,7 @@ func newConnection(ctx context.Context, cfg *Config, host string) (*pgx.Conn, er
 	}
 
 	if err := db.Ping(ctx); err != nil {
+		_ = db.Close(ctx)
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
@@ -131,6 +132,7 @@ func newPool(ctx context.Context, cfg *Config, host string) (*pgxpool.Pool, erro
 	}
 
 	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("ping pool: %w", err)
 	}
 
