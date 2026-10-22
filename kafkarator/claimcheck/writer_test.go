@@ -9,7 +9,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/hamba/avro/v2"
+	"github.com/confluentinc/confluent-avro-go/v2"
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

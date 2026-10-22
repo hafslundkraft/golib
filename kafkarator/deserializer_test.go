@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/confluentinc/confluent-avro-go/v2"
 	sr "github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
-	"github.com/hamba/avro/v2"
 )
 
 func TestAvroDeserializer_Success(t *testing.T) {

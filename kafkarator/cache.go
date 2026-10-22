@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/hamba/avro/v2"
+	"github.com/confluentinc/confluent-avro-go/v2"
 )
 
 type schemaKey struct {
