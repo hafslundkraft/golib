@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hamba/avro/v2"
+	"github.com/confluentinc/confluent-avro-go/v2"
 )
 
 // ValueDeserializer deserializes bytes into domain values
