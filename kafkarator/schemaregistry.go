@@ -167,7 +167,11 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	req = req.Clone(req.Context())
 	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-	return t.base.RoundTrip(req)
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("schema registry bearer round trip: %w", err)
+	}
+	return resp, nil
 }
 
 func withBearerTokenSource(base *http.Client, ts oauth2.TokenSource) *http.Client {

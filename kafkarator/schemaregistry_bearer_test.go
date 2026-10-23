@@ -1,6 +1,7 @@
 package kafkarator
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,7 +26,9 @@ func TestBearerTransport_SetsAuthorizationHeader(t *testing.T) {
 	})
 	client := withBearerTokenSource(http.DefaultClient, ts)
 
-	resp, err := client.Get(srv.URL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, http.NoBody)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -57,7 +60,9 @@ func TestBearerTransport_RefreshesPerRequest(t *testing.T) {
 	client := withBearerTokenSource(http.DefaultClient, ts)
 
 	for range 2 {
-		resp, err := client.Get(srv.URL)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, http.NoBody)
+		require.NoError(t, err)
+		resp, err := client.Do(req)
 		require.NoError(t, err)
 		resp.Body.Close()
 	}
