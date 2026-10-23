@@ -23,7 +23,7 @@ func NewSchemaRegistryTestHelper(
 	if err := ensureSchemaRegistered(srClient, topic, schema); err != nil {
 		return nil, fmt.Errorf("failed to ensure schema registered: %w", err)
 	}
-	client, err := newSchemaRegistryClient(&schemaRegistryConfig, tel)
+	client, err := newSchemaRegistryClient(&schemaRegistryConfig, tel, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create traced schema registry client: %w", err)
 	}

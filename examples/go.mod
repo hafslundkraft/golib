@@ -125,3 +125,5 @@ replace github.com/hafslundkraft/golib/kafkarator/claimcheck => ../kafkarator/cl
 replace github.com/hafslundkraft/golib/telemetry => ../telemetry
 
 replace github.com/hafslundkraft/golib/kafkarator => ../kafkarator
+
+replace github.com/hafslundkraft/golib/identity => ../identity

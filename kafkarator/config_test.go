@@ -75,16 +75,18 @@ func TestGetSRConfig_Success(t *testing.T) {
 	})
 }
 
-func TestGetSRConfig_MissingPassword(t *testing.T) {
+func TestGetSRConfig_URLOnly(t *testing.T) {
 	withEnv(t, map[string]string{
-		envKafkaUser:         "user",
+		envKafkaUser:         "",
 		envSchemaRegistryURL: "url.com",
 		envKafkaPassword:     "",
 	}, func() {
-		_, err := getSRConfig()
+		cfg, err := getSRConfig()
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), envKafkaPassword)
+		require.NoError(t, err)
+		assert.Equal(t, "url.com", cfg.SchemaRegistryURL)
+		assert.Empty(t, cfg.SchemaRegistryUser)
+		assert.Empty(t, cfg.SchemaRegistryPassword)
 	})
 }
 

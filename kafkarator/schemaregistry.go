@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/oauth2"
 )
 
 const (
@@ -38,7 +39,11 @@ type telemetryHTTPTransporter interface {
 	HTTPTransport(rt http.RoundTripper) *otelhttp.Transport
 }
 
-func newSchemaRegistryClient(cfg *SchemaRegistryConfig, tel TelemetryProvider) (SchemaRegistryClient, error) {
+func newSchemaRegistryClient(
+	cfg *SchemaRegistryConfig,
+	tel TelemetryProvider,
+	ts oauth2.TokenSource,
+) (SchemaRegistryClient, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("schema registry config was not provided")
 	}
@@ -51,14 +56,20 @@ func newSchemaRegistryClient(cfg *SchemaRegistryConfig, tel TelemetryProvider) (
 	}
 
 	var cfgSR *sr.Config
-	if cfg.SchemaRegistryUser == "" && cfg.SchemaRegistryPassword == "" {
+	switch {
+	case ts != nil:
 		cfgSR = sr.NewConfig(cfg.SchemaRegistryURL)
-	} else {
+	case cfg.SchemaRegistryUser == "" && cfg.SchemaRegistryPassword == "":
+		cfgSR = sr.NewConfig(cfg.SchemaRegistryURL)
+	default:
 		cfgSR = sr.NewConfigWithBasicAuthentication(
 			cfg.SchemaRegistryURL, cfg.SchemaRegistryUser, cfg.SchemaRegistryPassword,
 		)
 	}
 	cfgSR.HTTPClient = instrumentHTTPClient(cfgSR.HTTPClient, tel)
+	if ts != nil {
+		cfgSR.HTTPClient = withBearerTokenSource(cfgSR.HTTPClient, ts)
+	}
 	srClient, err := sr.NewClient(cfgSR)
 	if err != nil {
 		return nil, fmt.Errorf("create schema registry client (url=%s): %w",
@@ -140,6 +151,38 @@ func instrumentHTTPClient(base *http.Client, tel TelemetryProvider) *http.Client
 	}
 
 	c.Transport = otelhttp.NewTransport(rt)
+
+	return &c
+}
+
+type bearerTransport struct {
+	base http.RoundTripper
+	ts   oauth2.TokenSource
+}
+
+func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	tok, err := t.ts.Token()
+	if err != nil {
+		return nil, fmt.Errorf("get schema registry bearer token: %w", err)
+	}
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	return t.base.RoundTrip(req)
+}
+
+func withBearerTokenSource(base *http.Client, ts oauth2.TokenSource) *http.Client {
+	if base == nil {
+		base = http.DefaultClient
+	}
+
+	c := *base
+
+	rt := c.Transport
+	if rt == nil {
+		rt = http.DefaultTransport
+	}
+
+	c.Transport = &bearerTransport{base: rt, ts: ts}
 
 	return &c
 }
