@@ -33,7 +33,7 @@ enable = [
     "govet",
     "staticcheck",
     "errcheck",
-    "gomodguard",
+    "gomodguard_v2",
     "forbidigo",
     "rowserrcheck",
     "sqlclosecheck",
@@ -127,8 +127,11 @@ rules = [
     { name = "exported" },
 ]
 
-[linters.settings.gomodguard.blocked]
-modules = [
-    { "github.com/pkg/errors" = { recommendations = [], reason = "Use Go built-in errors wrapping" } },
-    { "gopkg.in/yaml.v3" = { recommendations = ["github.com/goccy/go-yaml"], reason = "Unmaintained" } },
-]
+[[linters.settings.gomodguard_v2.blocked]]
+module = "github.com/pkg/errors"
+reason = "Use Go built-in errors wrapping"
+
+[[linters.settings.gomodguard_v2.blocked]]
+module = "gopkg.in/yaml.v3"
+recommendations = ["github.com/goccy/go-yaml"]
+reason = "Unmaintained"

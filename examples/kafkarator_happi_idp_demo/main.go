@@ -81,12 +81,14 @@ func main() {
 	// 5. Build the connection with the Happi token source instead of Azure AD.
 	conn, err := kafkarator.NewConnection(cfg, tp, kafkarator.WithTokenSource(ts))
 	if err != nil {
-		log.Fatalf("create connection: %v", err)
+		log.Printf("create connection: %v", err)
+		return
 	}
 
 	// 6. Exercise the full OAUTHBEARER handshake against the broker.
 	if err := conn.Test(ctx); err != nil {
-		log.Fatalf("kafka connection test failed: %v", err)
+		log.Printf("kafka connection test failed: %v", err)
+		return
 	}
 
 	log.Println("kafka connection test succeeded using Happi IdP token")
