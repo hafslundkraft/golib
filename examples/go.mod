@@ -4,7 +4,8 @@ go 1.27.1
 
 require (
 	github.com/confluentinc/confluent-kafka-go/v2 v2.16.0
-	github.com/hafslundkraft/golib/kafkarator v0.2.0
+	github.com/hafslundkraft/golib/identity v0.1.2
+	github.com/hafslundkraft/golib/kafkarator v0.3.28
 	github.com/hafslundkraft/golib/kafkarator/claimcheck v0.0.0
 	github.com/hafslundkraft/golib/telemetry v0.0.0
 	github.com/testcontainers/testcontainers-go/modules/redpanda v0.44.0
@@ -43,6 +44,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/confluentinc/confluent-avro-go/v2 v2.32.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
@@ -60,7 +62,6 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
-	github.com/hamba/avro/v2 v2.31.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -125,3 +126,5 @@ replace github.com/hafslundkraft/golib/kafkarator/claimcheck => ../kafkarator/cl
 replace github.com/hafslundkraft/golib/telemetry => ../telemetry
 
 replace github.com/hafslundkraft/golib/kafkarator => ../kafkarator
+
+replace github.com/hafslundkraft/golib/identity => ../identity

@@ -245,14 +245,7 @@ func getSRConfig() (*SchemaRegistryConfig, error) {
 	}
 
 	srUser := os.Getenv(envKafkaUser)
-	if srUser == "" {
-		return nil, fmt.Errorf("environment variable %s is not set", envKafkaUser)
-	}
-
 	srPassword := os.Getenv(envKafkaPassword)
-	if srPassword == "" {
-		return nil, fmt.Errorf("environment variable %s is not set", envKafkaPassword)
-	}
 
 	return &SchemaRegistryConfig{
 		SchemaRegistryURL:      srURL,

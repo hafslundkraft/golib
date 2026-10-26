@@ -60,8 +60,9 @@ type TelemetryProvider interface {
 type Option func(*options)
 
 type options struct {
-	tokenSource oauth2.TokenSource
-	srClient    SchemaRegistryClient
+	tokenSource   oauth2.TokenSource
+	srTokenSource oauth2.TokenSource
+	srClient      SchemaRegistryClient
 }
 
 // WithTokenSource provides the optional TokenSource to use instead of default token provider.
@@ -73,6 +74,15 @@ type options struct {
 func WithTokenSource(ts oauth2.TokenSource) Option {
 	return func(o *options) {
 		o.tokenSource = ts
+	}
+}
+
+// WithSchemaRegistryTokenSource sets an OIDC token source used to authenticate
+// Schema Registry requests with a Bearer token. When set, basic-auth SR config
+// is ignored. If not set, the token source from WithTokenSource is reused.
+func WithSchemaRegistryTokenSource(ts oauth2.TokenSource) Option {
+	return func(o *options) {
+		o.srTokenSource = ts
 	}
 }
 
@@ -128,7 +138,11 @@ func NewConnection(
 
 	srClient := o.srClient
 	if srClient == nil && config.SchemaRegistryConfig.SchemaRegistryURL != "" {
-		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig, tel)
+		srTokenSource := o.srTokenSource
+		if srTokenSource == nil {
+			srTokenSource = o.tokenSource
+		}
+		srClient, err = newSchemaRegistryClient(&config.SchemaRegistryConfig, tel, srTokenSource)
 		if err != nil {
 			return nil, fmt.Errorf("schema registry client: %w", err)
 		}
