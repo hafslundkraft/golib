@@ -98,11 +98,11 @@ func NewWriter(conn *kafkarator.Connection, opts ...WriterOption) (*Writer, erro
 	}
 	connCfg := conn.Config()
 	if cfg.s3Factory == nil {
-		exchanger, err := newTokenExchanger()
+		retriever, err := newIdentityTokenRetriever()
 		if err != nil {
-			return nil, fmt.Errorf("claimcheck: init token exchanger: %w", err)
+			return nil, fmt.Errorf("claimcheck: init token retriever: %w", err)
 		}
-		cfg.s3Factory = defaultS3WriterFactory(exchanger, connCfg.Env)
+		cfg.s3Factory = defaultS3WriterFactory(retriever, connCfg.Env)
 	}
 	if cfg.fetcher == nil {
 		cfg.fetcher = newSRSchemaFetcher(conn.SchemaRegistryClient())

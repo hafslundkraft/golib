@@ -27,52 +27,45 @@ const (
 
 // newS3Client creates an S3Client for use on Happi. It:
 //  1. Uses the provided system and env to build the role ARN.
-//  2. On first use, exchanges the Happi IDP token for a short-lived S3 token
-//     and writes it to AWS_WEB_IDENTITY_TOKEN_FILE.
+//  2. Fetches a short-lived Ceph S3 token via the Happi IDP, exchanging the
+//     workload service account token for it.
 //  3. Assumes the role via AssumeRoleWithWebIdentity, refreshing as needed.
 //
 // access should be "rw" for writers or "r" for readers.
-// exchanger may be nil, in which case a new one is created from env vars.
-func newS3Client(bucket, access, system, env string, exchanger *tokenExchanger) (S3Client, error) {
+// retriever may be nil, in which case a new one is created from env vars.
+func newS3Client(bucket, access, system, env string, retriever stscreds.IdentityTokenRetriever) (S3Client, error) {
 	roleARN, err := claimCheckRoleARN(system, env, bucket, access)
 	if err != nil {
 		return nil, err
 	}
 
-	if exchanger == nil {
-		exchanger, err = newTokenExchanger()
+	if retriever == nil {
+		retriever, err = newIdentityTokenRetriever()
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return &s3Client{
-		exchanger:    exchanger,
-		roleARN:      roleARN,
-		awsTokenFile: exchanger.awsTokenFile,
-		s3Endpoint:   os.Getenv(envS3Endpoint),
-		stsEndpoint:  os.Getenv(envSTSEndpoint),
+		tokenRetriever: retriever,
+		roleARN:        roleARN,
+		s3Endpoint:     os.Getenv(envS3Endpoint),
+		stsEndpoint:    os.Getenv(envSTSEndpoint),
 	}, nil
 }
 
 // s3Client wraps the AWS SDK S3 client and implements S3Client.
-// It exchanges the Happi IDP token before each operation.
 type s3Client struct {
-	exchanger    *tokenExchanger
-	roleARN      string
-	awsTokenFile string
-	s3Endpoint   string
-	stsEndpoint  string
+	tokenRetriever stscreds.IdentityTokenRetriever
+	roleARN        string
+	s3Endpoint     string
+	stsEndpoint    string
 
 	mu     sync.Mutex
 	client *awss3.Client
 }
 
 func (p *s3Client) awsClient(ctx context.Context) (*awss3.Client, error) {
-	if err := p.exchanger.ensureFreshToken(ctx); err != nil {
-		return nil, err
-	}
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.client != nil {
@@ -93,7 +86,7 @@ func (p *s3Client) awsClient(ctx context.Context) (*awss3.Client, error) {
 	provider := stscreds.NewWebIdentityRoleProvider(
 		stsClient,
 		p.roleARN,
-		stscreds.IdentityTokenFile(p.awsTokenFile),
+		p.tokenRetriever,
 	)
 
 	cfg, err := awsconfig.LoadDefaultConfig(ctx,
@@ -247,9 +240,11 @@ func (p *s3Client) DeleteObject(ctx context.Context, bucket, key string) error {
 //
 // The system is the owner of the bucket (resolved from the topic): for a shared
 // data-product the producer must assume the data-definitions role, not its own.
-// The provided exchanger is shared across all clients to avoid concurrent token
-// exchanges racing on the same awsTokenFile.
-func defaultS3WriterFactory(exchanger *tokenExchanger, env string) func(system, bucket string) (S3Writer, error) {
+// The provided token retriever is shared across all clients.
+func defaultS3WriterFactory(
+	retriever stscreds.IdentityTokenRetriever,
+	env string,
+) func(system, bucket string) (S3Writer, error) {
 	var (
 		mu    sync.Mutex
 		cache = map[string]S3Writer{}
@@ -261,7 +256,7 @@ func defaultS3WriterFactory(exchanger *tokenExchanger, env string) func(system, 
 		if c, ok := cache[key]; ok {
 			return c, nil
 		}
-		c, err := newS3Client(bucket, "rw", system, env, exchanger)
+		c, err := newS3Client(bucket, "rw", system, env, retriever)
 		if err != nil {
 			return nil, err
 		}
@@ -276,9 +271,8 @@ func defaultS3WriterFactory(exchanger *tokenExchanger, env string) func(system, 
 //
 // The system is the producer named in the claim-check envelope: the bucket is
 // owned by that system, so the assumed IAM role must be scoped to it. The
-// provided exchanger is shared across all clients to avoid concurrent token
-// exchanges racing on the same awsTokenFile.
-func defaultS3ReaderFactory(exchanger *tokenExchanger, env string) s3ReaderFactory {
+// provided token retriever is shared across all clients.
+func defaultS3ReaderFactory(retriever stscreds.IdentityTokenRetriever, env string) s3ReaderFactory {
 	var (
 		mu    sync.Mutex
 		cache = map[string]S3Reader{}
@@ -290,7 +284,7 @@ func defaultS3ReaderFactory(exchanger *tokenExchanger, env string) s3ReaderFacto
 		if c, ok := cache[key]; ok {
 			return c, nil
 		}
-		c, err := newS3Client(bucket, "r", system, env, exchanger)
+		c, err := newS3Client(bucket, "r", system, env, retriever)
 		if err != nil {
 			return nil, err
 		}
