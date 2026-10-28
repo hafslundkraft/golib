@@ -241,7 +241,8 @@ const (
 //
 // It needs a reader made with [WithPartitionEOF], and expects to be the only
 // member of its consumer group: a partition assigned to another member is never
-// reached. Errors librdkafka recovers from by itself are skipped. It returns
+// reached. Transient errors librdkafka recovers from by itself, such as a lost
+// broker connection, are skipped; any other error ends the read. It returns
 // when ctx is done, with the messages read so far and an error. The returned
 // CommitFunc commits everything that was read, once per partition.
 func (rc *Reader) ReadToEnd(ctx context.Context) ([]Message, CommitFunc, error) {
@@ -262,10 +263,15 @@ func (rc *Reader) ReadToEnd(ctx context.Context) ([]Message, CommitFunc, error) 
 
 	var all []Message
 	latest := map[int32]kafka.Offset{}
+	// A partition added after the start is not counted: it could otherwise
+	// stand in for one that has not been read to its end.
 	onEOF := func(partition int32) bool {
-		done[partition] = true
+		if _, ok := ends[partition]; ok {
+			done[partition] = true
+		}
 		return len(done) == len(ends)
 	}
+	var lastTransient error
 
 	for {
 		if err := rc.markPositions(ends, done); err != nil {
@@ -275,9 +281,11 @@ func (rc *Reader) ReadToEnd(ctx context.Context) ([]Message, CommitFunc, error) 
 			return all, rc.commitFunc(latest), nil
 		}
 		if err := ctx.Err(); err != nil {
-			return all, rc.commitFunc(latest), fmt.Errorf(
-				"read to end: %d of %d partitions reached: %w", len(done), len(ends), err,
-			)
+			err = fmt.Errorf("read to end: %d of %d partitions reached: %w", len(done), len(ends), err)
+			if lastTransient != nil {
+				err = fmt.Errorf("%w; last Kafka error: %w", err, lastTransient)
+			}
+			return all, rc.commitFunc(latest), err
 		}
 
 		wait := readToEndPollWait
@@ -289,13 +297,31 @@ func (rc *Reader) ReadToEnd(ctx context.Context) ([]Message, CommitFunc, error) 
 		for partition, off := range offsets {
 			latest[partition] = off
 		}
-		var kerr kafka.Error
-		if errors.As(err, &kerr) && !kerr.IsFatal() {
+		if isTransient(err) {
+			lastTransient = err
 			continue // librdkafka retries by itself
 		}
 		if err != nil {
 			return all, rc.commitFunc(latest), err
 		}
+	}
+}
+
+// isTransient reports whether err is a Kafka error librdkafka recovers from by
+// itself. Permanent errors, such as a failed topic authorization, are not
+// marked fatal by librdkafka, so IsFatal cannot tell them apart.
+func isTransient(err error) bool {
+	var kerr kafka.Error
+	if !errors.As(err, &kerr) {
+		return false
+	}
+	switch kerr.Code() {
+	case kafka.ErrTransport, kafka.ErrAllBrokersDown, kafka.ErrResolve, kafka.ErrTimedOut,
+		kafka.ErrRequestTimedOut, kafka.ErrNetworkException,
+		kafka.ErrLeaderNotAvailable, kafka.ErrNotLeaderForPartition:
+		return true
+	default:
+		return false
 	}
 }
 

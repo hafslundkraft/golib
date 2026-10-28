@@ -2,6 +2,7 @@ package kafkarator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -185,4 +186,20 @@ func TestReadToEndOnAReaderAlreadyAtTheEnd(t *testing.T) {
 	again, _, err := reader.ReadToEnd(againCtx)
 	require.NoError(t, err, "a second ReadToEnd on the same reader should see it is already at the end")
 	assert.Empty(t, again)
+}
+
+func TestIsTransient(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{fmt.Errorf("poll error: %w", kafka.NewError(kafka.ErrTransport, "broker down", false)), true},
+		{fmt.Errorf("poll error: %w", kafka.NewError(kafka.ErrAllBrokersDown, "all down", false)), true},
+		{fmt.Errorf("poll error: %w", kafka.NewError(kafka.ErrTopicAuthorizationFailed, "denied", false)), false},
+		{fmt.Errorf("poll error: %w", kafka.NewError(kafka.ErrUnknownTopicOrPart, "no topic", false)), false},
+		{errors.New("not a Kafka error"), false},
+		{nil, false},
+	} {
+		assert.Equal(t, tc.want, isTransient(tc.err), "%v", tc.err)
+	}
 }
