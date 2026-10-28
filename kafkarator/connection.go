@@ -297,12 +297,30 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 
 	applyConsumerConfig(conf, group, ro.autoOffsetReset, c.config.MaxPollIntervalMs)
 
+	core, err := c.openConsumer(conf, topic, group)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := core.consumer.Subscribe(topic, nil); err != nil {
+		_ = core.close()
+		return nil, fmt.Errorf("subscribe: %w", err)
+	}
+
+	return newReader(core), nil
+}
+
+// openConsumer creates a consumer from conf and starts the OAuth refresh loop
+// feeding it when using SASL. The consumer is neither subscribed nor assigned;
+// that is up to the caller, who must close it. group is the consumer group
+// recorded in telemetry, and may be empty.
+func (c *Connection) openConsumer(conf kafka.ConfigMap, topic, group string) (_ *consumerCore, err error) {
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
 		return nil, fmt.Errorf("create consumer: %w", err)
 	}
 
-	// Unwind on failure; on success ownership transfers to the Reader.
+	// Unwind on failure; on success ownership transfers to the caller.
 	var stopAuth func()
 	defer func() {
 		if err != nil {
@@ -313,13 +331,9 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		}
 	}()
 
-	if err = consumer.Subscribe(topic, nil); err != nil {
-		return nil, fmt.Errorf("subscribe: %w", err)
-	}
-
 	if c.config.AuthMode == AuthSASL {
 		// The refresh loop is scoped to this consumer, not to the Connection:
-		// it must stop when the reader is closed, not at process exit.
+		// it must stop when the consumer is closed, not at process exit.
 		if stopAuth, err = c.startOAuth(context.Background(), consumer); err != nil {
 			return nil, err
 		}
@@ -335,11 +349,10 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		metric.WithExplicitBucketBoundaries(messagingDurationBuckets...),
 	)
 	if err != nil {
-		_ = consumer.Close()
 		return nil, fmt.Errorf("create operation duration histogram: %w", err)
 	}
 
-	return newReader(
+	return newConsumerCore(
 		consumer,
 		counter,
 		opDuration,
