@@ -2,6 +2,7 @@ package kafkarator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -58,6 +59,13 @@ type Reader struct {
 	// stopAuth stops the OAuth token refresh goroutine feeding this reader's
 	// consumer and waits for it to exit. Nil when not using SASL.
 	stopAuth func()
+
+	// partitionEOF is set by [WithPartitionEOF]. While [Reader.ReadToEnd]
+	// runs, atEnd holds the partitions that have reached their end, and
+	// partitions is how many the topic has.
+	partitionEOF bool
+	atEnd        map[int32]bool
+	partitions   int
 }
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
@@ -172,6 +180,17 @@ func (rc *Reader) Read(
 			partitionID := fmt.Sprintf("%d", e.TopicPartition.Partition)
 			rc.recordConsumed(ctx, partitionID, nil)
 
+		case kafka.PartitionEOF:
+			// Only delivered with WithPartitionEOF, and only tracked during
+			// ReadToEnd, which needs Read to return as soon as every
+			// partition has been read to its end.
+			if rc.atEnd != nil {
+				rc.atEnd[e.Partition] = true
+				if len(rc.atEnd) >= rc.partitions {
+					return msgs, commit, nil
+				}
+			}
+
 		case kafka.Error:
 			if e.IsTimeout() {
 				return msgs, commit, nil
@@ -186,6 +205,80 @@ func (rc *Reader) Read(
 	}
 
 	return msgs, commit, nil
+}
+
+// ErrPartitionEOFNotEnabled is returned by [Reader.ReadToEnd] on a reader made
+// without [WithPartitionEOF].
+var ErrPartitionEOFNotEnabled = errors.New("ReadToEnd needs a reader made with WithPartitionEOF")
+
+const (
+	readToEndBatch     = 500
+	readToEndPollWait  = time.Second
+	topicMetadataLimit = 10 * time.Second
+)
+
+// ReadToEnd reads the topic from where the consumer group stands to the end of
+// every partition, and returns what it read. Use it to load a topic's current
+// state, for example a full read of a compacted topic: with no committed
+// offsets and [OffsetEarliest], that is every message still on the topic.
+//
+// A partition counts as read to its end the first time the reader reaches its
+// end, so a message written to it after that may or may not be included. An
+// empty partition counts once the reader has reached it.
+//
+// It needs a reader made with [WithPartitionEOF], and expects to be the only
+// member of its consumer group: a partition assigned to another member is never
+// reached. It returns when ctx is done, with the messages read so far and an
+// error. The returned CommitFunc commits everything that was read.
+func (rc *Reader) ReadToEnd(ctx context.Context) ([]Message, CommitFunc, error) {
+	if !rc.partitionEOF {
+		return nil, nil, ErrPartitionEOFNotEnabled
+	}
+
+	md, err := rc.consumer.GetMetadata(&rc.topic, false, int(topicMetadataLimit.Milliseconds()))
+	if err != nil {
+		return nil, nil, fmt.Errorf("topic metadata: %w", err)
+	}
+	tm, ok := md.Topics[rc.topic]
+	if !ok {
+		return nil, nil, fmt.Errorf("topic %s not in metadata", rc.topic)
+	}
+	if tm.Error.Code() != kafka.ErrNoError {
+		return nil, nil, fmt.Errorf("topic metadata for %s: %w", rc.topic, tm.Error)
+	}
+	if len(tm.Partitions) == 0 {
+		return nil, nil, fmt.Errorf("topic %s has no partitions", rc.topic)
+	}
+
+	rc.partitions = len(tm.Partitions)
+	rc.atEnd = map[int32]bool{}
+	defer func() { rc.atEnd = nil }()
+
+	var all []Message
+	var commits []CommitFunc
+	commitAll := CommitFunc(func(ctx context.Context) error {
+		for _, commit := range commits {
+			if err := commit(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	for len(rc.atEnd) < rc.partitions {
+		if err := ctx.Err(); err != nil {
+			return all, commitAll, fmt.Errorf(
+				"read to end: %d of %d partitions reached: %w", len(rc.atEnd), rc.partitions, err,
+			)
+		}
+		msgs, commit, err := rc.Read(ctx, readToEndBatch, readToEndPollWait)
+		all = append(all, msgs...)
+		commits = append(commits, commit)
+		if err != nil {
+			return all, commitAll, err
+		}
+	}
+	return all, commitAll, nil
 }
 
 // recordReceiveDuration records messaging.client.operation.duration for a

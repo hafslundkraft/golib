@@ -256,6 +256,7 @@ type ReaderOption func(*readerOptions) error
 
 type readerOptions struct {
 	autoOffsetReset AutoOffsetReset
+	partitionEOF    bool
 }
 
 func defaultReaderOptions() readerOptions {
@@ -279,6 +280,16 @@ func WithReaderAutoOffsetReset(v AutoOffsetReset) ReaderOption {
 	}
 }
 
+// WithPartitionEOF makes the reader notice when it reaches the end of a
+// partition, which [Reader.ReadToEnd] needs. It sets librdkafka's
+// enable.partition.eof. Without it, [Reader.Read] behaves as before.
+func WithPartitionEOF() ReaderOption {
+	return func(o *readerOptions) error {
+		o.partitionEOF = true
+		return nil
+	}
+}
+
 // Reader returns a reader that is used to fetch messages from Kafka.
 func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err error) {
 	ro := defaultReaderOptions()
@@ -296,6 +307,9 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 	}
 
 	applyConsumerConfig(conf, group, ro.autoOffsetReset, c.config.MaxPollIntervalMs)
+	if ro.partitionEOF {
+		conf["enable.partition.eof"] = true
+	}
 
 	consumer, err := kafka.NewConsumer(&conf)
 	if err != nil {
@@ -339,7 +353,7 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		return nil, fmt.Errorf("create operation duration histogram: %w", err)
 	}
 
-	return newReader(
+	reader := newReader(
 		consumer,
 		counter,
 		opDuration,
@@ -348,7 +362,9 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		topic,
 		group,
 		stopAuth,
-	), nil
+	)
+	reader.partitionEOF = ro.partitionEOF
+	return reader, nil
 }
 
 // Processor returns a processor that automatically handles trace propagation and span management

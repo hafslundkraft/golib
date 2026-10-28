@@ -155,6 +155,24 @@ handleManyMessages(messages)
 _ = committer(ctx)
 ```
 
+##### Reading a topic to its end
+
+`ReadToEnd` reads until every partition has reached its end, and returns everything it read. Use it to load a topic's current state, for example a full read of a compacted topic: with no committed offsets and `OffsetEarliest`, that is every message still on the topic. The reader must be made with `WithPartitionEOF()`, and should be the only member of its consumer group, since a partition assigned to another member is never reached.
+
+```go
+reader, err := conn.Reader("my-compacted-topic", kafkarator.WithPartitionEOF())
+defer reader.Close(ctx)
+
+ctx, cancel := context.WithTimeout(ctx, time.Minute)
+defer cancel()
+messages, committer, err := reader.ReadToEnd(ctx)
+if err != nil {
+	// ctx ended before every partition was read to its end; messages holds what was read
+}
+```
+
+Without committing, the next reader in the same consumer group starts from the beginning again.
+
 For a complete example with testcontainers and Avro serialization, see [examples/kafkarator_processor_demo](../examples/kafkarator_processor_demo).
 
 ## Installation

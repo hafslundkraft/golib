@@ -103,3 +103,10 @@ func TestSASLScopeErrorMessage(t *testing.T) {
 	assert.Contains(t, err.Error(), "AZURE_KAFKA_SCOPE")
 	assert.NotContains(t, err.Error(), "KAFKA_SASL_SCOPE")
 }
+
+func TestWithPartitionEOF(t *testing.T) {
+	ro := defaultReaderOptions()
+	assert.False(t, ro.partitionEOF, "off unless asked for")
+	require.NoError(t, WithPartitionEOF()(&ro))
+	assert.True(t, ro.partitionEOF)
+}
