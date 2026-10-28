@@ -353,7 +353,7 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		return nil, fmt.Errorf("create operation duration histogram: %w", err)
 	}
 
-	reader := newReader(
+	return newReader(
 		consumer,
 		counter,
 		opDuration,
@@ -362,9 +362,8 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 		topic,
 		group,
 		stopAuth,
-	)
-	reader.partitionEOF = ro.partitionEOF
-	return reader, nil
+		ro.partitionEOF,
+	), nil
 }
 
 // Processor returns a processor that automatically handles trace propagation and span management

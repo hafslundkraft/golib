@@ -148,6 +148,8 @@ func TestReadToEndStopsWhenTheContextEnds(t *testing.T) {
 	topic := createTopic(t, 3)
 	conn, err := NewConnection(&config, newMockTelemetry())
 	require.NoError(t, err)
+	// An empty topic is read to its end without reading anything.
+	writeMessages(t, conn, topic, 10)
 	reader, err := conn.Reader(topic, WithPartitionEOF())
 	require.NoError(t, err)
 	defer reader.Close(context.Background())
@@ -156,4 +158,31 @@ func TestReadToEndStopsWhenTheContextEnds(t *testing.T) {
 	cancel()
 	_, _, err = reader.ReadToEnd(ctx)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+// End-of-partition events come once per arrival at the end. A reader that has
+// already reached the end, through Read or an earlier ReadToEnd, gets none, and
+// ReadToEnd must still see that every partition is at its end.
+func TestReadToEndOnAReaderAlreadyAtTheEnd(t *testing.T) {
+	ctx := context.Background()
+	topic := createTopic(t, 3)
+	conn, err := NewConnection(&config, newMockTelemetry())
+	require.NoError(t, err)
+	writeMessages(t, conn, topic, 10)
+
+	reader, err := conn.Reader(topic, WithPartitionEOF())
+	require.NoError(t, err)
+	defer reader.Close(ctx)
+
+	readCtx, cancel := context.WithTimeout(ctx, readToEndTimeout)
+	defer cancel()
+	msgs, _, err := reader.ReadToEnd(readCtx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 10)
+
+	againCtx, cancelAgain := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelAgain()
+	again, _, err := reader.ReadToEnd(againCtx)
+	require.NoError(t, err, "a second ReadToEnd on the same reader should see it is already at the end")
+	assert.Empty(t, again)
 }

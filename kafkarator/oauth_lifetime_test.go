@@ -326,5 +326,5 @@ func newTestReader(t *testing.T, group string, stopAuth func(*kafka.Consumer)) *
 
 	dummyServer := parseServerInfo(dummyBroker)
 
-	return newReader(c, consumed, opDur, dummyServer, tel, "oauth-lifetime-topic", group, stop)
+	return newReader(c, consumed, opDur, dummyServer, tel, "oauth-lifetime-topic", group, stop, false)
 }

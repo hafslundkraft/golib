@@ -28,6 +28,7 @@ func newReader(
 	topic string,
 	consumerGroup string,
 	stopAuth func(),
+	partitionEOF bool,
 ) *Reader {
 	return &Reader{
 		consumer:            c,
@@ -38,6 +39,7 @@ func newReader(
 		topic:               topic,
 		consumerGroup:       consumerGroup,
 		stopAuth:            stopAuth,
+		partitionEOF:        partitionEOF,
 	}
 }
 
@@ -60,12 +62,9 @@ type Reader struct {
 	// consumer and waits for it to exit. Nil when not using SASL.
 	stopAuth func()
 
-	// partitionEOF is set by [WithPartitionEOF]. While [Reader.ReadToEnd]
-	// runs, atEnd holds the partitions that have reached their end, and
-	// partitions is how many the topic has.
+	// partitionEOF is set by [WithPartitionEOF], which [Reader.ReadToEnd]
+	// needs.
 	partitionEOF bool
-	atEnd        map[int32]bool
-	partitions   int
 }
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
@@ -103,6 +102,20 @@ func (rc *Reader) Read(
 	maxMessages int,
 	maxWait time.Duration,
 ) ([]Message, CommitFunc, error) {
+	msgs, latest, err := rc.poll(ctx, maxMessages, maxWait, nil)
+	return msgs, rc.commitFunc(latest), err
+}
+
+// poll reads as [Reader.Read] describes, and returns the latest offset read
+// per partition. onEOF, when not nil, is called for each end-of-partition
+// event, and poll returns as soon as it returns true. A Kafka error other than
+// a timeout ends the poll; the error wraps the [kafka.Error].
+func (rc *Reader) poll(
+	ctx context.Context,
+	maxMessages int,
+	maxWait time.Duration,
+	onEOF func(partition int32) bool,
+) ([]Message, map[int32]kafka.Offset, error) {
 	ctx, span := startPollSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup, rc.srv)
 	defer span.End()
 
@@ -124,34 +137,6 @@ func (rc *Reader) Read(
 
 	// Track last seen offsets per partition
 	latestOffsets := map[int32]kafka.Offset{}
-
-	commit := CommitFunc(func(ctx context.Context) error {
-		commitCtx, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup, rc.srv)
-		defer span.End()
-
-		commitStart := time.Now()
-		var commitErr error
-		defer func() {
-			rc.recordCommitDuration(commitCtx, time.Since(commitStart).Seconds(), commitErr)
-			setSpanStatus(span, commitErr)
-		}()
-
-		for partition, off := range latestOffsets {
-			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
-				{
-					Topic:     &rc.topic,
-					Partition: partition,
-					Offset:    off + 1,
-				},
-			})
-			if err != nil {
-				commitErr = err
-				return fmt.Errorf("commit failed: %w", err)
-			}
-		}
-
-		return nil
-	})
 
 	for len(msgs) < maxMessages {
 		remaining := time.Until(deadline)
@@ -181,30 +166,56 @@ func (rc *Reader) Read(
 			rc.recordConsumed(ctx, partitionID, nil)
 
 		case kafka.PartitionEOF:
-			// Only delivered with WithPartitionEOF, and only tracked during
-			// ReadToEnd, which needs Read to return as soon as every
-			// partition has been read to its end.
-			if rc.atEnd != nil {
-				rc.atEnd[e.Partition] = true
-				if len(rc.atEnd) >= rc.partitions {
-					return msgs, commit, nil
-				}
+			// Only delivered with WithPartitionEOF.
+			if onEOF != nil && onEOF(e.Partition) {
+				return msgs, latestOffsets, nil
 			}
 
 		case kafka.Error:
 			if e.IsTimeout() {
-				return msgs, commit, nil
+				return msgs, latestOffsets, nil
 			}
 			rc.recordConsumed(ctx, "", e)
 			pollErr = e
-			return msgs, commit, fmt.Errorf("poll error: %w", e)
+			return msgs, latestOffsets, fmt.Errorf("poll error: %w", e)
 
 		default:
 			// ignore rebalance events etc.
 		}
 	}
 
-	return msgs, commit, nil
+	return msgs, latestOffsets, nil
+}
+
+// commitFunc commits the given latest offset per partition.
+func (rc *Reader) commitFunc(latestOffsets map[int32]kafka.Offset) CommitFunc {
+	return func(ctx context.Context) error {
+		commitCtx, span := startCommitSpan(ctx, rc.tel.Tracer(), rc.topic, rc.consumerGroup, rc.srv)
+		defer span.End()
+
+		commitStart := time.Now()
+		var commitErr error
+		defer func() {
+			rc.recordCommitDuration(commitCtx, time.Since(commitStart).Seconds(), commitErr)
+			setSpanStatus(span, commitErr)
+		}()
+
+		for partition, off := range latestOffsets {
+			_, err := rc.consumer.CommitOffsets([]kafka.TopicPartition{
+				{
+					Topic:     &rc.topic,
+					Partition: partition,
+					Offset:    off + 1,
+				},
+			})
+			if err != nil {
+				commitErr = err
+				return fmt.Errorf("commit failed: %w", err)
+			}
+		}
+
+		return nil
+	}
 }
 
 // ErrPartitionEOFNotEnabled is returned by [Reader.ReadToEnd] on a reader made
@@ -222,63 +233,126 @@ const (
 // state, for example a full read of a compacted topic: with no committed
 // offsets and [OffsetEarliest], that is every message still on the topic.
 //
-// A partition counts as read to its end the first time the reader reaches its
-// end, so a message written to it after that may or may not be included. An
-// empty partition counts once the reader has reached it.
+// The end of a partition is its end offset when ReadToEnd starts. A partition
+// is done when it is empty, when the reader's position has reached that
+// offset, or when the reader gets an end-of-partition event, which also covers
+// a partition whose last offsets are not messages. A message written after the
+// start may or may not be included. So may a partition added after the start.
 //
 // It needs a reader made with [WithPartitionEOF], and expects to be the only
 // member of its consumer group: a partition assigned to another member is never
-// reached. It returns when ctx is done, with the messages read so far and an
-// error. The returned CommitFunc commits everything that was read.
+// reached. Errors librdkafka recovers from by itself are skipped. It returns
+// when ctx is done, with the messages read so far and an error. The returned
+// CommitFunc commits everything that was read, once per partition.
 func (rc *Reader) ReadToEnd(ctx context.Context) ([]Message, CommitFunc, error) {
 	if !rc.partitionEOF {
 		return nil, nil, ErrPartitionEOFNotEnabled
 	}
 
-	md, err := rc.consumer.GetMetadata(&rc.topic, false, int(topicMetadataLimit.Milliseconds()))
+	ends, err := rc.endOffsets()
 	if err != nil {
-		return nil, nil, fmt.Errorf("topic metadata: %w", err)
+		return nil, nil, err
+	}
+	done := map[int32]bool{}
+	for partition, end := range ends {
+		if end.low >= end.high {
+			done[partition] = true
+		}
+	}
+
+	var all []Message
+	latest := map[int32]kafka.Offset{}
+	onEOF := func(partition int32) bool {
+		done[partition] = true
+		return len(done) == len(ends)
+	}
+
+	for {
+		if err := rc.markPositions(ends, done); err != nil {
+			return all, rc.commitFunc(latest), err
+		}
+		if len(done) == len(ends) {
+			return all, rc.commitFunc(latest), nil
+		}
+		if err := ctx.Err(); err != nil {
+			return all, rc.commitFunc(latest), fmt.Errorf(
+				"read to end: %d of %d partitions reached: %w", len(done), len(ends), err,
+			)
+		}
+
+		wait := readToEndPollWait
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
+			wait = time.Until(deadline)
+		}
+		msgs, offsets, err := rc.poll(ctx, readToEndBatch, wait, onEOF)
+		all = append(all, msgs...)
+		for partition, off := range offsets {
+			latest[partition] = off
+		}
+		var kerr kafka.Error
+		if errors.As(err, &kerr) && !kerr.IsFatal() {
+			continue // librdkafka retries by itself
+		}
+		if err != nil {
+			return all, rc.commitFunc(latest), err
+		}
+	}
+}
+
+type partitionEnds struct{ low, high int64 }
+
+// endOffsets is each partition's low and high watermark, now.
+func (rc *Reader) endOffsets() (map[int32]partitionEnds, error) {
+	limit := int(topicMetadataLimit.Milliseconds())
+	md, err := rc.consumer.GetMetadata(&rc.topic, false, limit)
+	if err != nil {
+		return nil, fmt.Errorf("topic metadata: %w", err)
 	}
 	tm, ok := md.Topics[rc.topic]
 	if !ok {
-		return nil, nil, fmt.Errorf("topic %s not in metadata", rc.topic)
+		return nil, fmt.Errorf("topic %s not in metadata", rc.topic)
 	}
 	if tm.Error.Code() != kafka.ErrNoError {
-		return nil, nil, fmt.Errorf("topic metadata for %s: %w", rc.topic, tm.Error)
+		return nil, fmt.Errorf("topic metadata for %s: %w", rc.topic, tm.Error)
 	}
 	if len(tm.Partitions) == 0 {
-		return nil, nil, fmt.Errorf("topic %s has no partitions", rc.topic)
+		return nil, fmt.Errorf("topic %s has no partitions", rc.topic)
 	}
-
-	rc.partitions = len(tm.Partitions)
-	rc.atEnd = map[int32]bool{}
-	defer func() { rc.atEnd = nil }()
-
-	var all []Message
-	var commits []CommitFunc
-	commitAll := CommitFunc(func(ctx context.Context) error {
-		for _, commit := range commits {
-			if err := commit(ctx); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-
-	for len(rc.atEnd) < rc.partitions {
-		if err := ctx.Err(); err != nil {
-			return all, commitAll, fmt.Errorf(
-				"read to end: %d of %d partitions reached: %w", len(rc.atEnd), rc.partitions, err,
-			)
-		}
-		msgs, commit, err := rc.Read(ctx, readToEndBatch, readToEndPollWait)
-		all = append(all, msgs...)
-		commits = append(commits, commit)
+	ends := make(map[int32]partitionEnds, len(tm.Partitions))
+	for _, p := range tm.Partitions {
+		low, high, err := rc.consumer.QueryWatermarkOffsets(rc.topic, p.ID, limit)
 		if err != nil {
-			return all, commitAll, err
+			return nil, fmt.Errorf("end offset of %s partition %d: %w", rc.topic, p.ID, err)
+		}
+		ends[p.ID] = partitionEnds{low: low, high: high}
+	}
+	return ends, nil
+}
+
+// markPositions marks done each partition this reader is assigned whose
+// position has reached its end offset. That covers a reader already at the end,
+// which gets no end-of-partition event.
+func (rc *Reader) markPositions(ends map[int32]partitionEnds, done map[int32]bool) error {
+	var pending []kafka.TopicPartition
+	for partition := range ends {
+		if !done[partition] {
+			pending = append(pending, kafka.TopicPartition{Topic: &rc.topic, Partition: partition})
 		}
 	}
-	return all, commitAll, nil
+	if len(pending) == 0 {
+		return nil
+	}
+	positions, err := rc.consumer.Position(pending)
+	if err != nil {
+		return fmt.Errorf("consumer position: %w", err)
+	}
+	for _, p := range positions {
+		// Unassigned or not yet fetched partitions have a negative position.
+		if p.Offset >= 0 && int64(p.Offset) >= ends[p.Partition].high {
+			done[p.Partition] = true
+		}
+	}
+	return nil
 }
 
 // recordReceiveDuration records messaging.client.operation.duration for a
