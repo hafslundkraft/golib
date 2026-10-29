@@ -22,8 +22,8 @@ func newReader(core *consumerCore) *Reader {
 
 // Reader provides an interface for reading messages from a Kafka topic, as well
 // as closing it when the client is done reading. Additionally, the act of fetching
-// messages and committing them ("committing" == registering the largest offset per
-// partition as the high watermark within the consumer group) is split giving the
+// messages and committing them ("committing" == recording in the consumer group,
+// per partition, that the group resumes after the messages read) is split giving the
 // client total control and responsibility.
 type Reader struct {
 	*consumerCore
@@ -42,7 +42,7 @@ func (r *Reader) Close(ctx context.Context) error {
 // is exceeded before maxMessages have been fetched from the topic, the func will
 // return with as many messages in the list as were fetched before timeout.
 //
-// commiter can be used to commit the high watermark per partition to the consumer group. It
+// commiter can be used to commit the offsets read so far to the consumer group. It
 // is up to the client if and when commiter is invoked. Committing often can affect
 // performance considerably in a high-volume scenario, so the client could for example
 // employ a strategy where commiter is only invoked every N iterations.

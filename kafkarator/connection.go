@@ -26,7 +26,7 @@ import (
 // that emits messages, while the second exposes a reader. They support two different
 // use-cases where ChannelReader is best for low volume scenarios, while Reader is best for
 // high volume scenarios and/or situations where the client needs to control exactly how and
-// when high watermark offsets are committed. Processor is also available as a higher-level
+// when offsets are committed. Processor is also available as a higher-level
 // abstraction that wraps Reader with automatic trace propagation and offset management.
 //
 // For writing, a writer is exposed. It supports writing messages, one at a time.
@@ -414,7 +414,7 @@ func (c *Connection) Processor(
 //
 // If an internal error is raised, the error will be logged, and the channel will be closed.
 //
-// The high watermark offset is automatically committed for each message. This potentially has significant
+// The offset of each message is committed automatically. This potentially has significant
 // performance consequences. Also, it sacrifices control, for instance the client's handling of a message
 // might fail its offset is committed. Please use Reader if you are concerned about performance, or you
 // want to explicitly commit offsets.
