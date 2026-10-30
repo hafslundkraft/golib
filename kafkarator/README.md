@@ -57,13 +57,14 @@ if err != nil {
 
 ### Reading messages
 
-There are three ways to read messages from Kafka, each suited for different use cases:
+There are four ways to read messages from Kafka, each suited for different use cases:
 
 | Method | What It Does | When to Use | Offset Commits | `maxMessages` |
 |--------|--------------|-------------|-----------------|---------------|
 | **Processor** | `Reader` with automatic tracing built-in | Need to trace message flow | Automatic after batch | n |
 | **ChannelReader** | Simple Go channel streaming | Quick prototypes, simple apps | Automatic per message | 1 |
 | **Reader** | Read in batches with full control | High-traffic apps, need control | Manual via `Committer` | n |
+| **ReadToEnd** | Read every partition from the beginning to its current end, outside any consumer group | Load a copy of reference data | None | n/a |
 
 
 #### Processor
@@ -154,6 +155,29 @@ handleManyMessages(messages)
 // You decide when to save progress
 _ = committer(ctx)
 ```
+
+#### ReadToEnd
+Read every partition of a topic from the beginning, without joining a consumer group, for example to load a copy of reference data. Nothing is committed, so each read covers the whole topic, independently of any other consumer.
+
+```go
+ctx, cancel := context.WithTimeout(ctx, time.Minute)
+defer cancel()
+
+state := map[string][]byte{}
+for msg, err := range conn.ReadToEnd(ctx, "my-compacted-topic") {
+    if err != nil {
+        // ctx ended before every partition was read to its end, or Kafka failed
+        return err
+    }
+    if msg.Value == nil {
+        delete(state, string(msg.Key)) // tombstone
+        continue
+    }
+    state[string(msg.Key)] = msg.Value
+}
+```
+
+`ReadToEnd` stops at the end each partition had when iteration started, so messages written during the read are not included. Compaction is lazy, so a key can appear more than once; the last one wins. Messages are only in order within a partition, so this holds while each key stays in one partition. Each iteration opens its own consumer and closes it when iteration finishes.
 
 For a complete example with testcontainers and Avro serialization, see [examples/kafkarator_processor_demo](../examples/kafkarator_processor_demo).
 

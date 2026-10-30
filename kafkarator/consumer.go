@@ -10,8 +10,8 @@ import (
 )
 
 // consumerCore is a Kafka consumer with the OAuth refresh loop feeding it and
-// its telemetry, neither subscribed nor assigned partitions. [Reader] builds
-// on it.
+// its telemetry, neither subscribed nor assigned partitions. [Reader] and
+// [Connection.ReadToEnd] build on it.
 type consumerCore struct {
 	consumer            *kafka.Consumer
 	readMessagesCounter messagingconv.ClientConsumedMessages

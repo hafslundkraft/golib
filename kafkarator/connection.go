@@ -3,6 +3,7 @@ package kafkarator
 import (
 	"context"
 	"fmt"
+	"iter"
 	"log/slog"
 	"strings"
 	"time"
@@ -17,29 +18,34 @@ import (
 )
 
 // Connection represents a Connection to a Kafka service. Connection supports both writing
-// and reading messages. For reading, a consumer group must be supplied. This means
-// that multiple copies of the service using this library can be started simultaneously, and Kafka
-// will automatically balance consumption between the consumers, i.e. the service can be scaled
-// horizontally. Of course, this only makes sense if the topic has more than one partition.
+// and reading messages.
 //
-// Three modes of reading are supported: ChannelReader, Reader and Processor. The former exposes a channel
-// that emits messages, while the second exposes a reader. They support two different
-// use-cases where ChannelReader is best for low volume scenarios, while Reader is best for
-// high volume scenarios and/or situations where the client needs to control exactly how and
-// when offsets are committed. Processor is also available as a higher-level
+// Four modes of reading are supported: ChannelReader, Reader, Processor and ReadToEnd.
+// The first three read as members of a consumer group. This means that multiple copies of
+// the service using this library can be started simultaneously, and Kafka will automatically
+// balance consumption between the consumers, i.e. the service can be scaled horizontally. Of
+// course, this only makes sense if the topic has more than one partition.
+//
+// ChannelReader exposes a channel that emits messages, and is best for low volume scenarios.
+// Reader is best for high volume scenarios and/or situations where the client needs to
+// control exactly how and when offsets are committed. Processor is a higher-level
 // abstraction that wraps Reader with automatic trace propagation and offset management.
+//
+// ReadToEnd reads every partition of a topic outside any consumer group, for
+// example to load a copy of reference data.
 //
 // For writing, a writer is exposed. It supports writing messages, one at a time.
 //
 // Connection holds no broker connection of its own: it is a factory that carries
 // configuration, telemetry and a Schema Registry client, and builds a fresh
-// producer or consumer on each Writer, Reader, Processor or ChannelReader call.
-// Each of those owns its Kafka handle and its OAuth refresh loop, and must be
-// closed individually. The Reader behind ChannelReader is the exception: it is
-// owned by the returned channel's goroutine and closed when that goroutine
-// exits. Cancellation is only observed between messages, so callers must keep
-// receiving until the channel closes; abandoning it strands the goroutine, and
-// the Reader and refresh loop with it.
+// producer or consumer on each Writer, Reader, Processor or ChannelReader call,
+// and on each iteration of ReadToEnd. Each of those owns its Kafka handle and
+// its OAuth refresh loop, and must be closed individually, with two exceptions.
+// ReadToEnd closes its consumer when iteration finishes. The Reader behind
+// ChannelReader is owned by the returned channel's goroutine and closed when
+// that goroutine exits. Cancellation is only observed between messages, so
+// callers must keep receiving until the channel closes; abandoning it strands
+// the goroutine, and the Reader and refresh loop with it.
 type Connection struct {
 	config    Config
 	configMap *kafka.ConfigMap
@@ -308,6 +314,59 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 	}
 
 	return newReader(core), nil
+}
+
+// ReadToEnd returns an iterator over the messages of every partition of topic,
+// from the beginning up to each partition's high watermark as determined when
+// iteration starts. It joins no consumer group and commits nothing, so each
+// iteration reads the whole topic, independently of any other consumer. Use it
+// when you need all of a topic's data, such as reference data.
+//
+// Errors Kafka recovers from, such as a lost connection, are retried until ctx
+// ends, so give ctx a deadline. If iteration finishes without an error, every
+// partition has been read up to its high watermark. Otherwise, the last value
+// is an error.
+//
+// If the topic's producers use transactions, a partition with a transaction
+// still open is read up to the last message before that transaction. Later
+// iterations read past it once it is committed or aborted.
+func (c *Connection) ReadToEnd(ctx context.Context, topic string) iter.Seq2[Message, error] {
+	return func(yield func(Message, error) bool) {
+		core, err := c.openReadToEndConsumer(topic)
+		if err != nil {
+			yield(Message{}, err)
+			return
+		}
+		defer func() { _ = core.close() }()
+
+		if err := readToEnd(ctx, core, yield); err != nil {
+			yield(Message{}, err)
+		}
+	}
+}
+
+// openReadToEndConsumer opens a consumer for [Connection.ReadToEnd]. The
+// caller must close it.
+func (c *Connection) openReadToEndConsumer(topic string) (*consumerCore, error) {
+	group, err := c.consumerGroupName(topic)
+	if err != nil {
+		return nil, fmt.Errorf("consumer group name: %w", err)
+	}
+
+	conf := cloneConfigMap(c.configMap)
+	// Assign needs a group.id although assigned partitions join no group, and
+	// the group's coordinator is looked up, which needs authorization for the
+	// group. The workload is only authorized for its own.
+	conf["group.id"] = group
+	conf["enable.auto.commit"] = false
+	// Applies when retention deletes messages ahead of the read.
+	conf["auto.offset.reset"] = string(OffsetEarliest)
+	// Reports each partition's end. ReadToEnd needs it when the end is not a
+	// message: transaction markers, or an open transaction holding the read
+	// back.
+	conf["enable.partition.eof"] = true
+
+	return c.openConsumer(conf, topic, "")
 }
 
 // openConsumer creates a consumer from conf and starts the OAuth refresh loop
