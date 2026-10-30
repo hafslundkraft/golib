@@ -316,7 +316,7 @@ func (c *Connection) Reader(topic string, opts ...ReaderOption) (_ *Reader, err 
 	return newReader(core), nil
 }
 
-// ReadToEnd returns an iterator over the messages of every partition of topic,
+// ReadToEnd returns an iterator over the messages in every partition of topic,
 // from the beginning up to each partition's high watermark as determined when
 // iteration starts. It joins no consumer group and commits nothing, so each
 // iteration reads the whole topic, independently of any other consumer. Use it
