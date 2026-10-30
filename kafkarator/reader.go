@@ -3,7 +3,6 @@ package kafkarator
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -16,48 +15,18 @@ const magicByte = 0
 // It is safe to call multiple times; committing is idempotent.
 type CommitFunc func(ctx context.Context) error
 
-// newReader wraps an already-subscribed consumer. stopAuth may be nil; see the
-// field on [Reader].
-func newReader(
-	c *kafka.Consumer,
-	rmc messagingconv.ClientConsumedMessages,
-	opDur messagingconv.ClientOperationDuration,
-	srv serverInfo,
-	tel TelemetryProvider,
-	topic string,
-	consumerGroup string,
-	stopAuth func(),
-) *Reader {
-	return &Reader{
-		consumer:            c,
-		readMessagesCounter: rmc,
-		operationDuration:   opDur,
-		srv:                 srv,
-		tel:                 tel,
-		topic:               topic,
-		consumerGroup:       consumerGroup,
-		stopAuth:            stopAuth,
-	}
+// newReader wraps a consumer that has subscribed to the topic.
+func newReader(core *consumerCore) *Reader {
+	return &Reader{consumerCore: core}
 }
 
 // Reader provides an interface for reading messages from a Kafka topic, as well
 // as closing it when the client is done reading. Additionally, the act of fetching
-// messages and committing them ("committing" == registering the largest offset per
-// partition as the high watermark within the consumer group) is split giving the
+// messages and committing them ("committing" == recording in the consumer group,
+// per partition, that the group resumes after the messages read) is split giving the
 // client total control and responsibility.
 type Reader struct {
-	consumer            *kafka.Consumer
-	readMessagesCounter messagingconv.ClientConsumedMessages
-	operationDuration   messagingconv.ClientOperationDuration
-	srv                 serverInfo
-	tel                 TelemetryProvider
-	closed              atomic.Bool
-	topic               string
-	consumerGroup       string
-
-	// stopAuth stops the OAuth token refresh goroutine feeding this reader's
-	// consumer and waits for it to exit. Nil when not using SASL.
-	stopAuth func()
+	*consumerCore
 }
 
 // Close closes releases the underlying infrastructure, and renders this instance unusable.
@@ -66,27 +35,14 @@ type Reader struct {
 // destroying the consumer; otherwise the loop could call into a freed
 // librdkafka handle.
 func (r *Reader) Close(ctx context.Context) error {
-	if !r.closed.CompareAndSwap(false, true) {
-		return nil // It's ok to close multiple times.
-	}
-
-	// Before the consumer is torn down, and unconditionally, so a failed close
-	// does not leak the goroutine for the lifetime of the process.
-	if r.stopAuth != nil {
-		r.stopAuth()
-	}
-
-	if err := r.consumer.Close(); err != nil {
-		return fmt.Errorf("error closing reader: %w", err)
-	}
-	return nil
+	return r.close()
 }
 
 // Read returns a slice of messages at most maxMessages long. If the duration maxWait
 // is exceeded before maxMessages have been fetched from the topic, the func will
 // return with as many messages in the list as were fetched before timeout.
 //
-// commiter can be used to commit the high watermark per partition to the consumer group. It
+// commiter can be used to commit the offsets read so far to the consumer group. It
 // is up to the client if and when commiter is invoked. Committing often can affect
 // performance considerably in a high-volume scenario, so the client could for example
 // employ a strategy where commiter is only invoked every N iterations.
@@ -159,14 +115,7 @@ func (rc *Reader) Read(
 		switch e := ev.(type) {
 
 		case *kafka.Message:
-			msgs = append(msgs, Message{
-				Topic:     *e.TopicPartition.Topic,
-				Partition: int(e.TopicPartition.Partition),
-				Offset:    int64(e.TopicPartition.Offset),
-				Key:       e.Key,
-				Value:     e.Value,
-				Headers:   convertHeaders(e.Headers),
-			})
+			msgs = append(msgs, toMessage(e))
 
 			latestOffsets[e.TopicPartition.Partition] = e.TopicPartition.Offset
 			partitionID := fmt.Sprintf("%d", e.TopicPartition.Partition)
@@ -188,23 +137,6 @@ func (rc *Reader) Read(
 	return msgs, commit, nil
 }
 
-// recordReceiveDuration records messaging.client.operation.duration for a
-// poll/receive covering the whole Read.
-func (rc *Reader) recordReceiveDuration(ctx context.Context, seconds float64, err error) {
-	recordOperationDuration(
-		ctx,
-		rc.operationDuration,
-		MessagingOperationNamePoll,
-		messagingconv.OperationTypeReceive,
-		rc.topic,
-		rc.consumerGroup,
-		"",
-		rc.srv,
-		seconds,
-		err,
-	)
-}
-
 // recordCommitDuration records messaging.client.operation.duration for an
 // offset commit (settle).
 func (rc *Reader) recordCommitDuration(ctx context.Context, seconds float64, err error) {
@@ -220,10 +152,4 @@ func (rc *Reader) recordCommitDuration(ctx context.Context, seconds float64, err
 		seconds,
 		err,
 	)
-}
-
-// recordConsumed records one messaging.client.consumed.messages for a delivered
-// message, or a failed receive when err is non-nil.
-func (rc *Reader) recordConsumed(ctx context.Context, partition string, err error) {
-	recordConsumedMessage(ctx, rc.readMessagesCounter, rc.topic, rc.consumerGroup, partition, rc.srv, err)
 }
