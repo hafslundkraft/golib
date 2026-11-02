@@ -2,6 +2,7 @@ package kafkarator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/confluentinc/confluent-avro-go/v2"
@@ -9,8 +10,18 @@ import (
 
 // ValueDeserializer deserializes bytes into domain values
 type ValueDeserializer interface {
-	// Deserialize decodes value into out. out must be a non-nil pointer.
-	// If value is not Avro-framed, out is left unchanged and nil is returned.
+	// Deserialize decodes value into out with the schema registered for topic in
+	// the Schema Registry. out must be a non-nil pointer. If value is empty,
+	// such as a tombstone, or not in the Schema Registry wire format, an error
+	// is returned and out is left unchanged.
+	//
+	// Example:
+	//
+	//	var value MyStruct
+	//	err := deserializer.Deserialize(ctx, topic, bytes, &value)
+	//	if err != nil {
+	//		// handle error
+	//	}
 	Deserialize(ctx context.Context, topic string, value []byte, out any) error
 }
 
@@ -40,15 +51,13 @@ func newAvroDeserializer(
 	}
 }
 
-// Deserialize deserializes the bytes to a domain value according to its schema
-// Example:
-//
-//	var value MyStruct
-//	err := deserializer.Deserialize(ctx, topic, bytes, &value)
-//	if err != nil {
-//		// handle error
-//	}
+// Deserialize implements [ValueDeserializer] for values encoded with Avro. The
+// schema is registered under the subject topic + "-value".
 func (d *AvroDeserializer) Deserialize(ctx context.Context, topic string, value []byte, out any) error {
+	if len(value) == 0 {
+		return errors.New("invalid Avro framing: empty value, such as a tombstone")
+	}
+
 	// Not Avro Confluent framing
 	if len(value) < 5 || value[0] != magicByte {
 		return fmt.Errorf(
