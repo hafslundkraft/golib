@@ -72,6 +72,22 @@ func TestAvroDeserializer_InvalidMagicByte(t *testing.T) {
 	}
 }
 
+func TestAvroDeserializer_EmptyValue(t *testing.T) {
+	ctx := context.Background()
+	d := newAvroDeserializer(newMockSRClient(), newMockTelemetry())
+
+	for _, value := range [][]byte{nil, {}} {
+		out := map[string]any{"id": "unchanged"}
+		err := d.Deserialize(ctx, "test-topic", value, &out)
+		if err == nil || !strings.HasPrefix(err.Error(), "invalid Avro framing") {
+			t.Fatalf("expected invalid framing error for %#v, got %v", value, err)
+		}
+		if out["id"] != "unchanged" {
+			t.Fatalf("out changed for %#v: %+v", value, out)
+		}
+	}
+}
+
 func TestAvroDeserializer_UnknownSchemaID(t *testing.T) {
 	ctx := context.Background()
 
