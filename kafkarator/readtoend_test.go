@@ -234,12 +234,18 @@ func TestReadToEndStopsAtAnOpenTransaction(t *testing.T) {
 	)
 
 	require.NoError(t, producer.CommitTransaction(txCtx))
-	assert.Equal(
-		t,
-		append(committed, pending...),
-		values(readToEndOrFail(t, conn, topic)),
-		"the transaction should be read once committed",
-	)
+	// CommitTransaction returns before the commit marker is written to the
+	// partition, and only the marker makes the transaction readable.
+	assert.EventuallyWithT(t, func(c *assert.CollectT) {
+		readCtx, cancel := context.WithTimeout(ctx, readToEndTimeout)
+		defer cancel()
+		var msgs []Message
+		for msg, err := range conn.ReadToEnd(readCtx, topic) {
+			require.NoError(c, err)
+			msgs = append(msgs, msg)
+		}
+		assert.Equal(c, append(committed, pending...), values(msgs))
+	}, readToEndTimeout, 100*time.Millisecond, "the transaction should be read once committed")
 }
 
 func TestReadToEndYieldsAnErrorWhenTheContextEnds(t *testing.T) {
