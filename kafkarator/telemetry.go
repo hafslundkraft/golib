@@ -154,10 +154,12 @@ func startPollSpan(
 	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingDestinationName(topic),
-		semconv.MessagingConsumerGroupName(group),
 		semconv.MessagingOperationName(MessagingOperationNamePoll),
 		semconv.MessagingOperationTypeReceive,
 	)
+	if group != "" {
+		attrs = append(attrs, semconv.MessagingConsumerGroupName(group))
+	}
 	attrs = append(attrs, srvAttrs...)
 	return tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
