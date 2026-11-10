@@ -132,7 +132,10 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 	for i := range msgs {
 		// Check if context has been canceled before processing next message
 		if err := ctx.Err(); err != nil {
-			return processedCount, errors.Join(fmt.Errorf("context canceled: %w", err), commit(ctx, WithCommitHandled(msgs[:i])))
+			return processedCount, errors.Join(
+				fmt.Errorf("context canceled: %w", err),
+				commit(ctx, WithCommitHandled(msgs[:i])),
+			)
 		}
 		msgCtx, span := startProcessingSpan(ctx, p.tel.Tracer(), p.reader.consumerGroup, &msgs[i], p.reader.srv)
 

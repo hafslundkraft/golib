@@ -54,7 +54,12 @@ func TestProcessorHandlerErrorRedeliversFailedMessage(t *testing.T) {
 		}
 		return nil
 	}
-	processor, err := conn.Processor(topic, handler, WithProcessorMaxMessages(3), WithProcessorReadTimeout(2*time.Second))
+	processor, err := conn.Processor(
+		topic,
+		handler,
+		WithProcessorMaxMessages(3),
+		WithProcessorReadTimeout(2*time.Second),
+	)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"v1", "v2", "v2", "v3"}, processUntil(t, processor, &handled, 4))
@@ -83,14 +88,24 @@ func TestProcessorHandlerErrorCommitsHandledMessages(t *testing.T) {
 		}
 		return nil
 	}
-	processor, err := conn.Processor(topic, handler, WithProcessorMaxMessages(2), WithProcessorReadTimeout(2*time.Second))
+	processor, err := conn.Processor(
+		topic,
+		handler,
+		WithProcessorMaxMessages(2),
+		WithProcessorReadTimeout(2*time.Second),
+	)
 	require.NoError(t, err)
 	require.Equal(t, []string{"v1", "v2"}, processUntil(t, processor, &handled, 2))
 	require.NoError(t, processor.Close(ctx))
 
 	// v1 was committed, v2 was not.
 	handled = nil
-	processor2, err := conn.Processor(topic, handler, WithProcessorMaxMessages(1), WithProcessorReadTimeout(2*time.Second))
+	processor2, err := conn.Processor(
+		topic,
+		handler,
+		WithProcessorMaxMessages(1),
+		WithProcessorReadTimeout(2*time.Second),
+	)
 	require.NoError(t, err)
 	defer processor2.Close(ctx)
 	require.Equal(t, []string{"v2"}, processUntil(t, processor2, &handled, 1))

@@ -99,7 +99,7 @@ func TestReadToEndReadsEveryPartition(t *testing.T) {
 	msgs := readToEndOrFail(t, conn, topic)
 	assert.ElementsMatch(t, written, values(msgs))
 
-	partitions := map[int]bool{}
+	partitions := map[int32]bool{}
 	for _, m := range msgs {
 		partitions[m.Partition] = true
 	}

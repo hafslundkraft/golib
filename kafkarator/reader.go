@@ -131,7 +131,7 @@ func (rc *Reader) Read(
 	failure := rc.deferredErr
 	rc.deferredErr = nil
 	// Keep polling if a seek fails: rebalances are only served by Poll.
-	seekErr := rc.seekPendingLocked()
+	seekErr := rc.seekPendingLocked(ctx)
 	pendingSeeks := map[int32]bool{}
 	for p, pos := range rc.positions {
 		pendingSeeks[p] = pos.seekPending
@@ -185,7 +185,7 @@ poll:
 	rc.mu.Lock()
 	rc.deferredErr = failure
 	for _, m := range msgs {
-		p := int32(m.Partition)
+		p := m.Partition
 		next := kafka.Offset(m.Offset) + 1
 		if pos, ok := rc.positions[p]; ok {
 			pos.next = next
@@ -217,7 +217,7 @@ func (rc *Reader) commitFunc(msgs []Message, gen uint64) CommitFunc {
 		last:  map[int32]kafka.Offset{},
 	}
 	for _, m := range msgs {
-		p, o := int32(m.Partition), kafka.Offset(m.Offset)
+		p, o := m.Partition, kafka.Offset(m.Offset)
 		b.msgs[partitionOffset{p, o}] = true
 		if _, ok := b.first[p]; !ok {
 			b.first[p] = o
@@ -235,9 +235,14 @@ func (rc *Reader) commitFunc(msgs []Message, gen uint64) CommitFunc {
 func (b readBatch) rewindOffsets(topic string, handled []Message) (map[int32]kafka.Offset, error) {
 	done := make(map[partitionOffset]bool, len(handled))
 	for _, m := range handled {
-		k := partitionOffset{int32(m.Partition), kafka.Offset(m.Offset)}
+		k := partitionOffset{m.Partition, kafka.Offset(m.Offset)}
 		if m.Topic != topic || !b.msgs[k] {
-			return nil, fmt.Errorf("handled message %s[%d] at offset %d is not part of this batch", m.Topic, m.Partition, m.Offset)
+			return nil, fmt.Errorf(
+				"handled message %s[%d] at offset %d is not part of this batch",
+				m.Topic,
+				m.Partition,
+				m.Offset,
+			)
 		}
 		done[k] = true
 	}
@@ -327,7 +332,7 @@ func (rc *Reader) rewindLocked(offsets map[int32]kafka.Offset) {
 // seekPendingLocked seeks rewound partitions. Revoked ones are skipped: commits
 // stop at the rewind offset, so the next owner reads them again. rc.mu must be
 // held.
-func (rc *Reader) seekPendingLocked() error {
+func (rc *Reader) seekPendingLocked(ctx context.Context) error {
 	var errs []error
 	for p, pos := range rc.positions {
 		if !pos.seekPending {
@@ -341,13 +346,16 @@ func (rc *Reader) seekPendingLocked() error {
 		}
 		switch {
 		case err == nil:
-			rc.tel.Logger().Info("Rewound partition", "topic", rc.topic, "partition", p, "offset", int64(pos.next))
+			rc.tel.Logger().
+				InfoContext(ctx, "Rewound partition", "topic", rc.topic, "partition", p, "offset", int64(pos.next))
 		case rc.isAssigned(p):
-			rc.tel.Logger().Warn("Rewind of partition failed", "topic", rc.topic, "partition", p, "offset", int64(pos.next), "error", err)
+			rc.tel.Logger().WarnContext(ctx, "Rewind of partition failed",
+				"topic", rc.topic, "partition", p, "offset", int64(pos.next), "error", err)
 			errs = append(errs, fmt.Errorf("seek partition %d to offset %d: %w", p, pos.next, err))
 			continue
 		default:
-			rc.tel.Logger().Info("Skipped rewind of revoked partition", "topic", rc.topic, "partition", p, "error", err)
+			rc.tel.Logger().
+				InfoContext(ctx, "Skipped rewind of revoked partition", "topic", rc.topic, "partition", p, "error", err)
 		}
 		pos.seekPending = false
 	}
