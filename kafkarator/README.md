@@ -108,7 +108,7 @@ defer processor.Close(ctx)
 processed, err := processor.ProcessNext(ctx)
 ```
 
-> **If the handler returns an error:** nothing is committed, but the processor has already read past the batch. Calling `ProcessNext` again continues with the next messages, and the failed messages are skipped. To get them redelivered, close the processor and create a new one.
+> **If the handler returns an error:** `ProcessNext` commits the messages handled before it and returns the error. The next call delivers the failed message and the rest again. To skip a failing message, return `nil` from the handler.
 
 #### ChannelReader
 In order to use the deserializer, a schema for the topic must be available in the schema registry. Receive messages, one at a time, as quickly as possible. Suitable for low-volume scenarios. Control around when the reader commits offsets is sacrificed; each message is committed automatically.
@@ -155,6 +155,20 @@ handleManyMessages(messages)
 // You decide when to save progress
 _ = committer(ctx)
 ```
+
+To commit only some messages, pass the handled ones with `kafkarator.WithCommitHandled`. Later reads return the rest, from the first unhandled message on each partition. An empty slice means none were handled.
+
+```go
+messages, committer, err := reader.Read(ctx, 10, 5*time.Second)
+for i := range messages {
+    if err := handle(messages[i]); err != nil {
+        return errors.Join(err, committer(ctx, kafkarator.WithCommitHandled(messages[:i])))
+    }
+}
+return committer(ctx)
+```
+
+If `Read` fails after messages were read, it returns them and the next `Read` returns the error. After `Close`, reads and commits return `kafkarator.ErrReaderClosed`.
 
 #### ReadToEnd
 Read every partition of a topic from the beginning, without joining a consumer group, for example to load a copy of reference data. Nothing is committed, so each read covers the whole topic, independently of any other consumer.

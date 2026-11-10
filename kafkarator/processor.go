@@ -2,6 +2,7 @@ package kafkarator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,8 +11,7 @@ import (
 
 // Processor provides automatic processing of Kafka messages with built-in
 // distributed tracing and offset management. It reads messages in groups (up to maxMessages),
-// calls a handler function for each message, and commits offsets only after successful
-// processing of all messages.
+// calls a handler function for each message, and commits offsets of the messages handled.
 type Processor struct {
 	reader             *Reader
 	tel                TelemetryProvider
@@ -23,8 +23,8 @@ type Processor struct {
 
 // ProcessFunc is a function that processes a single Kafka message.
 // It receives a context with propagated trace information and should return
-// an error if processing fails. If an error is returned, the Processor will
-// stop processing and will not commit offsets.
+// an error if processing fails. The failed message and the rest of the batch
+// are delivered again by the next ProcessNext; return nil to skip a message.
 type ProcessFunc func(ctx context.Context, msg *Message) error
 
 // ProcessorOption configures a Processor instance.
@@ -112,7 +112,8 @@ func (p *Processor) Close(ctx context.Context) error {
 
 // ProcessNext processes the next batch of messages from Kafka.
 // It reads messages, processes each one with the configured handler,
-// and commits offsets only after all messages are successfully processed.
+// and commits offsets when all messages are successfully processed.
+// If the handler fails or ctx is canceled, the handled messages are committed.
 //
 // The context passed to the handler carries a trace.Link back to the
 // producer's span rather than sharing its trace ID.
@@ -131,7 +132,7 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 	for i := range msgs {
 		// Check if context has been canceled before processing next message
 		if err := ctx.Err(); err != nil {
-			return processedCount, fmt.Errorf("context canceled: %w", err)
+			return processedCount, errors.Join(fmt.Errorf("context canceled: %w", err), commit(ctx, WithCommitHandled(msgs[:i])))
 		}
 		msgCtx, span := startProcessingSpan(ctx, p.tel.Tracer(), p.reader.consumerGroup, &msgs[i], p.reader.srv)
 
@@ -149,12 +150,12 @@ func (p *Processor) ProcessNext(ctx context.Context) (int, error) {
 		span.End()
 
 		if processErr != nil {
-			return processedCount, fmt.Errorf(
+			return processedCount, errors.Join(fmt.Errorf(
 				"process message (partition=%d, offset=%d): %w",
 				msgs[i].Partition,
 				msgs[i].Offset,
 				processErr,
-			)
+			), commit(ctx, WithCommitHandled(msgs[:i])))
 		}
 
 		processedCount++
