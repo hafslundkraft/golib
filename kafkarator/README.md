@@ -156,7 +156,7 @@ handleManyMessages(messages)
 _ = committer(ctx)
 ```
 
-To commit only some messages, pass the handled ones with `kafkarator.WithCommitHandled`. Later reads return the rest, from the first unhandled message on each partition. An empty slice means none were handled.
+By default, `committer(ctx)` commits the offsets of every message in the batch. To commit offsets only for some messages, pass the handled ones with `kafkarator.WithCommitHandled`: on each partition, it commits up to the offset of the first unhandled message, and later reads return the rest from there. An empty slice means none were handled.
 
 ```go
 messages, committer, err := reader.Read(ctx, 10, 5*time.Second)

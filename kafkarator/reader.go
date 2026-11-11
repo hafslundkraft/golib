@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,9 +19,11 @@ var ErrReaderClosed = errors.New("kafkarator: reader closed")
 
 // CommitFunc commits offsets for messages previously read.
 // It is safe to call multiple times; committing is idempotent.
-//
+// By default it commits the offsets of every message in the batch. With
+// [WithCommitHandled], it commits, on each partition, only up to the offset of
+// the first message not handled.
 // Commit batches in read order: a commit covers everything before it on the
-// same partitions. Partitions rewound after the batch was read are skipped.
+// same partitions.
 type CommitFunc func(ctx context.Context, opts ...CommitOption) error
 
 // CommitOption configures a call to a [CommitFunc].
@@ -31,10 +34,15 @@ type commitOptions struct {
 	hasHandled bool
 }
 
-// WithCommitHandled commits the batch up to the first message not in msgs on
-// each partition. Later reads return the batch again from there, including
-// any handled messages after it. Empty msgs means none were handled.
+// WithCommitHandled commits offsets only for the handled messages msgs, instead
+// of the whole batch. On each partition, it commits up to the offset of the
+// first message not in msgs, and later reads return messages again from there,
+// including any handled messages after it. Partitions with no handled messages
+// get no offset committed.
+// Empty msgs means none were handled. msgs is copied, so changing it afterwards
+// has no effect.
 func WithCommitHandled(msgs []Message) CommitOption {
+	msgs = slices.Clone(msgs)
 	return func(o *commitOptions) {
 		o.handled = msgs
 		o.hasHandled = true
@@ -116,7 +124,7 @@ func (rc *Reader) Read(
 	// error — so the metric mirrors the span duration in all cases.
 	readStart := time.Now()
 	var pollErr error
-	msgs := make([]Message, 0, maxMessages)
+	var msgs []Message
 	// Always stamp batch attrs (plus duration/status), even when the read fails
 	// mid-batch, with the messages collected so far.
 	defer func() {
@@ -139,40 +147,13 @@ func (rc *Reader) Read(
 	gen := rc.gen
 	rc.mu.Unlock()
 
-poll:
-	for failure == nil && len(msgs) < maxMessages {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			break
-		}
-
-		ev := rc.consumer.Poll(int(remaining.Milliseconds()))
-		if ev == nil {
-			break
-		}
-
-		switch e := ev.(type) {
-
-		case *kafka.Message:
-			p := e.TopicPartition.Partition
-			// Delivered again once the seek succeeds.
-			if pendingSeeks[p] {
-				continue
-			}
-			msgs = append(msgs, toMessage(e))
-			rc.recordConsumed(ctx, fmt.Sprintf("%d", p), nil)
-
-		case kafka.Error:
-			if e.IsTimeout() {
-				break poll
-			}
-			failure = fmt.Errorf("poll error: %w", e)
-
-		default:
-			// ignore rebalance events etc.
-		}
+	if failure != nil {
+		rc.recordConsumed(ctx, "", failure)
+		pollErr = failure
+		return msgs, rc.commitFunc(nil, gen), failure
 	}
 
+	msgs, failure = rc.poll(ctx, maxMessages, deadline, pendingSeeks)
 	if failure == nil && seekErr != nil {
 		failure = fmt.Errorf("rewind: %w", seekErr)
 	}
@@ -196,6 +177,37 @@ poll:
 	rc.mu.Unlock()
 
 	return msgs, rc.commitFunc(msgs, gen), nil
+}
+
+// poll reads up to maxMessages before the deadline. Messages on partitions in
+// skip are dropped; they are delivered again once their seek succeeds.
+func (rc *Reader) poll(
+	ctx context.Context,
+	maxMessages int,
+	deadline time.Time,
+	skip map[int32]bool,
+) ([]Message, error) {
+	msgs := make([]Message, 0, maxMessages)
+	for len(msgs) < maxMessages && time.Now().Before(deadline) {
+		ev := rc.consumer.Poll(int(time.Until(deadline).Milliseconds()))
+		switch e := ev.(type) {
+		case nil: // no event before the timeout
+			return msgs, nil
+		case kafka.Error:
+			if e.IsTimeout() {
+				return msgs, nil
+			}
+			return msgs, fmt.Errorf("poll error: %w", e)
+		case *kafka.Message:
+			p := e.TopicPartition.Partition
+			if !skip[p] {
+				msgs = append(msgs, toMessage(e))
+				rc.recordConsumed(ctx, fmt.Sprintf("%d", p), nil)
+			}
+		}
+		// Other events, such as rebalances, are ignored.
+	}
+	return msgs, nil
 }
 
 // readBatch records what a Read returned, for committing it later.
