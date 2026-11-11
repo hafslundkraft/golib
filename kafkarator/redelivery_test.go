@@ -161,12 +161,14 @@ func TestReaderKeepsRewindFromCommitDuringRead(t *testing.T) {
 		return msgs
 	}
 
-	first := reader.recordReadLocked(batch(0, 4), 0)
+	first := reader.dropRewoundLocked(batch(0, 4), 0)
+	reader.advancePositionsLocked(first)
 	commit := reader.commitFunc(first, 0)
-	// The second batch is polled at gen 0, before the commit rewinds. Nothing
-	// handled means no offsets, so the commit never reaches the consumer.
+	// The second batch is polled at rewindSeq 0, before the commit rewinds.
+	// Nothing handled means no offsets, so the commit never reaches the consumer.
 	require.NoError(t, commit(ctx, WithCommitHandled(nil)))
-	second := reader.recordReadLocked(batch(5, 9), 0)
+	second := reader.dropRewoundLocked(batch(5, 9), 0)
+	reader.advancePositionsLocked(second)
 
 	require.Empty(t, second)
 	pos := reader.positions[0]

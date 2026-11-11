@@ -70,15 +70,15 @@ type Reader struct {
 	// deferredErr is returned by the next Read, so that the messages read
 	// before it are not dropped by the caller.
 	deferredErr error
-	// gen counts rewinds, so a commit can tell if its batch is stale.
-	gen       uint64
+	// rewindSeq counts rewinds, so a commit can tell if its batch is stale.
+	rewindSeq uint64
 	positions map[int32]*partitionPosition
 }
 
 type partitionPosition struct {
 	next        kafka.Offset
 	seekPending bool
-	// rewoundAt is the gen of the partition's latest rewind.
+	// rewoundAt is the rewindSeq of the partition's latest rewind.
 	rewoundAt uint64
 }
 
@@ -144,13 +144,13 @@ func (rc *Reader) Read(
 	for p, pos := range rc.positions {
 		pendingSeeks[p] = pos.seekPending
 	}
-	gen := rc.gen
+	rewindSeq := rc.rewindSeq
 	rc.mu.Unlock()
 
 	if failure != nil {
 		rc.recordConsumed(ctx, "", failure)
 		pollErr = failure
-		return msgs, rc.commitFunc(nil, gen), failure
+		return msgs, rc.commitFunc(nil, rewindSeq), failure
 	}
 
 	msgs, failure = rc.poll(ctx, maxMessages, deadline, pendingSeeks)
@@ -160,26 +160,30 @@ func (rc *Reader) Read(
 	if failure != nil && len(msgs) == 0 {
 		rc.recordConsumed(ctx, "", failure)
 		pollErr = failure
-		return msgs, rc.commitFunc(nil, gen), failure
+		return msgs, rc.commitFunc(nil, rewindSeq), failure
 	}
 
 	rc.mu.Lock()
 	rc.deferredErr = failure
-	msgs = rc.recordReadLocked(msgs, gen)
+	msgs = rc.dropRewoundLocked(msgs, rewindSeq)
+	rc.advancePositionsLocked(msgs)
 	rc.mu.Unlock()
 
-	return msgs, rc.commitFunc(msgs, gen), nil
+	return msgs, rc.commitFunc(msgs, rewindSeq), nil
 }
 
-// recordReadLocked advances partition positions past msgs, polled at gen, and
-// returns the msgs to deliver. rc.mu must be held.
-func (rc *Reader) recordReadLocked(msgs []Message, gen uint64) []Message {
-	// A commit rewound these partitions while polling; their messages come
-	// again after the seek, and keeping them would move pos.next past it.
-	msgs = slices.DeleteFunc(msgs, func(m Message) bool {
+// dropRewoundLocked removes msgs on partitions rewound after rewindSeq. A
+// commit rewound them while polling; their messages come again after the
+// seek, and keeping them would move pos.next past it. rc.mu must be held.
+func (rc *Reader) dropRewoundLocked(msgs []Message, rewindSeq uint64) []Message {
+	return slices.DeleteFunc(msgs, func(m Message) bool {
 		pos := rc.positions[m.Partition]
-		return pos != nil && pos.rewoundAt > gen
+		return pos != nil && pos.rewoundAt > rewindSeq
 	})
+}
+
+// advancePositionsLocked moves partition positions past msgs. rc.mu must be held.
+func (rc *Reader) advancePositionsLocked(msgs []Message) {
 	for _, m := range msgs {
 		p := m.Partition
 		next := kafka.Offset(m.Offset) + 1
@@ -189,7 +193,6 @@ func (rc *Reader) recordReadLocked(msgs []Message, gen uint64) []Message {
 			rc.positions[p] = &partitionPosition{next: next}
 		}
 	}
-	return msgs
 }
 
 // poll reads up to maxMessages before the deadline. Messages on partitions in
@@ -225,21 +228,21 @@ func (rc *Reader) poll(
 
 // readBatch records what a Read returned, for committing it later.
 type readBatch struct {
-	// gen is the reader's gen when the batch was read.
-	gen   uint64
-	msgs  map[partitionOffset]bool
-	first map[int32]kafka.Offset
-	last  map[int32]kafka.Offset
-	// rewoundAt is the gen of this batch's own latest rewind per partition,
+	// rewindSeq is the reader's rewindSeq when the batch was read.
+	rewindSeq uint64
+	msgs      map[partitionOffset]bool
+	first     map[int32]kafka.Offset
+	last      map[int32]kafka.Offset
+	// rewoundAt is the rewindSeq of this batch's own latest rewind per partition,
 	// so a retried commit is not taken as stale. Guarded by Reader.mu.
 	rewoundAt map[int32]uint64
 }
 
-// commitFunc returns the commit func for msgs, read at gen.
-func (rc *Reader) commitFunc(msgs []Message, gen uint64) CommitFunc {
+// commitFunc returns the commit func for msgs, read at rewindSeq.
+func (rc *Reader) commitFunc(msgs []Message, rewindSeq uint64) CommitFunc {
 	// Copied, so callers changing msgs don't change the commit.
 	b := &readBatch{
-		gen:       gen,
+		rewindSeq: rewindSeq,
 		msgs:      make(map[partitionOffset]bool, len(msgs)),
 		first:     map[int32]kafka.Offset{},
 		last:      map[int32]kafka.Offset{},
@@ -316,7 +319,7 @@ func (rc *Reader) commit(ctx context.Context, b *readBatch, opts ...CommitOption
 	var offsets []kafka.TopicPartition
 	for p, l := range b.last {
 		// Committing would mark messages that are read again as handled.
-		if pos := rc.positions[p]; pos != nil && pos.rewoundAt > b.gen && pos.rewoundAt != b.rewoundAt[p] {
+		if pos := rc.positions[p]; pos != nil && pos.rewoundAt > b.rewindSeq && pos.rewoundAt != b.rewoundAt[p] {
 			rc.tel.Logger().WarnContext(ctx, "Skipped commit of rewound partition", "topic", rc.topic, "partition", p)
 			continue
 		}
@@ -329,7 +332,7 @@ func (rc *Reader) commit(ctx context.Context, b *readBatch, opts ...CommitOption
 	// After the stale check, which must ignore this rewind, and before the
 	// commit, so a failed commit keeps it.
 	for _, p := range rc.rewindLocked(rewindTo) {
-		b.rewoundAt[p] = rc.gen
+		b.rewoundAt[p] = rc.rewindSeq
 	}
 	rc.mu.Unlock()
 
@@ -353,12 +356,12 @@ func (rc *Reader) rewindLocked(offsets map[int32]kafka.Offset) []int32 {
 			continue
 		}
 		if moved == nil {
-			rc.gen++
+			rc.rewindSeq++
 		}
 		moved = append(moved, p)
 		pos.next = o
 		pos.seekPending = true
-		pos.rewoundAt = rc.gen
+		pos.rewoundAt = rc.rewindSeq
 	}
 	return moved
 }
