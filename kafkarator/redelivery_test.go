@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/semconv/v1.38.0/messagingconv"
 )
 
 // produceValues writes values to a new topic, all on one partition.
@@ -143,6 +145,60 @@ func TestReaderUnhandledCommitStopsCommitOfLaterBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, first, 1)
 	require.Equal(t, "v1", string(first[0].Value), "nothing should have been committed")
+}
+
+func TestReaderKeepsRewindFromCommitDuringRead(t *testing.T) {
+	ctx := context.Background()
+	tel := newMockTelemetry()
+	opDur, err := messagingconv.NewClientOperationDuration(tel.Meter())
+	require.NoError(t, err)
+	reader := newReader(&consumerCore{tel: tel, operationDuration: opDur, topic: "t"})
+	batch := func(from, to int64) []Message {
+		var msgs []Message
+		for o := from; o <= to; o++ {
+			msgs = append(msgs, Message{Topic: "t", Partition: 0, Offset: o})
+		}
+		return msgs
+	}
+
+	first := reader.recordReadLocked(batch(0, 4), 0)
+	commit := reader.commitFunc(first, 0)
+	// The second batch is polled at gen 0, before the commit rewinds. Nothing
+	// handled means no offsets, so the commit never reaches the consumer.
+	require.NoError(t, commit(ctx, WithCommitHandled(nil)))
+	second := reader.recordReadLocked(batch(5, 9), 0)
+
+	require.Empty(t, second)
+	pos := reader.positions[0]
+	require.Equal(t, kafka.Offset(0), pos.next)
+	require.True(t, pos.seekPending)
+}
+
+func TestReaderRetriedCommitHandledCommits(t *testing.T) {
+	ctx := context.Background()
+	conn, err := NewConnection(&config, newMockTelemetry())
+	require.NoError(t, err)
+	topic := produceValues(t, conn, "v0", "v1", "v2", "v3")
+
+	reader, err := conn.Reader(topic)
+	require.NoError(t, err)
+	defer reader.Close(ctx)
+	msgs, commit, err := retryRead(ctx, reader, 4, testTimeout)
+	require.NoError(t, err)
+	require.Len(t, msgs, 4)
+	tp := kafka.TopicPartition{Topic: &topic, Partition: msgs[0].Partition}
+
+	require.NoError(t, commit(ctx, WithCommitHandled(msgs[:2])))
+	// Undo the commit, as if it had failed.
+	reset := tp
+	reset.Offset = 0
+	_, err = reader.consumer.CommitOffsets([]kafka.TopicPartition{reset})
+	require.NoError(t, err)
+
+	require.NoError(t, commit(ctx, WithCommitHandled(msgs[:2])))
+	committed, err := reader.consumer.Committed([]kafka.TopicPartition{tp}, int(testTimeout.Milliseconds()))
+	require.NoError(t, err)
+	require.Equal(t, kafka.Offset(2), committed[0].Offset)
 }
 
 func TestReaderReturnsErrReaderClosedAfterClose(t *testing.T) {
