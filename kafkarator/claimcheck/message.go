@@ -21,7 +21,7 @@ type Message struct {
 	Key       []byte
 	value     []byte
 	Headers   map[string][]byte
-	Partition int
+	Partition int32
 	Offset    int64
 	resolver  *resolver
 }
