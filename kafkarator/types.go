@@ -8,7 +8,7 @@ type Message struct {
 	Topic string
 
 	// Partition is the partition of the topic that the message came from. Only relevant for consuming
-	Partition int
+	Partition int32
 
 	// Offset is the offset, or "address", of the message on the partition. Only relevant for consuming
 	Offset int64

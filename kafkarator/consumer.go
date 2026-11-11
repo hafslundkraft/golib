@@ -99,7 +99,7 @@ func (cc *consumerCore) recordConsumed(ctx context.Context, partition string, er
 func toMessage(e *kafka.Message) Message {
 	return Message{
 		Topic:     *e.TopicPartition.Topic,
-		Partition: int(e.TopicPartition.Partition),
+		Partition: e.TopicPartition.Partition,
 		Offset:    int64(e.TopicPartition.Offset),
 		Key:       e.Key,
 		Value:     e.Value,

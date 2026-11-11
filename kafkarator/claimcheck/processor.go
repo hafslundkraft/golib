@@ -151,7 +151,7 @@ func NewProcessor(
 			Key:       msg.Key,
 			value:     msg.Value,
 			Headers:   msg.Headers,
-			Partition: msg.Partition,
+			Partition: int(msg.Partition), //nolint:unconvert // kafkarator's Partition is int32 in the next release
 			Offset:    msg.Offset,
 			resolver:  res,
 		})
