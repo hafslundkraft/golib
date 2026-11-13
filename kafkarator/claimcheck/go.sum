@@ -106,6 +106,8 @@ github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX
 github.com/google/gofuzz v1.0.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/hafslundkraft/golib/identity v0.1.2 h1:aR9mU1mBI5RijnrDhZFqEMJtEaFsqK/Ziw9zbTi7Cmw=
+github.com/hafslundkraft/golib/identity v0.1.2/go.mod h1:5yxV2uySKH7+CMJBANzrlfnmL29zjKrplB0jiBZddJc=
 github.com/hafslundkraft/golib/kafkarator v0.4.0 h1:jRw5VZB1GRpgp04hXXCYhYa5uzCqGFBNOsPyxP64+/k=
 github.com/hafslundkraft/golib/kafkarator v0.4.0/go.mod h1:0gSWnp4Kc7Dlh1JSkgUBbnmrPwzg7qykyrLCSPb7fl8=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=

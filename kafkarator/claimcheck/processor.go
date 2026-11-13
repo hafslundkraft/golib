@@ -120,11 +120,11 @@ func NewProcessor(
 		fixed := cfg.s3
 		s3Factory = func(_, _ string) (S3Reader, error) { return fixed, nil }
 	} else {
-		exchanger, err := newTokenExchanger()
+		retriever, err := newIdentityTokenRetriever()
 		if err != nil {
-			return nil, fmt.Errorf("claimcheck: init token exchanger: %w", err)
+			return nil, fmt.Errorf("claimcheck: init token retriever: %w", err)
 		}
-		s3Factory = defaultS3ReaderFactory(exchanger, connCfg.Env)
+		s3Factory = defaultS3ReaderFactory(retriever, connCfg.Env)
 	}
 
 	tracer := cfg.tracer
