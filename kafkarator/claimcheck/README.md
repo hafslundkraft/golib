@@ -19,9 +19,9 @@ Parquet, S3, and STS dependencies.
 
 S3 authentication is handled automatically when `HAPPI_IDP_ISSUER_URL` is
 set (injected by the Happi operator alongside `AWS_ENDPOINT_URL_S3` and
-`AWS_ENDPOINT_URL_STS`). The library exchanges the platform IDP token
-for a Ceph-compatible JWT before each S3 operation and refreshes it
-transparently.
+`AWS_ENDPOINT_URL_STS`). The library uses the `identity` package to exchange
+the platform IDP token for a Ceph-compatible JWT whenever the AWS SDK needs
+new credentials, and refreshes it transparently.
 
 The IAM role ARN is derived automatically from `HAPPI_SYSTEM_NAME`,
 `HAPPI_ENV`, and the bucket name — no manifest configuration required.

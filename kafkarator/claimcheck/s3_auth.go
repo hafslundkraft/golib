@@ -3,9 +3,11 @@ package claimcheck
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"golang.org/x/oauth2"
@@ -18,6 +20,8 @@ const (
 	defaultIDPS3Scope = "ceph_rgw"
 
 	envIDPS3Scope = "HAPPI_IDP_S3_SCOPE"
+
+	tokenRequestTimeout = 10 * time.Second
 )
 
 // isValidARNComponent reports whether s contains only characters that are safe
@@ -67,22 +71,28 @@ func claimCheckRoleARN(system, env, bucket, access string) (string, error) {
 		system, env, bucket, system, env, bucket, access), nil
 }
 
+// newIDPTokenSource returns a cached Happi IDP token source for the given scope.
+// identity keeps ctx for the source's lifetime, so it must be long-lived, and
+// oauth2 reads its HTTP client from it — that is how httpClient's timeout
+// reaches token refreshes, since Token() takes no ctx.
+func newIDPTokenSource(cred *identity.WorkloadCredential, scope string, httpClient *http.Client) oauth2.TokenSource {
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, httpClient)
+	return cred.TokenSource(ctx, identity.WithScopes(scope))
+}
+
 // newIdentityTokenRetriever builds an stscreds.IdentityTokenRetriever backed by
 // identity.WorkloadCredential. The retriever is independent of bucket and role,
 // so it can be shared across multiple S3 clients.
 func newIdentityTokenRetriever() (stscreds.IdentityTokenRetriever, error) {
-	idpIssuerURL := os.Getenv(envIDPIssuerURL)
-	if strings.TrimSpace(idpIssuerURL) == "" {
-		return nil, fmt.Errorf("claimcheck: %s env var is not set", envIDPIssuerURL)
-	}
-	parsed, err := url.Parse(idpIssuerURL)
-	if err != nil || parsed.Scheme != "https" {
-		return nil, fmt.Errorf("claimcheck: %s must be an https:// URL, got %q", envIDPIssuerURL, idpIssuerURL)
-	}
-
 	cred, err := identity.NewWorkloadCredential()
 	if err != nil {
 		return nil, fmt.Errorf("claimcheck: init workload credential: %w", err)
+	}
+
+	// identity does not enforce https, and the pod's service account token is sent here.
+	if u, err := url.Parse(cred.TokenURL); err != nil || u.Scheme != "https" {
+		return nil, fmt.Errorf("claimcheck: %s must be an https:// URL, got token URL %q",
+			envIDPIssuerURL, cred.TokenURL)
 	}
 
 	idpScope := defaultIDPS3Scope
@@ -90,17 +100,15 @@ func newIdentityTokenRetriever() (stscreds.IdentityTokenRetriever, error) {
 		idpScope = v
 	}
 
-	src := cred.TokenSource(context.Background(), identity.WithScopes(idpScope))
-	return tokenSourceRetriever{src: src}, nil
+	httpClient := &http.Client{Timeout: tokenRequestTimeout}
+	return tokenSourceRetriever{src: newIDPTokenSource(cred, idpScope, httpClient)}, nil
 }
 
 // tokenSourceRetriever adapts an oauth2.TokenSource to the AWS SDK's
 // stscreds.IdentityTokenRetriever interface, returning the access token in
 // memory rather than via a file.
 type tokenSourceRetriever struct {
-	src interface {
-		Token() (*oauth2.Token, error)
-	}
+	src oauth2.TokenSource
 }
 
 func (r tokenSourceRetriever) GetIdentityToken() ([]byte, error) {
