@@ -2,9 +2,7 @@ package claimcheck
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,13 +10,15 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-	nooptrace "go.opentelemetry.io/otel/trace/noop"
+	"github.com/hafslundkraft/golib/identity"
+	"golang.org/x/oauth2"
 )
 
 const (
-	envIDPIssuerURL     = "HAPPI_IDP_ISSUER_URL"
+	envIDPIssuerURL            = "HAPPI_IDP_ISSUER_URL"
+	envServiceAccountTokenPath = "HAPPI_SERVICE_ACCOUNT_TOKEN_PATH" //nolint:gosec // environment variable name, not a credential
+	// envIDPTokenFile is the legacy name, kept until we confirm no deployment sets it.
+	// Remove together with the same fallback in hafslund.happi.py.
 	envIDPTokenFile     = "HAPPI_IDP_TOKEN_FILE"        //nolint:gosec // environment variable name, not a credential
 	envAWSTokenFile     = "AWS_WEB_IDENTITY_TOKEN_FILE" //nolint:gosec // environment variable name, not a credential
 	defaultIDPTokenFile = "/happi/idp-token"            //nolint:gosec // well-known path on Happi pods, not a hardcoded credential
@@ -27,8 +27,6 @@ const (
 
 	envIDPS3Scope = "HAPPI_IDP_S3_SCOPE"
 
-	tokenExpiryMargin   = 60 * time.Second
-	tokenExpiryFallback = 3600 * time.Second
 	tokenRequestTimeout = 10 * time.Second
 )
 
@@ -79,6 +77,30 @@ func claimCheckRoleARN(system, env, bucket, access string) (string, error) {
 		system, env, bucket, system, env, bucket, access), nil
 }
 
+// idpTokenFileFromEnv returns the path to the platform IDP token. Blank values
+// count as unset, matching token_file_from_env in hafslund.happi.py.
+func idpTokenFileFromEnv() string {
+	for _, name := range []string{envServiceAccountTokenPath, envIDPTokenFile} {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v
+		}
+	}
+	return defaultIDPTokenFile
+}
+
+// newIDPTokenSource returns a cached Happi IDP token source for the given scope.
+// identity keeps ctx for the source's lifetime, so it must be long-lived, and
+// oauth2 reads its HTTP client from it — that is how httpClient's timeout
+// reaches token refreshes, since Token() takes no ctx.
+func newIDPTokenSource(issuerURL, tokenFile, scope string, httpClient *http.Client) oauth2.TokenSource {
+	cred := &identity.WorkloadCredential{
+		TokenFile: tokenFile,
+		TokenURL:  strings.TrimRight(issuerURL, "/") + "/protocol/openid-connect/token",
+	}
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, httpClient)
+	return cred.TokenSource(ctx, identity.WithScopes(scope))
+}
+
 // newTokenExchanger creates a tokenExchanger from environment variables.
 // The exchanger is independent of bucket and role — it can be shared across
 // multiple S3 clients to avoid concurrent token exchanges racing on the same
@@ -93,10 +115,7 @@ func newTokenExchanger() (*tokenExchanger, error) {
 		return nil, fmt.Errorf("claimcheck: %s must be an https:// URL, got %q", envIDPIssuerURL, idpIssuerURL)
 	}
 
-	idpTokenFile := defaultIDPTokenFile
-	if v := os.Getenv(envIDPTokenFile); v != "" {
-		idpTokenFile = v
-	}
+	idpTokenFile := idpTokenFileFromEnv()
 
 	awsTokenFile := defaultAWSTokenFile
 	if v := os.Getenv(envAWSTokenFile); v != "" {
@@ -108,144 +127,74 @@ func newTokenExchanger() (*tokenExchanger, error) {
 		idpScope = v
 	}
 
+	httpClient := &http.Client{Timeout: tokenRequestTimeout}
 	return &tokenExchanger{
-		idpIssuerURL: idpIssuerURL,
-		idpTokenFile: idpTokenFile,
 		awsTokenFile: awsTokenFile,
-		idpScope:     idpScope,
-		tracer:       nooptrace.NewTracerProvider().Tracer(""),
-		httpClient:   &http.Client{Timeout: tokenRequestTimeout},
+		tokenSource:  newIDPTokenSource(idpIssuerURL, idpTokenFile, idpScope, httpClient),
 	}, nil
 }
 
+// tokenExchanger keeps awsTokenFile in sync with the current Happi IDP token,
+// which the AWS SDK reads for AssumeRoleWithWebIdentity.
 type tokenExchanger struct {
-	idpIssuerURL string
-	idpTokenFile string
 	awsTokenFile string
-	idpScope     string
-	tracer       trace.Tracer
-	httpClient   *http.Client
+	tokenSource  oauth2.TokenSource
 
-	mu        sync.Mutex
-	expiresAt time.Time
+	mu      sync.Mutex
+	written string // access token currently in awsTokenFile
 }
 
-// ensureFreshToken proactively refreshes the AWS token file if it is about
-// to expire (within tokenExpiryMargin). Thread-safe.
-func (e *tokenExchanger) ensureFreshToken(ctx context.Context) error {
+// ensureFreshToken writes the current IDP token to awsTokenFile if it has
+// changed. tokenSource owns caching and expiry, so this is cheap when nothing
+// changed. Thread-safe.
+func (e *tokenExchanger) ensureFreshToken(_ context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if time.Now().Before(e.expiresAt.Add(-tokenExpiryMargin)) {
-		return nil // still fresh
-	}
-
-	expiresIn, err := e.exchangeToken(ctx)
+	tok, err := e.tokenSource.Token()
 	if err != nil {
+		return fmt.Errorf("claimcheck: get IDP token: %w", err)
+	}
+	if tok.AccessToken == e.written {
+		return nil
+	}
+	if err := writeFileAtomic(e.awsTokenFile, tok.AccessToken); err != nil {
 		return err
 	}
-	e.expiresAt = time.Now().Add(expiresIn)
+	e.written = tok.AccessToken
 	return nil
 }
 
-// exchangeToken performs the IDP token exchange and writes the AWS token file.
-// Returns the token lifetime.
-func (e *tokenExchanger) exchangeToken(ctx context.Context) (_ time.Duration, retErr error) {
-	ctx, span := e.tracer.Start(ctx, "idp token exchange",
-		trace.WithSpanKind(trace.SpanKindClient),
-	)
-	defer func() {
-		if retErr != nil {
-			span.RecordError(retErr)
-			span.SetStatus(codes.Error, retErr.Error())
-		}
-		span.End()
-	}()
-
-	assertionBytes, err := os.ReadFile(e.idpTokenFile)
-	if err != nil {
-		return 0, fmt.Errorf("claimcheck: read IDP token file %s: %w", e.idpTokenFile, err)
-	}
-	assertion := strings.TrimSpace(string(assertionBytes))
-
-	tokenURL := strings.TrimSuffix(e.idpIssuerURL, "/") + "/protocol/openid-connect/token"
-	formData := url.Values{
-		"grant_type":            {"client_credentials"},
-		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
-		"client_assertion":      {assertion},
-		"scope":                 {e.idpScope},
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, tokenRequestTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, tokenURL,
-		strings.NewReader(formData.Encode()))
-	if err != nil {
-		return 0, fmt.Errorf("claimcheck: build token exchange request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("claimcheck: token exchange request to %s: %w", tokenURL, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB ceiling
-	if err != nil {
-		return 0, fmt.Errorf("claimcheck: read token exchange response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("claimcheck: token exchange failed: HTTP %d %s from %s",
-			resp.StatusCode, resp.Status, tokenURL)
-	}
-
-	var data struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := json.Unmarshal(body, &data); err != nil {
-		return 0, fmt.Errorf("claimcheck: parse token exchange response: %w", err)
-	}
-	if data.AccessToken == "" {
-		return 0, fmt.Errorf("claimcheck: token exchange response missing access_token")
-	}
-
-	// Write atomically: write to a temp file then rename.
+// writeFileAtomic writes content to path via a temp file and rename, so the
+// AWS SDK never reads a half-written token.
+func writeFileAtomic(path, content string) error {
 	dir := "."
-	if idx := strings.LastIndex(e.awsTokenFile, "/"); idx >= 0 {
-		dir = e.awsTokenFile[:idx]
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		dir = path[:idx]
 		if dir == "" {
 			dir = "/"
 		}
 	}
 	tmpFile, err := os.CreateTemp(dir, ".ceph_token.*")
 	if err != nil {
-		return 0, fmt.Errorf("claimcheck: create temp token file: %w", err)
+		return fmt.Errorf("claimcheck: create temp token file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	defer func() { _ = os.Remove(tmpPath) }() // clean up temp on error
 
 	if err := tmpFile.Chmod(0o600); err != nil {
 		_ = tmpFile.Close()
-		return 0, fmt.Errorf("claimcheck: chmod temp token file: %w", err)
+		return fmt.Errorf("claimcheck: chmod temp token file: %w", err)
 	}
-	if _, err := tmpFile.WriteString(data.AccessToken); err != nil {
+	if _, err := tmpFile.WriteString(content); err != nil {
 		_ = tmpFile.Close()
-		return 0, fmt.Errorf("claimcheck: write temp token file: %w", err)
+		return fmt.Errorf("claimcheck: write temp token file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return 0, fmt.Errorf("claimcheck: close temp token file: %w", err)
+		return fmt.Errorf("claimcheck: close temp token file: %w", err)
 	}
-	if err := os.Rename(tmpPath, e.awsTokenFile); err != nil {
-		return 0, fmt.Errorf("claimcheck: rename token file: %w", err)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("claimcheck: rename token file: %w", err)
 	}
-
-	lifetime := time.Duration(data.ExpiresIn) * time.Second
-	if lifetime == 0 {
-		lifetime = tokenExpiryFallback
-	}
-	return lifetime, nil
+	return nil
 }
