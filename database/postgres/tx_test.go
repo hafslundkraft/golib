@@ -88,6 +88,35 @@ func TestTryTxFunc_GivesUpAfterMaxRetries(t *testing.T) {
 	})
 }
 
+func TestTryTxFunc_RetriesThroughSwitchover(t *testing.T) {
+	// A switchover as BeginTx on a pool sees it: the old primary shuts down,
+	// then nothing answers, then the new primary is still starting up.
+	errs := []error{
+		&pgconn.PgError{Code: "57P01"},
+		connectError(t),
+		&pgconn.PgError{Code: "57P03"},
+	}
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		db := &mockDB{beginTxFn: func() (pgx.Tx, error) {
+			if n := int(attempts.Add(1)); n <= len(errs) {
+				return nil, errs[n-1]
+			}
+			return &mockTx{}, nil
+		}}
+
+		err := TryTxFunc(context.Background(), db, pgx.TxOptions{}, func(tx pgx.Tx) error {
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := int(attempts.Load()), len(errs)+1; got != want {
+			t.Fatalf("expected %d attempts, got %d", want, got)
+		}
+	})
+}
+
 func TestTryTxFunc_RespectsContextCancellation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		serializationErr := &pgconn.PgError{Code: "40001"}

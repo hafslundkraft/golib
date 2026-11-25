@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -126,6 +127,13 @@ func newPool(ctx context.Context, cfg *Config, host string) (*pgxpool.Pool, erro
 	pgCfg.ConnConfig.OAuthTokenProvider = tokenProvider(ctx, cfg.Credential, cfg.ResourceID)
 	pgCfg.ConnConfig.Tracer = cfg.tracer
 
+	// The pool pings a connection that has sat idle before handing it out.
+	// Without a timeout that ping waits as long as the caller's context, often
+	// with no deadline at all, and a connection to a node that died without
+	// closing it never answers. The ping is a round trip on a connection that is
+	// already open, so a short timeout does not fail healthy ones.
+	pgCfg.PingTimeout = 2 * time.Second
+
 	pool, err := pgxpool.NewWithConfig(ctx, pgCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)
@@ -145,8 +153,12 @@ func newPool(ctx context.Context, cfg *Config, host string) (*pgxpool.Pool, erro
 // token goes over the wire on every connection, and unlike a scram exchange it
 // is replayable by anyone who sees it. prefer does not verify the certificate,
 // so it needs no CA distributed to the workloads.
+//
+// connect_timeout bounds a connection attempt that gets no answer, so that
+// during a switchover it fails and is retried rather than waiting out the
+// caller's context.
 func connectionString(cfg *Config, host string) string {
-	return fmt.Sprintf("postgres://%s@%s:5432/%s?sslmode=prefer", cfg.User, host, cfg.Database)
+	return fmt.Sprintf("postgres://%s@%s:5432/%s?sslmode=prefer&connect_timeout=5", cfg.User, host, cfg.Database)
 }
 
 func tokenProvider(

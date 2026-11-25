@@ -10,11 +10,31 @@ import (
 )
 
 // IsTransientError reports whether err is a transient PostgreSQL error that
-// may succeed on retry (closed connections, connection exceptions, or
-// serialization failures).
+// may succeed on retry (closed connections, failed connection attempts,
+// connection exceptions, a server shutting down or starting up, or
+// serialization failures). These are what a switchover to a new primary
+// looks like from the client.
 func IsTransientError(err error) bool {
-	return errors.Is(err, net.ErrClosed) || IsConnectionException(err) || IsSerializationFailure(err)
+	return errors.Is(err, net.ErrClosed) ||
+		isConnectError(err) ||
+		IsConnectionException(err) ||
+		IsServerShutdown(err) ||
+		IsSerializationFailure(err)
 }
+
+// isConnectError reports whether err is a failed connection attempt. Nothing
+// reached the server, so a retry is always safe.
+func isConnectError(err error) bool {
+	_, ok := errors.AsType[*pgconn.ConnectError](err)
+	return ok
+}
+
+// IsServerShutdown reports whether err is a PostgreSQL 57P01 (admin_shutdown)
+// or 57P03 (cannot_connect_now) error: the server terminated the session
+// because it is shutting down, or is not yet accepting connections.
+var IsServerShutdown = pgErrMatcher(func(err *pgconn.PgError) bool {
+	return err.Code == "57P01" || err.Code == "57P03"
+})
 
 // IsConnectionException reports whether err is a PostgreSQL class 08
 // (connection exception) error.
