@@ -53,8 +53,14 @@ func main() {
 ## Retrying transactions
 
 `TryTxFunc` works exactly like `pgx.BeginTxFunc`, but retries the
-transaction on transient errors (connection exceptions, serialization
-failures) with exponential backoff.
+transaction on transient errors (failed connection attempts, connection
+exceptions, a server shutting down or starting up, serialization failures)
+with exponential backoff. These cover a switchover to a new primary, which
+happens on every node drain and database upgrade.
+
+The function you pass must be safe to run more than once. If the connection
+is lost during `COMMIT`, the transaction may have committed even though
+`TryTxFunc` sees an error and runs it again.
 
 ```go
 err := postgres.TryTxFunc(ctx, db, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
