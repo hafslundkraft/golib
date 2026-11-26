@@ -31,7 +31,7 @@ func ClaimCheckRoleARN(system, env, bucket, access string) (string, error) {
 
 // RoleARNForClient builds a production S3 client via the same path used by the
 // writer/processor and returns the role ARN it computed for the given bucket.
-// The token exchanger is constructed from env vars but no network call is made
+// The token retriever is constructed from env vars but no network call is made
 // at construction time. For e2e tests only.
 func RoleARNForClient(bucket, access, system, env string) (string, error) {
 	c, err := newS3Client(bucket, access, system, env, nil)
